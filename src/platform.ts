@@ -42,7 +42,8 @@ export async function reportSelftest(result: unknown): Promise<void> {
 
 export function platformName(): string {
   const ua = navigator.userAgent;
+  const plat = navigator.platform || ua;
   const engine = isTauri ? (/Windows/.test(ua) ? 'WebView2' : /Mac/.test(ua) ? 'WKWebView' : 'WebKitGTK') : 'Browser';
-  const os = /Windows/.test(ua) ? 'Windows' : /Mac/.test(ua) ? 'macOS' : /Linux/.test(ua) ? 'Linux' : 'unbekannt';
+  const os = /Win/.test(plat) ? 'Windows' : /Mac/.test(plat) ? 'macOS' : /Linux/.test(plat) ? 'Linux' : 'unbekannt';
   return `${os} · ${engine}`;
 }

@@ -14,6 +14,9 @@ export interface SelftestResult {
   tilesLoaded: boolean;
   tileLoadMs: number;
   tileErrors: number;
+  /** gezeichnete Objekte der Grundkarte im sichtbaren Ausschnitt */
+  basemapFeatures: number;
+  sourceLoaded: boolean;
   vehicles: number;
   vehiclesOnMap: number;
   seconds: number;
@@ -36,6 +39,7 @@ export async function runSelftest(game: GameController, seconds: number, minFps 
   const t0 = performance.now();
   while (game.status.phase === 'loading' && performance.now() - t0 < 30000) await wait(100);
   game.fitRegion();
+  await wait(300);
   while (!game.status.tilesLoaded && performance.now() - t0 < 45000) await wait(100);
   const tileLoadMs = performance.now() - t0;
 
@@ -62,6 +66,9 @@ export async function runSelftest(game: GameController, seconds: number, minFps 
   const r = game.status.region;
   const onMap = positions.filter((p) => r && Math.abs(p.lat - r.center.lat) < 0.6 && Math.abs(p.lon - r.center.lon) < 0.9).length;
 
+  const map = game.getMap()!;
+  const basemapFeatures = map.queryRenderedFeatures().filter((f) => f.source === 'protomaps').length;
+  const sourceLoaded = map.isSourceLoaded('protomaps');
   const canvas = document.createElement('canvas');
   const webgl2 = !!canvas.getContext('webgl2');
 
@@ -73,6 +80,8 @@ export async function runSelftest(game: GameController, seconds: number, minFps 
     tilesLoaded: game.status.tilesLoaded,
     tileLoadMs: Math.round(tileLoadMs),
     tileErrors: game.status.tileErrors,
+    basemapFeatures,
+    sourceLoaded,
     vehicles: game.status.vehicles,
     vehiclesOnMap: onMap,
     seconds,
@@ -88,7 +97,7 @@ export async function runSelftest(game: GameController, seconds: number, minFps 
     failures,
   };
   if (!webgl2) failures.push('kein WebGL2');
-  if (!result.tilesLoaded) failures.push('Grundkarte nicht geladen');
+  if (basemapFeatures < 200) failures.push(`Grundkarte nicht gezeichnet (${basemapFeatures} Objekte)`);
   if (result.tileErrors > 0) failures.push(`${result.tileErrors} Kartenfehler`);
   if (result.vehicles !== 30 || result.vehiclesOnMap !== 30) failures.push('nicht alle 30 Fahrzeuge auf der Karte');
   if (result.stepsPerSecond < 90) failures.push(`nur ${result.stepsPerSecond} Schritte/s bei 100x`);

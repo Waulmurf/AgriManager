@@ -104,6 +104,11 @@ export class Simulation {
         trips: 0,
       });
     }
+    // Abgestellt am Hof: Route aus einem Punkt, damit jedes Fahrzeug eine Position hat
+    for (const v of this.vehicles) {
+      v.route = this.makeRoute([graph.x[this.homeNode]], [graph.y[this.homeNode]], [], 'road');
+      this.pending.push(v.route);
+    }
   }
 
   get vehicleInfo(): VehicleInfo[] {

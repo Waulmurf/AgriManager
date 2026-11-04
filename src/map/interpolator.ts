@@ -30,6 +30,8 @@ export class VehicleInterpolator {
   private lastBearing: Float64Array = new Float64Array(0);
   /** zuletzt gezeigte Spielzeit (für Anzeige der Uhr) */
   renderTime = 0;
+  private clock = 0;
+  private clockAt = 0;
 
   get routeCount() {
     return this.routes.size;
@@ -49,17 +51,40 @@ export class VehicleInterpolator {
     this.pruneRoutes();
   }
 
-  /** Spielzeit, die zum Zeitpunkt `now` (ms) dargestellt wird. */
+  /**
+   * Spielzeit, die zum Zeitpunkt `now` (ms) dargestellt wird. Die Darstellungsuhr
+   * läuft mit der eingestellten Rate weiter und wird nur sanft an das Ziel
+   * (letzte Meldung minus Rückstand) herangeführt. So erzeugen verspätet oder
+   * gebündelt eintreffende Meldungen keine Sprünge.
+   */
   timeAt(now: number): number {
     const n = this.snaps.length;
     if (n === 0) return 0;
     const latest = this.snaps[n - 1];
-    if (this.speed === 0 || n === 1) return latest.time;
+    const oldest = this.snaps[0].time;
+    if (this.speed === 0 || n === 1) {
+      this.clock = latest.time;
+      this.clockAt = now;
+      return latest.time;
+    }
     const rate = this.speed * STEPS_PER_SECOND_AT_1X; // Schritte pro Sekunde
     const interval = Math.max(1 / rate, 1 / MAX_SNAPSHOTS_PER_SECOND); // s zwischen Meldungen
     const lag = rate * interval * 1.25; // Spielminuten Rückstand
-    const t = latest.time - lag + ((now - latest.recv) / 1000) * rate;
-    return Math.min(latest.time, Math.max(this.snaps[0].time, t));
+    const target = latest.time - lag + ((now - latest.recv) / 1000) * rate;
+    const dt = Math.max(0, (now - this.clockAt) / 1000);
+    let t = this.clock + dt * rate;
+    const err = target - t;
+    if (this.clockAt === 0 || Math.abs(err) > lag * 4 + rate) {
+      t = target; // Neustart oder großer Versatz (z. B. Geschwindigkeitswechsel)
+    } else {
+      t += err * Math.min(1, dt * 3);
+    }
+    t = Math.min(latest.time, Math.max(oldest, t));
+    // nie rückwärts laufen
+    if (t < this.clock && this.clock <= latest.time) t = this.clock;
+    this.clock = t;
+    this.clockAt = now;
+    return t;
   }
 
   /** Schreibt für jedes Fahrzeug Position und Richtung nach `out`. */

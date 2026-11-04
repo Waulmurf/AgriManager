@@ -5,8 +5,10 @@
 import * as maplibregl from 'maplibre-gl';
 import type { GeoJSONSource, Map as MlMap, ErrorEvent as MlErrorEvent } from 'maplibre-gl';
 import { Protocol } from 'pmtiles';
+// MapLibre 6 lädt seinen Kachel-Worker als eigene Datei; Vite muss sie mitliefern.
+import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
 import { assetBase, mapDataUrl } from '../platform';
-import { buildStyle, circlePolygon } from '../map/style';
+import { addFallbackImages, BASEMAP_SOURCE, buildStyle, circlePolygon } from '../map/style';
 import { addVehicleIcons, vehicleIconId } from '../map/icons';
 import { VehicleInterpolator, type VehicleSample } from '../map/interpolator';
 import type { FromWorker, Speed, ToWorker, WorkerStats } from '../sim/protocol';
@@ -55,6 +57,7 @@ export class GameController {
   private lastFrame = 0;
   private updateCost = 0;
   private notifyAt = 0;
+  private tileTimer: ReturnType<typeof setInterval> | undefined;
   status: GameStatus = {
     phase: 'loading', speed: 0, time: 0, vehicles: 0, stats: null, fps: 0, frameP95: 0, updateMs: 0,
     region: null, graph: null, tilesLoaded: false, tileErrors: 0,
@@ -80,6 +83,7 @@ export class GameController {
       this.emit({ region });
 
       if (!protocolRegistered) {
+        maplibregl.setWorkerUrl(new URL(maplibreWorkerUrl, window.location.href).href);
         maplibregl.addProtocol('pmtiles', new Protocol().tile);
         protocolRegistered = true;
       }
@@ -96,6 +100,7 @@ export class GameController {
         localIdeographFontFamily: 'sans-serif',
       });
       this.map = map;
+      addFallbackImages(map);
       map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'top-right');
       map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');
       map.on('error', (e: MlErrorEvent) => {
@@ -108,9 +113,13 @@ export class GameController {
       this.worker = new Worker(new URL('../sim/worker.ts', import.meta.url), { type: 'module' });
       this.worker.onmessage = (ev: MessageEvent<FromWorker>) => this.onWorker(ev.data);
       this.post({ type: 'init', graph: graphBuf, seed: SEED, vehicleCount: VEHICLE_COUNT }, [graphBuf]);
-      map.on('idle', () => {
-        if (!this.status.tilesLoaded && map.areTilesLoaded()) this.emit({ tilesLoaded: true });
-      });
+      // „idle“ kommt nicht, solange Fahrzeuge sich bewegen – daher Kachelstatus prüfen
+      const checkTiles = () => {
+        const loaded = map.isSourceLoaded(BASEMAP_SOURCE) && map.areTilesLoaded();
+        if (loaded !== this.status.tilesLoaded) this.emit({ tilesLoaded: loaded });
+      };
+      map.on('idle', checkTiles);
+      this.tileTimer = setInterval(checkTiles, 250);
       this.raf = requestAnimationFrame(this.frame);
     } catch (e) {
       this.emit({ phase: 'error', message: e instanceof Error ? e.message : String(e) });
@@ -149,6 +158,7 @@ export class GameController {
 
   destroy() {
     cancelAnimationFrame(this.raf);
+    clearInterval(this.tileTimer);
     this.worker?.terminate();
     this.map?.remove();
     this.listeners.clear();
@@ -167,7 +177,7 @@ export class GameController {
         type: 'Feature',
         id: v.id,
         properties: { icon: vehicleIconId(v.brand, v.profile), bearing: 0, state: 0, name: v.name },
-        geometry: { type: 'Point', coordinates: msg.home },
+        geometry: { type: 'Point', coordinates: [msg.home[0], msg.home[1]] },
       }));
       (this.map!.getSource('home') as GeoJSONSource).setData({
         type: 'Feature', properties: { name: 'Hof' }, geometry: { type: 'Point', coordinates: msg.home },

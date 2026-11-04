@@ -1,0 +1,181 @@
+name: ci
+
+# Bei jedem Stand: Unit-Tests (Vitest, Rust), Oberflächentests (Playwright,
+# Chromium ≙ WebView2, WebKit ≙ WKWebView) und Builds für Windows und macOS.
+# Die fertigen Apps starten im Selbsttest-Modus und melden Leistung und
+# Darstellung aus dem echten WebView2 bzw. WKWebView.
+on:
+  push:
+    branches: ['**']
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  GITHUB_TOKEN: ${{ github.token }}
+
+jobs:
+  unit:
+    name: Unit-Tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      # gleiche Referenz-Hashes auf allen Systemen = plattformunabhängiger Determinismus
+      - run: npx vitest run
+      - name: Rust-Tests (Range-Protokoll)
+        working-directory: src-tauri
+        run: cargo test -p range_proto
+
+  e2e:
+    name: Oberfläche (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            projects: chromium
+          - os: macos-latest
+            projects: chromium,webkit
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Kartendaten laden
+        uses: actions/cache@v4
+        with:
+          path: src-tauri/resources/map
+          key: map-${{ hashFiles('data/map-data.json') }}
+      - run: npm run map-data
+      - run: npx playwright install --with-deps ${{ matrix.projects == 'chromium' && 'chromium' || 'chromium webkit' }}
+      - run: npm run build
+      - name: Playwright
+        run: npx playwright test
+        env:
+          CI: '1'
+          PW_PROJECTS: ${{ matrix.projects }}
+          # CI-Runner rendern WebGL in Software; Ziel auf echter Hardware: 60 fps
+          PERF_MIN_FPS: '10'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-${{ matrix.os }}
+          path: |
+            playwright-report
+            test-results
+          retention-days: 14
+
+  build:
+    name: App-Build (${{ matrix.name }})
+    needs: unit
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            args: ''
+          - name: macOS Universal
+            os: macos-latest
+            args: '--target universal-apple-darwin'
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      - name: Kartendaten laden
+        uses: actions/cache@v4
+        with:
+          path: src-tauri/resources/map
+          key: map-${{ hashFiles('data/map-data.json') }}
+      - run: npm run map-data
+      - name: Tauri-Build
+        run: npx tauri build ${{ matrix.args }}
+
+      - name: Selbsttest der fertigen App (macOS, WKWebView)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          APP=$(ls -d src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app | head -1)
+          lipo -info "$APP/Contents/MacOS/"* | tee build-info.txt
+          export LOHNBETRIEB_SELFTEST=1 LOHNBETRIEB_SELFTEST_SECONDS=20 LOHNBETRIEB_SELFTEST_MIN_FPS=10
+          export LOHNBETRIEB_SELFTEST_OUT="$PWD/selftest-macos.json"
+          BIN=$(ls "$APP/Contents/MacOS/" | head -1)
+          "$APP/Contents/MacOS/$BIN" &
+          PID=$!
+          sleep 25 && screencapture -x selftest-macos.png || true
+          for i in $(seq 1 60); do kill -0 $PID 2>/dev/null || break; sleep 1; done
+          kill $PID 2>/dev/null || true
+          wait $PID; CODE=$?
+          cat selftest-macos.json || echo "kein Ergebnis"
+          echo "Exit-Code $CODE"
+          test -f selftest-macos.json && grep -q '"ok":true' selftest-macos.json
+
+      - name: Selbsttest der fertigen App (Windows, WebView2)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem src-tauri/target/release -Filter *.exe -File | Select-Object -First 1
+          Write-Output "Starte $($exe.FullName)"
+          Get-ChildItem src-tauri/target/release -Directory | Select-Object Name
+          $env:LOHNBETRIEB_SELFTEST = '1'
+          $env:LOHNBETRIEB_SELFTEST_SECONDS = '20'
+          $env:LOHNBETRIEB_SELFTEST_MIN_FPS = '10'
+          $env:LOHNBETRIEB_SELFTEST_OUT = "$PWD/selftest-windows.json"
+          $p = Start-Process -FilePath $exe.FullName -PassThru
+          Start-Sleep -Seconds 25
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+          [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+          $bmp.Save("$PWD/selftest-windows.png")
+          if (-not $p.WaitForExit(60000)) { $p.Kill() }
+          if (Test-Path selftest-windows.json) { Get-Content selftest-windows.json } else { Write-Output 'kein Ergebnis' }
+          if (-not (Select-String -Path selftest-windows.json -Pattern '"ok":true' -Quiet)) { exit 1 }
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: selbsttest-${{ runner.os }}
+          path: |
+            selftest-*.json
+            selftest-*.png
+            build-info.txt
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-${{ runner.os }}
+          path: |
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          retention-days: 14
