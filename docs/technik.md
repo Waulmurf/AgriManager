@@ -59,6 +59,13 @@ Ergänzt den Abschnitt „Technik und Entwicklungsumgebung“ in [anforderungen.
 - **Windows-Signatur**: optional, verhindert die SmartScreen-Warnung.
 - Feldblöcke (Lizenz und Verfügbarkeit für NI, ST, MV) prüfen.
 - Gewichts- und Breitenbeschränkungen stehen im Graphen, fließen aber noch nicht ins Routing ein.
+- A* braucht auf dem echten Graphen lokal im Median 3,4 ms je Route (p90 10 ms, max. 33 ms).
+  Starten viele Fahrzeuge in derselben Spielminute, wird dieser eine Schritt entsprechend
+  länger. Sollte das auf echter Hardware stören, kommen ALT-Landmarken (etwa 5–10× schneller)
+  oder eine Routensuche verteilt über mehrere Schritte hinzu.
+- WebKit auf GitHubs Intel-Mac-Runnern: Der WebGL-Kontext geht sofort verloren, weil dort
+  kein Metal-GPU vorhanden ist. Oberflächentests und App-Selbsttest auf macOS laufen deshalb
+  auf arm64-Runnern (`macos-15`), sofern GitHub Kapazität hat.
 
 ## Messwerte (Stand 4. Nov. 2026)
 

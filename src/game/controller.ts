@@ -108,6 +108,10 @@ export class GameController {
       addFallbackImages(map);
       map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'top-right');
       map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');
+      map.on('webglcontextlost', () => {
+        console.error('WebGL-Kontext verloren');
+        this.emit({ phase: 'error', message: 'Die Grafik (WebGL) ist ausgefallen. Grafiktreiber bzw. GPU-Unterstützung prüfen.' });
+      });
       map.on('error', (e: MlErrorEvent) => {
         this.emit({ tileErrors: this.status.tileErrors + 1 });
         console.warn('Kartenfehler', e.error?.message ?? e);
