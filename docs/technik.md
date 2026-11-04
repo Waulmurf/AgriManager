@@ -82,9 +82,10 @@ Ergänzt den Abschnitt „Technik und Entwicklungsumgebung“ in [anforderungen.
 | Salzwedel | 43,2 km | 53,8 km | 84 min |
 | Wittingen | 44,6 km | 51,1 km | 79 min |
 
-**Selbsttest 100x mit 30 Fahrzeugen.** CI-Runner haben keine GPU, WebGL läuft dort in
-Software. Die Bildraten unten zeigen deshalb nur, dass alles funktioniert, nicht die Leistung
-auf echter Hardware.
+**Selbsttest 100x mit 30 Fahrzeugen.** Einzig der arm64-Mac-Runner hat eine (paravirtualisierte)
+GPU. Dort erfüllt die fertige App im WKWebView die Zielwerte: 100 Schritte/s und 58 fps. Die
+übrigen CI-Runner rendern WebGL in Software. Ihre Bildraten zeigen nur, dass alles funktioniert,
+nicht die Leistung auf echter Hardware.
 
 | Umgebung | Engine | Karte gezeichnet | Fahrzeuge | Schritte/s (Soll 100) | fps | Rechenzeit/Schritt |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -92,11 +93,17 @@ auf echter Hardware.
 | Browser, Windows-Runner | Chromium 153 | ja, 1.365 Objekte | 30/30 | – | – | – |
 | Tauri-App, Linux (xvfb, llvmpipe) | WebKitGTK | ja, 1.401 Objekte | 30/30 | 99,9 | 11 | 5,5 ms |
 | Browser, Linux (SwiftShader) | Chromium 153 | ja | 30/30 | 100 | 6 | 1,7 ms |
-| Node (Vitest, echter Graph) | – | – | 30 | – | – | 1,6 ms |
-| Tauri-App, macOS | WKWebView | ausstehend | | | | |
+| Node, Linux-Runner (Rechenkern allein) | – | – | 30 | – | – | 0,98 ms |
+| Node, Windows-Runner (Rechenkern allein) | – | – | 30 | – | – | 1,28 ms |
+| Node, Intel-Mac-Runner (Rechenkern allein) | – | – | 30 | – | – | 3,1 ms |
+| **Tauri-App, macOS arm64-Runner (Apple Silicon, GPU)** | **WKWebView** | **ja, 1.389 Objekte, 0,9 s** | **30/30** | **100** | **58 (min. 49, P95 31 ms)** | **2,0 ms** |
+| Tauri-App, macOS Intel-Runner (ohne Metal) | WKWebView | nein: WebGL-Kontext verloren | – | – | – | – |
+| Tauri-App, Windows-Runner (2. Lauf) | WebView2 (Edge 156) | ja, 1.336 Objekte | 30/30 | 72 | 16 | 9,9 ms¹ |
 
 ¹ Der Worker teilt sich die 4 CPU-Kerne des Runners mit dem Software-Rendering.
-Auf einem Rechner mit GPU fällt diese Last weg.
+Auf einem Rechner mit GPU fällt diese Last weg. Derselbe Rechenkern braucht auf demselben
+Windows-Runner ohne Browser 1,28 ms pro Schritt. Der Zustand nach einem Spieltag ist auf Linux,
+Windows und macOS identisch (312 erledigte Felder, 438 Routensuchen).
 
 **Auf echter Hardware prüfen (Nils):** Die App mit gesetzter Umgebungsvariable starten.
 Sie läuft dann 20 s mit 100x, schreibt das Ergebnis in die angegebene Datei und beendet

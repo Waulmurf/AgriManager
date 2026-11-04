@@ -59,6 +59,8 @@ jobs:
         include:
           - os: windows-latest
             projects: chromium
+            # Browser-Worker auf diesem Runner ohne GPU stark gebremst: nur Funktion, keine Raten
+            strictTiming: '0'
           # WebKit braucht Metal: nur die arm64-Macs haben eine (paravirtualisierte) GPU,
           # auf Intel-Mac-Runnern verliert WebKit den WebGL-Kontext sofort. arm64-Runner
           # sind bei GitHub oft ausgelastet – der Job ist daher optional.
@@ -92,8 +94,7 @@ jobs:
           # Fehler; die Zielwerte (≥ 90 Schritte/s, ≥ 30 fps) gelten für echte Rechner.
           PERF_MIN_FPS: '3'
           E2E_MIN_SPS: '10'
-          E2E_MIN_STEPS_10X: '1'
-          E2E_MIN_STEPS_100X: '10'
+          E2E_STRICT_TIMING: ${{ matrix.strictTiming || '1' }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -53,8 +53,13 @@ test('Karte lädt aus der lokalen PMTiles-Datei und zeigt 30 Fahrzeuge', async (
 });
 
 test('Pause, 1x, 10x und 100x steuern die Spielzeit', async ({ page }) => {
+  // Ratenprüfung abschaltbar für CI-Rechner, deren Browser-Worker ohne GPU stark gebremst ist
+  const strict = process.env.E2E_STRICT_TIMING !== '0';
   await page.goto('./');
   await waitForGame(page);
+  const waitAdvance = (from: number) =>
+    page.waitForFunction((t) => (window as any).__game.status.simTime > t, from, { timeout: 60_000 });
+
   await page.getByTestId('speed-0').click();
   await page.waitForTimeout(500); // letzte Meldung des Workers abwarten
   const t0 = (await status(page)).time;
@@ -62,27 +67,34 @@ test('Pause, 1x, 10x und 100x steuern die Spielzeit', async ({ page }) => {
   expect((await status(page)).time).toBe(t0);
 
   await page.getByTestId('speed-10').click();
-  await page.waitForTimeout(1000); // Anlauf: erste Routensuchen aller Fahrzeuge
-  const t10 = (await status(page)).time;
-  await page.waitForTimeout(3000);
-  const dt10 = (await status(page)).time - t10;
-  // ~30 Minuten in 3 s (CI ohne GPU: Worker teilt sich die CPU mit dem Software-Rendering)
-  expect(dt10).toBeGreaterThan(Number(process.env.E2E_MIN_STEPS_10X ?? 15));
-  // obere Grenze nur grob: unter Last kommen Meldungen gebündelt an
-  expect(dt10).toBeLessThan(90);
+  await expect(page.getByTestId('speed-10')).toHaveClass(/active/);
+  await waitAdvance(t0);
+  if (strict) {
+    await page.waitForTimeout(1000); // Anlauf
+    const t10 = (await status(page)).time;
+    await page.waitForTimeout(3000);
+    const dt10 = (await status(page)).time - t10;
+    expect(dt10).toBeGreaterThan(15); // ~30 Minuten in 3 s
+    expect(dt10).toBeLessThan(90); // grob: unter Last kommen Meldungen gebündelt an
+  }
 
   await page.getByTestId('speed-100').click();
-  const t1 = (await status(page)).time;
-  await page.waitForTimeout(3000);
-  const dt100 = (await status(page)).time - t1;
-  // ~300 Minuten in 3 s; auf CI-Rechnern ohne GPU teilt sich der Worker die CPU mit dem Software-Rendering
-  expect(dt100).toBeGreaterThan(Number(process.env.E2E_MIN_STEPS_100X ?? 200));
-  expect(dt100).toBeLessThan(900);
   await expect(page.getByTestId('speed-100')).toHaveClass(/active/);
+  const t1 = (await status(page)).time;
+  await waitAdvance(t1);
+  if (strict) {
+    const t2 = (await status(page)).time;
+    await page.waitForTimeout(3000);
+    const dt100 = (await status(page)).time - t2;
+    expect(dt100).toBeGreaterThan(200); // ~300 Minuten in 3 s
+    expect(dt100).toBeLessThan(900);
+  }
 
-  // Tastatur: Leertaste pausiert
+  // Tastatur: Leertaste pausiert, „1“ startet mit 1x
   await page.keyboard.press('Space');
   await expect(page.getByTestId('speed-0')).toHaveClass(/active/);
+  await page.keyboard.press('1');
+  await expect(page.getByTestId('speed-1')).toHaveClass(/active/);
 });
 
 test('Fahrzeuge bewegen sich flüssig und bleiben im Spielgebiet', async ({ page }) => {
