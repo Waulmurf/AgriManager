@@ -4,12 +4,13 @@
 // Skript ist nur zum Aktualisieren nötig.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const BASE = 'https://raw.githubusercontent.com/protomaps/basemaps-assets/main/fonts';
 const FONTS = ['Noto Sans Regular', 'Noto Sans Medium', 'Noto Sans Italic'];
 // Latein, Latein erweitert, Allgemeine Interpunktion („ “ – …)
 const RANGES = ['0-255', '256-511', '8192-8447'];
-const OUT = new URL('../public/map-assets/fonts/', import.meta.url).pathname;
+const OUT = fileURLToPath(new URL('../public/map-assets/fonts/', import.meta.url));
 
 for (const font of FONTS) {
   mkdirSync(join(OUT, font), { recursive: true });

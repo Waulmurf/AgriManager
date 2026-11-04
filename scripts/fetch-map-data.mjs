@@ -5,8 +5,9 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = new URL('..', import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const REPO = process.env.MAP_DATA_REPO ?? 'waulmurf/agrimanager';
 const { tag } = JSON.parse(readFileSync(join(ROOT, 'data/map-data.json'), 'utf8'));
 const OUT = join(ROOT, 'src-tauri/resources/map');
