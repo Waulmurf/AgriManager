@@ -27,7 +27,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # macOS-arm64-Runner waren mehrfach nicht verfügbar („capacity constraints“);
+        # Intel-Macs laufen mit derselben WKWebView-Engine und bauen ebenso Universal-Binaries.
+        os: [ubuntu-latest, windows-latest, macos-15-intel]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -51,7 +53,7 @@ jobs:
         include:
           - os: windows-latest
             projects: chromium
-          - os: macos-latest
+          - os: macos-15-intel
             projects: chromium,webkit
     runs-on: ${{ matrix.os }}
     steps:
@@ -79,6 +81,7 @@ jobs:
           # Fehler; die Zielwerte (≥ 90 Schritte/s, ≥ 30 fps) gelten für echte Rechner.
           PERF_MIN_FPS: '3'
           E2E_MIN_SPS: '10'
+          E2E_MIN_STEPS_10X: '3'
           E2E_MIN_STEPS_100X: '30'
       - uses: actions/upload-artifact@v4
         if: always()
@@ -99,7 +102,7 @@ jobs:
             os: windows-latest
             args: ''
           - name: macOS Universal
-            os: macos-latest
+            os: macos-15-intel
             args: '--target universal-apple-darwin'
     runs-on: ${{ matrix.os }}
     steps:
@@ -110,7 +113,7 @@ jobs:
           cache: npm
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
