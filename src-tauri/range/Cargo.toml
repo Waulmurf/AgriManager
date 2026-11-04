@@ -1,0 +1,7 @@
+[package]
+name = "range_proto"
+version = "0.1.0"
+edition = "2021"
+description = "HTTP-Range-Auslieferung lokaler Dateien für das mapdata://-Protokoll"
+
+[dependencies]

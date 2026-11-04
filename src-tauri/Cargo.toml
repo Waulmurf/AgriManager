@@ -1,0 +1,27 @@
+[package]
+name = "lohnbetrieb"
+version = "0.1.0"
+description = "Lohnbetrieb-Simulation"
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "lohnbetrieb_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+range_proto = { path = "range" }
+serde = { version = "1", features = ["derive"] }
+
+[workspace]
+members = [".", "range"]
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+strip = true

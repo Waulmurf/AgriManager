@@ -1,0 +1,16 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Simulation > hat einen plattformunabhängigen Referenzzustand 1`] = `
+{
+  "hash": "ab3ee17d",
+  "stats": {
+    "cacheHits": 1312,
+    "driving": 13,
+    "searches": 2383,
+    "time": 5000,
+    "trips": 2832,
+    "waiting": 7,
+    "working": 10,
+  },
+}
+`;

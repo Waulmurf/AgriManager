@@ -1,0 +1,10 @@
+n1 v1 dV c0 t2020-01-01T00:00:00Z i0 u T x10.7 y53.08
+n2 v1 dV c0 t2020-01-01T00:00:00Z i0 u T x10.71 y53.08
+n3 v1 dV c0 t2020-01-01T00:00:00Z i0 u Tbarrier=gate x10.72 y53.08
+n4 v1 dV c0 t2020-01-01T00:00:00Z i0 u T x10.71 y53.09
+w1 v1 dV c0 t2020-01-01T00:00:00Z i0 u Thighway=primary,name=B%20%4 Nn1,n2,n3
+w2 v1 dV c0 t2020-01-01T00:00:00Z i0 u Thighway=residential,oneway=-1 Nn2,n4,n99
+w3 v1 dV c0 t2020-01-01T00:00:00Z i0 u Thighway=motorway Nn3,n4
+w4 v1 dV c0 t2020-01-01T00:00:00Z i0 u Thighway=track,motor_vehicle=no,agricultural=yes Nn4x10.71y53.09,n5x10.715y53.1,n6x10.73y53.1
+w5 v1 dV c0 t2020-01-01T00:00:00Z i0 u Thighway=footway Nn6,n1
+w6 v1 dV c0 t2020-01-01T00:00:00Z i0 u Thighway=service,access=private Nn1,n4

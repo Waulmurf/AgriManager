@@ -53,8 +53,9 @@ for REG in $(jq -r '.geofabrik[]' "$CFG"); do
 done
 osmium merge --overwrite -o "$WORK/region.osm.pbf" "${PARTS[@]}"
 osmium tags-filter --overwrite -o "$WORK/roads.osm.pbf" "$WORK/region.osm.pbf" w/highway w/route=ferry
-osmium add-locations-to-ways --overwrite -o "$WORK/roads-loc.osm.pbf" "$WORK/roads.osm.pbf"
-osmium cat --overwrite -f opl -o "$WORK/roads.opl" "$WORK/roads-loc.osm.pbf"
+# OPL mit Knotenzeilen (Koordinaten) und Wegzeilen (Knotenreferenzen)
+osmium cat --overwrite -f opl -o "$WORK/roads.opl" "$WORK/roads.osm.pbf"
+head -c 600 "$WORK/roads.opl"; echo; grep -m2 '^w' "$WORK/roads.opl" | cut -c1-300
 OSM_TS=$(osmium fileinfo -g header.option.osmosis_replication_timestamp "$WORK/niedersachsen.osm.pbf" 2>/dev/null || echo "")
 
 echo "== Straßengraph bauen"

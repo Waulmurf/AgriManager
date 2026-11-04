@@ -1,0 +1,9 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Rng > ist plattformunabhängig (feste Referenzwerte) 1`] = `
+[
+  3833628664,
+  3868810187,
+  1830013216,
+]
+`;

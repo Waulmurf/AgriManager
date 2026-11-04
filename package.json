@@ -1,0 +1,37 @@
+{
+  "name": "lohnbetrieb-simulation",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "map-data": "node scripts/fetch-map-data.mjs",
+    "assets": "node scripts/fetch-map-assets.mjs",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@protomaps/basemaps": "5.7.2",
+    "@tauri-apps/api": "2.12.4",
+    "maplibre-gl": "6.16.0",
+    "pmtiles": "4.5.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@tauri-apps/cli": "2.12.4",
+    "@types/node": "22.20.5",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.2.1",
+    "typescript": "5.9.3",
+    "vite": "8.3.5",
+    "vitest": "5.1.0"
+  }
+}

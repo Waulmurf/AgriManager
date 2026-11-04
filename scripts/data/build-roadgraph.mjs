@@ -96,15 +96,33 @@ function parseNumber(v, unit) {
   return n;
 }
 
-// ---------- 1. Wege einlesen ----------
-const ways = []; // {cls, flags, maxW, maxWidth, nodes: [id...], xs, ys}
-const nodeUse = new Map(); // nodeId -> count
+// ---------- 1. Knoten und Wege einlesen ----------
+// Knotenkoordinaten stehen entweder in eigenen n-Zeilen („n1 … x10.1 y53.2“)
+// oder direkt an den Wegen („Nn1x10.1y53.2,…“ nach add-locations-to-ways).
+const nodeX = new Map(); // osm node id -> projiziertes x
+const nodeY = new Map();
+const rawWays = []; // {t, refs: [[id, x|null, y|null], …]}
 
 const rl = createInterface({ input: createReadStream(args.opl), crlfDelay: Infinity });
 let lineCount = 0;
 for await (const line of rl) {
   lineCount++;
-  if (line[0] !== 'w') continue;
+  const kind = line[0];
+  if (kind === 'n') {
+    const parts = line.split(' ');
+    const id = Number(parts[0].slice(1));
+    let lon = NaN, lat = NaN;
+    for (const p of parts) {
+      if (p[0] === 'x') lon = Number(p.slice(1));
+      else if (p[0] === 'y') lat = Number(p.slice(1));
+    }
+    if (Number.isFinite(lon) && Number.isFinite(lat)) {
+      nodeX.set(id, projX(lon));
+      nodeY.set(id, projY(lat));
+    }
+    continue;
+  }
+  if (kind !== 'w') continue;
   let tagStr = '';
   let nodeStr = '';
   for (const part of line.split(' ')) {
@@ -112,17 +130,31 @@ for await (const line of rl) {
     else if (part[0] === 'N') nodeStr = part.slice(1);
   }
   const t = parseTags(tagStr);
+  if (!allowed(t) || !nodeStr) continue;
+  const refs = [];
+  for (const n of nodeStr.split(',')) {
+    const m = n.match(/^n(\d+)(?:x(-?[\d.]+)y(-?[\d.]+))?$/);
+    if (!m) continue;
+    refs.push(m[2] !== undefined ? [Number(m[1]), projX(Number(m[2])), projY(Number(m[3]))] : [Number(m[1]), null, null]);
+  }
+  rawWays.push({ t, refs });
+}
+
+const ways = []; // {cls, flags, maxW, maxWidth, ids, xs, ys}
+const nodeUse = new Map(); // nodeId -> count
+let missing = 0;
+for (const { t, refs } of rawWays) {
   const cls = allowed(t);
-  if (!cls || !nodeStr) continue;
   const ids = [];
   const xs = [];
   const ys = [];
-  for (const n of nodeStr.split(',')) {
-    const m = n.match(/^n(\d+)x(-?[\d.]+)y(-?[\d.]+)$/);
-    if (!m) continue; // Knoten ohne Koordinate (außerhalb des Auszugs)
-    ids.push(Number(m[1]));
-    xs.push(projX(Number(m[2])));
-    ys.push(projY(Number(m[3])));
+  for (const [id, rx, ry] of refs) {
+    const x = rx ?? nodeX.get(id);
+    const y = ry ?? nodeY.get(id);
+    if (x === undefined) { missing++; continue; } // außerhalb des Auszugs
+    ids.push(id);
+    xs.push(x);
+    ys.push(y);
   }
   if (ids.length < 2) continue;
   let oneway = t.oneway === 'yes' || t.oneway === 'true' || t.oneway === '1' || t.junction === 'roundabout' || t.junction === 'circular';
@@ -144,7 +176,9 @@ for await (const line of rl) {
     nodeUse.set(ids[i], c + (i === 0 || i === ids.length - 1 ? 2 : 1));
   }
 }
-console.log(`OPL-Zeilen: ${lineCount}, nutzbare Wege: ${ways.length}`);
+if (missing) console.log(`Wegpunkte ohne Koordinate (übersprungen): ${missing}`);
+console.log(`OPL-Zeilen: ${lineCount}, Knoten mit Koordinate: ${nodeX.size}, nutzbare Wege: ${ways.length}`);
+if (ways.length === 0) throw new Error('Keine nutzbaren Wege – OPL-Format prüfen');
 
 // ---------- 2. An Kreuzungen aufteilen ----------
 const vIndex = new Map(); // osm node id -> vertex index
