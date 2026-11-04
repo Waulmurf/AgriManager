@@ -62,8 +62,10 @@ test('Pause, 1x, 10x und 100x steuern die Spielzeit', async ({ page }) => {
   expect((await status(page)).time).toBe(t0);
 
   await page.getByTestId('speed-10').click();
+  await page.waitForTimeout(1000); // Anlauf: erste Routensuchen aller Fahrzeuge
+  const t10 = (await status(page)).time;
   await page.waitForTimeout(3000);
-  const dt10 = (await status(page)).time - t0;
+  const dt10 = (await status(page)).time - t10;
   // ~30 Minuten in 3 s (CI ohne GPU: Worker teilt sich die CPU mit dem Software-Rendering)
   expect(dt10).toBeGreaterThan(Number(process.env.E2E_MIN_STEPS_10X ?? 15));
   // obere Grenze nur grob: unter Last kommen Meldungen gebündelt an

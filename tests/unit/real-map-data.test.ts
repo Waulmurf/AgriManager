@@ -67,7 +67,7 @@ describe.skipIf(!has)('echte Kartendaten', () => {
     const t0 = performance.now();
     s.run(1440); // ein Spieltag
     const ms = performance.now() - t0;
-    console.log(`1 Spieltag: ${ms.toFixed(0)} ms (${(ms / 1440).toFixed(3)} ms/Schritt)`, s.stats());
+    console.log(`RECHENKERN ${process.platform}/${process.arch}: 1 Spieltag ${ms.toFixed(0)} ms (${(ms / 1440).toFixed(3)} ms/Schritt)`, JSON.stringify(s.stats()));
     // 100x erlaubt 10 ms pro Schritt
     expect(ms / 1440).toBeLessThan(5);
   });
