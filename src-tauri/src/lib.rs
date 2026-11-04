@@ -57,10 +57,16 @@ fn selftest_report(app: tauri::AppHandle, json: String) {
     app.exit(if ok { 0 } else { 1 });
 }
 
+/// Protokollzeile aus dem WebView auf die Konsole (nur im Selbsttest genutzt).
+#[tauri::command]
+fn selftest_log(msg: String) {
+    println!("WEBVIEW {msg}");
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![selftest_config, selftest_report])
+        .invoke_handler(tauri::generate_handler![selftest_config, selftest_report, selftest_log])
         .register_asynchronous_uri_scheme_protocol("mapdata", |ctx, request, responder| {
             let root = map_dir(ctx.app_handle());
             let method = request.method().as_str().to_string();

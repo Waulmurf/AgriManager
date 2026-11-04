@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { GameController, type GameStatus } from './game/controller';
 import { formatGameTime } from './game/clock';
 import { runSelftest } from './game/selftest';
-import { platformName, selftestConfig } from './platform';
+import { forwardLogsToHost, platformName, selftestConfig } from './platform';
 import type { Speed } from './sim/protocol';
 
 const SPEEDS: { value: Speed; label: string; key: string }[] = [
@@ -24,12 +24,15 @@ export function App() {
     setGame(g);
     (window as unknown as { __game?: GameController }).__game = g;
     let cancelled = false;
-    g.start(mapRef.current!).then(async () => {
-      const cfg = await selftestConfig();
+    selftestConfig().then(async (cfg) => {
+      const log = cfg.enabled ? forwardLogsToHost() : null;
+      log?.(`Start ${navigator.userAgent}`);
+      await g.start(mapRef.current!);
       if (cancelled) return;
+      log?.(`Spielstatus ${g.status.phase}${g.status.message ? ': ' + g.status.message : ''}`);
       if (cfg.enabled) {
         setSelftest('läuft …');
-        const r = await runSelftest(g, cfg.seconds, cfg.minFps, cfg.minSps);
+        const r = await runSelftest(g, cfg.seconds, cfg.minFps, cfg.minSps, log ?? undefined);
         setSelftest(r.ok ? 'bestanden' : `fehlgeschlagen: ${r.failures.join(', ')}`);
       } else {
         g.setSpeed(1);

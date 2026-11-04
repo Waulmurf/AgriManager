@@ -35,7 +35,13 @@ export interface SelftestResult {
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export async function runSelftest(game: GameController, seconds: number, minFps = 30, minSps = 90): Promise<SelftestResult> {
+export async function runSelftest(
+  game: GameController,
+  seconds: number,
+  minFps = 30,
+  minSps = 90,
+  log: (msg: string) => void = () => {},
+): Promise<SelftestResult> {
   const failures: string[] = [];
   const t0 = performance.now();
   while (game.status.phase === 'loading' && performance.now() - t0 < 30000) await wait(100);
@@ -43,6 +49,7 @@ export async function runSelftest(game: GameController, seconds: number, minFps 
   await wait(300);
   while (!game.status.tilesLoaded && performance.now() - t0 < 45000) await wait(100);
   const tileLoadMs = performance.now() - t0;
+  log(`Grundkarte: geladen=${game.status.tilesLoaded} nach ${Math.round(tileLoadMs)} ms, Phase ${game.status.phase}`);
 
   game.setSpeed(100);
   await wait(1500); // Einschwingen
@@ -60,6 +67,7 @@ export async function runSelftest(game: GameController, seconds: number, minFps 
     if (game.status.stats) sps.push(game.status.stats.stepsPerSecond);
   }
   const simMinutes = game.status.time - startTime;
+  log(`Messung fertig: ${Math.round(simMinutes)} Spielminuten, fps ${fps.map((f) => f.toFixed(0)).join('/')}`);
   game.setSpeed(1);
 
   const avg = (a: number[]) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);

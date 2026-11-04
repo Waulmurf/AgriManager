@@ -89,6 +89,9 @@ export class GameController {
         maplibregl.addProtocol('pmtiles', new Protocol().tile);
         protocolRegistered = true;
       }
+      if (!document.createElement('canvas').getContext('webgl2')) {
+        throw new Error('WebGL2 ist in dieser Umgebung nicht verfügbar');
+      }
       const center: [number, number] = [region.center.lon, region.center.lat];
       const map = new maplibregl.Map({
         container,
@@ -109,7 +112,20 @@ export class GameController {
         this.emit({ tileErrors: this.status.tileErrors + 1 });
         console.warn('Kartenfehler', e.error?.message ?? e);
       });
-      await new Promise<void>((res) => map.once('load', () => res()));
+      await new Promise<void>((res, rej) => {
+        let lastError = '';
+        const onErr = (e: MlErrorEvent) => { lastError = e.error?.message ?? String(e); };
+        map.on('error', onErr);
+        const timer = setTimeout(
+          () => rej(new Error(`Karte lädt nicht (30 s)${lastError ? ': ' + lastError : ''}`)),
+          30000,
+        );
+        map.once('load', () => {
+          clearTimeout(timer);
+          map.off('error', onErr);
+          res();
+        });
+      });
       this.addGameLayers(center, region.radiusKm * 1000);
 
       this.worker = new Worker(new URL('../sim/worker.ts', import.meta.url), { type: 'module' });

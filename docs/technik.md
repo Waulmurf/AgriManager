@@ -60,6 +60,49 @@ Ergänzt den Abschnitt „Technik und Entwicklungsumgebung“ in [anforderungen.
 - Feldblöcke (Lizenz und Verfügbarkeit für NI, ST, MV) prüfen.
 - Gewichts- und Breitenbeschränkungen stehen im Graphen, fließen aber noch nicht ins Routing ein.
 
-## Messwerte
+## Messwerte (Stand 4. Nov. 2026)
 
-Siehe Abschnitt unten; wird mit jedem CI-Lauf aktualisiert.
+**Kartendaten `map-data-v2`:** PMTiles 63 MB (Zoom 0–14). Der Straßengraph umfasst 8 MB mit
+174.230 Knoten und 207.010 Kanten. Fahrzeiten mit dem Schlepper ab Hof (A*, Plausibilitätstest):
+
+| Ziel | Luftlinie | Strecke | Fahrzeit Schlepper |
+| --- | --- | --- | --- |
+| Uelzen | 20,4 km | 23,0 km | 37 min |
+| Lüneburg | 23,4 km | 28,5 km | 47 min |
+| Bleckede | 18,0 km | 21,5 km | 36 min |
+| Neuhaus (rechts der Elbe, über Fähre) | 23,4 km | 29,1 km | 48 min |
+| Dannenberg | 26,9 km | 32,6 km | 51 min |
+| Salzwedel | 43,2 km | 53,8 km | 84 min |
+| Wittingen | 44,6 km | 51,1 km | 79 min |
+
+**Selbsttest 100x mit 30 Fahrzeugen.** CI-Runner haben keine GPU, WebGL läuft dort in
+Software. Die Bildraten unten zeigen deshalb nur, dass alles funktioniert, nicht die Leistung
+auf echter Hardware.
+
+| Umgebung | Engine | Karte gezeichnet | Fahrzeuge | Schritte/s (Soll 100) | fps | Rechenzeit/Schritt |
+| --- | --- | --- | --- | --- | --- | --- |
+| Tauri-App, Windows-Runner | WebView2 (Edge 156) | ja, 1.336 Objekte | 30/30 | 62 | 14 | 24 ms¹ |
+| Browser, Windows-Runner | Chromium 153 | ja, 1.365 Objekte | 30/30 | – | – | – |
+| Tauri-App, Linux (xvfb, llvmpipe) | WebKitGTK | ja, 1.401 Objekte | 30/30 | 99,9 | 11 | 5,5 ms |
+| Browser, Linux (SwiftShader) | Chromium 153 | ja | 30/30 | 100 | 6 | 1,7 ms |
+| Node (Vitest, echter Graph) | – | – | 30 | – | – | 1,6 ms |
+| Tauri-App, macOS | WKWebView | ausstehend | | | | |
+
+¹ Der Worker teilt sich die 4 CPU-Kerne des Runners mit dem Software-Rendering.
+Auf einem Rechner mit GPU fällt diese Last weg.
+
+**Auf echter Hardware prüfen (Nils):** Die App mit gesetzter Umgebungsvariable starten.
+Sie läuft dann 20 s mit 100x, schreibt das Ergebnis in die angegebene Datei und beendet
+sich. Zielwerte: ≥ 90 Schritte/s und ≥ 30 fps.
+
+macOS (Terminal):
+
+```bash
+LOHNBETRIEB_SELFTEST=1 LOHNBETRIEB_SELFTEST_OUT=~/selbsttest.json "/Applications/Lohnbetrieb-Simulation.app/Contents/MacOS/lohnbetrieb"
+```
+
+Windows (PowerShell, Installationspfad ggf. anpassen):
+
+```powershell
+$env:LOHNBETRIEB_SELFTEST=1; $env:LOHNBETRIEB_SELFTEST_OUT="$HOME\selbsttest.json"; & "$env:LOCALAPPDATA\Lohnbetrieb-Simulation\lohnbetrieb.exe"
+```

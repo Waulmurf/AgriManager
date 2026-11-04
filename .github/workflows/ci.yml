@@ -136,14 +136,14 @@ jobs:
           export LOHNBETRIEB_SELFTEST=1 LOHNBETRIEB_SELFTEST_SECONDS=20 LOHNBETRIEB_SELFTEST_MIN_FPS=3 LOHNBETRIEB_SELFTEST_MIN_SPS=10
           export LOHNBETRIEB_SELFTEST_OUT="$PWD/selftest-macos.json"
           BIN=$(ls "$APP/Contents/MacOS/" | head -1)
-          "$APP/Contents/MacOS/$BIN" &
+          "$APP/Contents/MacOS/$BIN" > app-macos.log 2>&1 &
           PID=$!
-          sleep 25 && screencapture -x selftest-macos.png || true
-          for i in $(seq 1 60); do kill -0 $PID 2>/dev/null || break; sleep 1; done
+          sleep 30 && screencapture -x selftest-macos.png || true
+          for i in $(seq 1 150); do kill -0 $PID 2>/dev/null || break; sleep 1; done
           kill $PID 2>/dev/null || true
-          wait $PID; CODE=$?
-          cat selftest-macos.json || echo "kein Ergebnis"
-          echo "Exit-Code $CODE"
+          wait $PID || true
+          echo "--- App-Ausgabe ---"; cat app-macos.log || true
+          echo "--- Ergebnis ---"; cat selftest-macos.json || echo "kein Ergebnis"
           test -f selftest-macos.json && grep -q '"ok":true' selftest-macos.json
 
       - name: Selbsttest der fertigen App (Windows, WebView2)
@@ -165,7 +165,7 @@ jobs:
           $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
           [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
           $bmp.Save("$PWD/selftest-windows.png")
-          if (-not $p.WaitForExit(60000)) { $p.Kill() }
+          if (-not $p.WaitForExit(150000)) { $p.Kill() }
           if (Test-Path selftest-windows.json) { Get-Content selftest-windows.json } else { Write-Output 'kein Ergebnis' }
           if (-not (Select-String -Path selftest-windows.json -Pattern '"ok":true' -Quiet)) { exit 1 }
 
@@ -176,6 +176,7 @@ jobs:
           path: |
             selftest-*.json
             selftest-*.png
+            app-*.log
             build-info.txt
           retention-days: 14
       - uses: actions/upload-artifact@v4

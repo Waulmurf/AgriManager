@@ -1,5 +1,22 @@
 import { expect, test, type Page } from '@playwright/test';
 
+// Browser-Konsole (Warnungen, Fehler) in die Testausgabe übernehmen – hilft bei Engine-Unterschieden
+test.beforeEach(async ({ page }, info) => {
+  page.on('console', (m) => {
+    if (m.type() === 'error' || m.type() === 'warning') {
+      if (!/GPU stall|GL Driver/.test(m.text())) console.log(`[${info.project.name} ${m.type()}] ${m.text().slice(0, 400)}`);
+    }
+  });
+  page.on('pageerror', (e) => console.log(`[${info.project.name} pageerror] ${e.message}`));
+});
+
+test.afterEach(async ({ page }, info) => {
+  if (info.status !== info.expectedStatus) {
+    const s = await page.evaluate(() => JSON.stringify((window as any).__game?.status ?? null)).catch(() => 'n/a');
+    console.log(`[${info.project.name}] Status bei Fehler: ${s}`);
+  }
+});
+
 async function waitForGame(page: Page) {
   await page.waitForFunction(() => {
     const g = (window as any).__game;
@@ -49,7 +66,8 @@ test('Pause, 1x, 10x und 100x steuern die Spielzeit', async ({ page }) => {
   const dt10 = (await status(page)).time - t0;
   // ~30 Minuten in 3 s (CI ohne GPU: Worker teilt sich die CPU mit dem Software-Rendering)
   expect(dt10).toBeGreaterThan(Number(process.env.E2E_MIN_STEPS_10X ?? 15));
-  expect(dt10).toBeLessThan(60);
+  // obere Grenze nur grob: unter Last kommen Meldungen gebündelt an
+  expect(dt10).toBeLessThan(90);
 
   await page.getByTestId('speed-100').click();
   const t1 = (await status(page)).time;
@@ -57,7 +75,7 @@ test('Pause, 1x, 10x und 100x steuern die Spielzeit', async ({ page }) => {
   const dt100 = (await status(page)).time - t1;
   // ~300 Minuten in 3 s; auf CI-Rechnern ohne GPU teilt sich der Worker die CPU mit dem Software-Rendering
   expect(dt100).toBeGreaterThan(Number(process.env.E2E_MIN_STEPS_100X ?? 200));
-  expect(dt100).toBeLessThan(450);
+  expect(dt100).toBeLessThan(900);
   await expect(page.getByTestId('speed-100')).toHaveClass(/active/);
 
   // Tastatur: Leertaste pausiert

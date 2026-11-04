@@ -48,3 +48,21 @@ export function platformName(): string {
   const os = /Win/.test(plat) ? 'Windows' : /Mac/.test(plat) ? 'macOS' : /Linux/.test(plat) ? 'Linux' : 'unbekannt';
   return `${os} · ${engine}`;
 }
+
+/** Leitet im Selbsttest Fehler und Fortschritt auf die Konsole der App um (für CI-Logs). */
+export function forwardLogsToHost(): (msg: string) => void {
+  const send = (msg: string) => {
+    if (isTauri) invoke('selftest_log', { msg: msg.slice(0, 2000) }).catch(() => {});
+    else console.log('[selbsttest]', msg);
+  };
+  window.addEventListener('error', (e) => send(`Fehler: ${e.message} (${e.filename}:${e.lineno})`));
+  window.addEventListener('unhandledrejection', (e) => send(`Promise-Fehler: ${String(e.reason)}`));
+  for (const level of ['error', 'warn'] as const) {
+    const orig = console[level].bind(console);
+    console[level] = (...args: unknown[]) => {
+      orig(...args);
+      send(`${level}: ${args.map((a) => (a instanceof Error ? a.message : String(a))).join(' ')}`);
+    };
+  }
+  return send;
+}
