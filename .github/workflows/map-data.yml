@@ -1,0 +1,86 @@
+name: map-data
+
+# Baut Grundkarte (PMTiles) und Straßengraph der Spielregion und legt sie als
+# GitHub-Release mit dem Tag aus data/map-data.json ab. Läuft nur, wenn sich die
+# Datenpipeline ändert oder von Hand gestartet wird; ein vorhandenes Release
+# wird nicht überschrieben (Tag erhöhen für einen Neubau).
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Vorhandenes Release ersetzen
+        type: boolean
+        default: false
+  push:
+    paths:
+      - data/map-data.json
+      - scripts/data/**
+      - .github/workflows/map-data.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: map-data
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Release schon vorhanden?
+        id: check
+        run: |
+          TAG=$(jq -r .tag data/map-data.json)
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          if gh release view "$TAG" >/dev/null 2>&1 && [ "${{ inputs.force }}" != "true" ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Release $TAG existiert bereits – nichts zu tun."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.exists == 'false'
+        with:
+          node-version: 22
+
+      - name: Werkzeuge installieren
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q osmium-tool jq
+          gh release download -R protomaps/go-pmtiles --pattern '*Linux_x86_64.tar.gz' -O /tmp/pmtiles.tgz
+          tar -xzf /tmp/pmtiles.tgz -C /tmp
+          sudo install /tmp/pmtiles /usr/local/bin/pmtiles
+          pmtiles version || true
+
+      - name: Kartendaten bauen
+        if: steps.check.outputs.exists == 'false'
+        run: bash scripts/data/build-region.sh
+
+      - name: Als Release veröffentlichen
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          TAG=${{ steps.check.outputs.tag }}
+          cd build/map-data
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" region.json region.pmtiles roadgraph.bin SHA256SUMS --clobber
+          else
+            gh release create "$TAG" region.json region.pmtiles roadgraph.bin SHA256SUMS \
+              --target "${{ github.sha }}" --prerelease \
+              --title "Kartendaten $TAG" \
+              --notes "Grundkarte und Straßengraph der Spielregion (50 km um 29584). Daten © OpenStreetMap-Mitwirkende (ODbL), Basiskarte Protomaps. Erzeugt von scripts/data/build-region.sh."
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: steps.check.outputs.exists == 'false'
+        with:
+          name: map-data
+          path: build/map-data
+          retention-days: 7

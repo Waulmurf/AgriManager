@@ -1,0 +1,12 @@
+node_modules/
+dist/
+build/
+coverage/
+test-results/
+playwright-report/
+*.log
+.DS_Store
+src-tauri/target/
+src-tauri/gen/
+# Kartendaten kommen aus dem Release (scripts/fetch-map-data.mjs)
+src-tauri/resources/map/

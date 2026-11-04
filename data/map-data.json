@@ -1,0 +1,16 @@
+{
+  "$comment": "Version der Kartendaten. Zum Neubauen Tag erhöhen; der Workflow map-data erzeugt dann ein neues Release mit diesem Tag.",
+  "tag": "map-data-v1",
+  "center": { "name": "Groß Thondorf (29584 Himbergen)", "query": "Groß Thondorf, Himbergen, Niedersachsen" },
+  "radiusKm": 50,
+  "marginKm": 5,
+  "pmtilesMaxZoom": 15,
+  "geofabrik": [
+    "europe/germany/niedersachsen",
+    "europe/germany/sachsen-anhalt",
+    "europe/germany/mecklenburg-vorpommern",
+    "europe/germany/brandenburg",
+    "europe/germany/schleswig-holstein",
+    "europe/germany/hamburg"
+  ]
+}
