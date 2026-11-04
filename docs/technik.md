@@ -97,8 +97,13 @@ nicht die Leistung auf echter Hardware.
 | Node, Windows-Runner (Rechenkern allein) | – | – | 30 | – | – | 1,28 ms |
 | Node, Intel-Mac-Runner (Rechenkern allein) | – | – | 30 | – | – | 3,1 ms |
 | **Tauri-App, macOS arm64-Runner (Apple Silicon, GPU)** | **WKWebView** | **ja, 1.389 Objekte, 0,9 s** | **30/30** | **100** | **58 (min. 49, P95 31 ms)** | **2,0 ms** |
+| Tauri-App, macOS arm64-Runner (2. Lauf) | WKWebView | ja, 1.389 Objekte, 1,7 s | 30/30 | 100 | 22 (min. 19, P95 113 ms)² | 4,3 ms |
+| Browser, macOS arm64-Runner, Retina (DPR 2) | WebKit 26.6 (Safari) | ja, 1.365 Objekte, 0,6 s | 30/30 | 100 | 59 (min. 57, P95 30 ms) | 1,2 ms |
 | Tauri-App, macOS Intel-Runner (ohne Metal) | WKWebView | nein: WebGL-Kontext verloren | – | – | – | – |
 | Tauri-App, Windows-Runner (2. Lauf) | WebView2 (Edge 156) | ja, 1.336 Objekte | 30/30 | 72 | 16 | 9,9 ms¹ |
+
+² Gleicher Code wie im 1. Lauf mit 58 fps. Geteilte CI-Macs schwanken stark. Maßgeblich ist
+der Selbsttest auf Nils' M1 Pro.
 
 ¹ Der Worker teilt sich die 4 CPU-Kerne des Runners mit dem Software-Rendering.
 Auf einem Rechner mit GPU fällt diese Last weg. Derselbe Rechenkern braucht auf demselben
