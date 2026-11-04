@@ -9,7 +9,7 @@ async function waitForGame(page: Page) {
 
 const status = (page: Page) => page.evaluate(() => {
   const s = (window as any).__game.status;
-  return { time: s.time, speed: s.speed, vehicles: s.vehicles, tileErrors: s.tileErrors, phase: s.phase };
+  return { time: s.simTime, speed: s.speed, vehicles: s.vehicles, tileErrors: s.tileErrors, phase: s.phase };
 });
 
 test('Karte lädt aus der lokalen PMTiles-Datei und zeigt 30 Fahrzeuge', async ({ page }, info) => {
@@ -39,6 +39,7 @@ test('Pause, 1x, 10x und 100x steuern die Spielzeit', async ({ page }) => {
   await page.goto('./');
   await waitForGame(page);
   await page.getByTestId('speed-0').click();
+  await page.waitForTimeout(500); // letzte Meldung des Workers abwarten
   const t0 = (await status(page)).time;
   await page.waitForTimeout(1500);
   expect((await status(page)).time).toBe(t0);
@@ -47,13 +48,15 @@ test('Pause, 1x, 10x und 100x steuern die Spielzeit', async ({ page }) => {
   await page.waitForTimeout(3000);
   const dt10 = (await status(page)).time - t0;
   expect(dt10).toBeGreaterThan(15); // ~30 Minuten in 3 s
-  expect(dt10).toBeLessThan(45);
+  expect(dt10).toBeLessThan(40);
 
   await page.getByTestId('speed-100').click();
   const t1 = (await status(page)).time;
   await page.waitForTimeout(3000);
   const dt100 = (await status(page)).time - t1;
-  expect(dt100).toBeGreaterThan(200); // ~300 Minuten in 3 s
+  // ~300 Minuten in 3 s; auf CI-Rechnern ohne GPU teilt sich der Worker die CPU mit dem Software-Rendering
+  expect(dt100).toBeGreaterThan(Number(process.env.E2E_MIN_STEPS_100X ?? 200));
+  expect(dt100).toBeLessThan(450);
   await expect(page.getByTestId('speed-100')).toHaveClass(/active/);
 
   // Tastatur: Leertaste pausiert
@@ -66,26 +69,27 @@ test('Fahrzeuge bewegen sich flüssig und bleiben im Spielgebiet', async ({ page
   await waitForGame(page);
   await page.getByTestId('speed-10').click();
   await page.waitForTimeout(4000);
-  // Positionen über mehrere Bilder: Schritte passen zur Fahrzeit, keine Sprünge
+  // Je Bild: Weg passt zur dargestellten Spielzeit (kein Springen, unabhängig von der Bildrate)
   const track = await page.evaluate(async () => {
     const g = (window as any).__game;
     const out: { t: number; p: { lon: number; lat: number }[] }[] = [];
-    for (let i = 0; i < 30; i++) {
-      const t = await new Promise<number>((r) => requestAnimationFrame((ts) => r(ts)));
-      out.push({ t, p: g.vehiclePositions().map((p: any) => ({ lon: p.lon, lat: p.lat })) });
+    for (let i = 0; i < 40; i++) {
+      await new Promise((r) => requestAnimationFrame(() => r(null)));
+      out.push({ t: g.renderTime(), p: g.vehiclePositions().map((p: any) => ({ lon: p.lon, lat: p.lat })) });
     }
     return out;
   });
   const m = (a: { lon: number; lat: number }, b: { lon: number; lat: number }) =>
     Math.hypot((b.lon - a.lon) * 67000, (b.lat - a.lat) * 111000);
+  expect(track[track.length - 1].t).toBeGreaterThan(track[0].t);
   let moving = 0;
   for (let v = 0; v < 30; v++) {
     if (m(track[0].p[v], track[track.length - 1].p[v]) > 1) moving++;
     for (let i = 1; i < track.length; i++) {
-      const dt = (track[i].t - track[i - 1].t) / 1000;
-      // 10x = 10 Spielminuten pro Sekunde, höchstens 60 km/h → 10 km Spielweg je Sekunde Echtzeit
-      const limit = (60 / 3.6) * 60 * 10 * dt * 1.3 + 5;
-      expect(m(track[i - 1].p[v], track[i].p[v])).toBeLessThan(limit);
+      const dMin = track[i].t - track[i - 1].t; // Spielminuten zwischen zwei Bildern
+      expect(dMin).toBeGreaterThanOrEqual(0);
+      // höchstens 60 km/h = 1000 m je Spielminute (+ Rundung)
+      expect(m(track[i - 1].p[v], track[i].p[v])).toBeLessThan(1000 * dMin * 1.05 + 5);
     }
     expect(Math.abs(track[track.length - 1].p[v].lat - 53.128)).toBeLessThan(0.6);
   }
@@ -94,11 +98,16 @@ test('Fahrzeuge bewegen sich flüssig und bleiben im Spielgebiet', async ({ page
 
 test('Leistung: 100x mit 30 Fahrzeugen', async ({ page }, info) => {
   const minFps = Number(process.env.PERF_MIN_FPS ?? 20);
-  await page.goto(`./?selftest=1&seconds=10&minFps=${minFps}`);
+  // kleinere Fläche: CI-Rechner rendern WebGL ohne GPU
+  await page.setViewportSize({ width: 1024, height: 700 });
+  const minSps = Number(process.env.E2E_MIN_SPS ?? 90);
+  await page.goto(`./?selftest=1&seconds=10&minFps=${minFps}&minSps=${minSps}`);
   const result = await page.waitForFunction(() => (window as any).__selftest, null, { timeout: 110_000 });
   const r = await result.jsonValue();
   await info.attach('selftest.json', { body: JSON.stringify(r, null, 2), contentType: 'application/json' });
   console.log('Selbsttest', info.project.name, JSON.stringify(r));
+  expect(r.basemapFeatures).toBeGreaterThan(200);
+  expect(r.vehiclesOnMap).toBe(30);
+  expect(r.tileErrors).toBe(0);
   expect(r.failures).toEqual([]);
-  expect(r.stepsPerSecond).toBeGreaterThanOrEqual(90);
 });

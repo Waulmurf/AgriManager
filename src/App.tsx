@@ -29,7 +29,7 @@ export function App() {
       if (cancelled) return;
       if (cfg.enabled) {
         setSelftest('läuft …');
-        const r = await runSelftest(g, cfg.seconds, cfg.minFps);
+        const r = await runSelftest(g, cfg.seconds, cfg.minFps, cfg.minSps);
         setSelftest(r.ok ? 'bestanden' : `fehlgeschlagen: ${r.failures.join(', ')}`);
       } else {
         g.setSpeed(1);

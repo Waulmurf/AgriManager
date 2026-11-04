@@ -24,13 +24,14 @@ fn map_dir(app: &tauri::AppHandle) -> PathBuf {
 }
 
 /// Selbsttest-Einstellungen aus der Umgebung (LOHNBETRIEB_SELFTEST=1,
-/// LOHNBETRIEB_SELFTEST_SECONDS, LOHNBETRIEB_SELFTEST_MIN_FPS) – für CI.
+/// LOHNBETRIEB_SELFTEST_SECONDS, LOHNBETRIEB_SELFTEST_MIN_FPS, LOHNBETRIEB_SELFTEST_MIN_SPS).
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SelftestConfig {
     enabled: bool,
     seconds: u32,
     min_fps: f64,
+    min_sps: f64,
 }
 
 #[tauri::command]
@@ -40,6 +41,7 @@ fn selftest_config() -> SelftestConfig {
         enabled: env("LOHNBETRIEB_SELFTEST").is_some_and(|v| v == "1"),
         seconds: env("LOHNBETRIEB_SELFTEST_SECONDS").and_then(|v| v.parse().ok()).unwrap_or(20),
         min_fps: env("LOHNBETRIEB_SELFTEST_MIN_FPS").and_then(|v| v.parse().ok()).unwrap_or(30.0),
+        min_sps: env("LOHNBETRIEB_SELFTEST_MIN_SPS").and_then(|v| v.parse().ok()).unwrap_or(90.0),
     }
 }
 

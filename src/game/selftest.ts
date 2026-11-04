@@ -29,12 +29,13 @@ export interface SelftestResult {
   updateMs: number;
   devicePixelRatio: number;
   minFps: number;
+  minSps: number;
   failures: string[];
 }
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export async function runSelftest(game: GameController, seconds: number, minFps = 30): Promise<SelftestResult> {
+export async function runSelftest(game: GameController, seconds: number, minFps = 30, minSps = 90): Promise<SelftestResult> {
   const failures: string[] = [];
   const t0 = performance.now();
   while (game.status.phase === 'loading' && performance.now() - t0 < 30000) await wait(100);
@@ -94,13 +95,14 @@ export async function runSelftest(game: GameController, seconds: number, minFps 
     updateMs: Math.round(avg(upd) * 100) / 100,
     devicePixelRatio: window.devicePixelRatio,
     minFps,
+    minSps,
     failures,
   };
   if (!webgl2) failures.push('kein WebGL2');
   if (basemapFeatures < 200) failures.push(`Grundkarte nicht gezeichnet (${basemapFeatures} Objekte)`);
   if (result.tileErrors > 0) failures.push(`${result.tileErrors} Kartenfehler`);
   if (result.vehicles !== 30 || result.vehiclesOnMap !== 30) failures.push('nicht alle 30 Fahrzeuge auf der Karte');
-  if (result.stepsPerSecond < 90) failures.push(`nur ${result.stepsPerSecond} Schritte/s bei 100x`);
+  if (result.stepsPerSecond < minSps) failures.push(`nur ${result.stepsPerSecond} Schritte/s bei 100x`);
   if (result.fpsAvg < minFps) failures.push(`Bildrate ${result.fpsAvg} fps unter ${minFps} fps`);
   result.ok = failures.length === 0;
   await reportSelftest(result);

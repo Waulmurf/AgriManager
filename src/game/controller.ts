@@ -28,6 +28,8 @@ export interface GameStatus {
   message?: string;
   speed: Speed;
   time: number;
+  /** Spielzeit laut Worker (letzte Meldung) */
+  simTime: number;
   vehicles: number;
   stats: WorkerStats | null;
   fps: number;
@@ -59,7 +61,7 @@ export class GameController {
   private notifyAt = 0;
   private tileTimer: ReturnType<typeof setInterval> | undefined;
   status: GameStatus = {
-    phase: 'loading', speed: 0, time: 0, vehicles: 0, stats: null, fps: 0, frameP95: 0, updateMs: 0,
+    phase: 'loading', speed: 0, time: 0, simTime: 0, vehicles: 0, stats: null, fps: 0, frameP95: 0, updateMs: 0,
     region: null, graph: null, tilesLoaded: false, tileErrors: 0,
   };
 
@@ -115,7 +117,8 @@ export class GameController {
       this.post({ type: 'init', graph: graphBuf, seed: SEED, vehicleCount: VEHICLE_COUNT }, [graphBuf]);
       // „idle“ kommt nicht, solange Fahrzeuge sich bewegen – daher Kachelstatus prüfen
       const checkTiles = () => {
-        const loaded = map.isSourceLoaded(BASEMAP_SOURCE) && map.areTilesLoaded();
+        // nur die Grundkarte: die Fahrzeugquelle wird ständig neu befüllt
+        const loaded = map.isSourceLoaded(BASEMAP_SOURCE);
         if (loaded !== this.status.tilesLoaded) this.emit({ tilesLoaded: loaded });
       };
       map.on('idle', checkTiles);
@@ -149,6 +152,11 @@ export class GameController {
 
   getMap() {
     return this.map;
+  }
+
+  /** Zuletzt dargestellte Spielzeit (Minuten, mit Nachkommastellen). */
+  renderTime(): number {
+    return this.interp.renderTime;
   }
 
   /** Aktuell gezeichnete Fahrzeugpositionen (für Tests). */
@@ -186,6 +194,7 @@ export class GameController {
     } else if (msg.type === 'tick') {
       this.interp.addTick(msg.time, msg.speed, msg.positions, msg.routes, performance.now());
       this.status.stats = msg.stats;
+      this.status.simTime = msg.time;
     } else if (msg.type === 'error') {
       this.emit({ phase: 'error', message: msg.message });
     }

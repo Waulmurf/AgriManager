@@ -18,12 +18,13 @@ export interface SelftestConfig {
   enabled: boolean;
   seconds: number;
   minFps: number;
+  minSps: number;
 }
 
 /** Selbsttest: in der App über LOHNBETRIEB_SELFTEST=1, im Browser über ?selftest=1. */
 export async function selftestConfig(): Promise<SelftestConfig> {
   const q = new URLSearchParams(window.location.search);
-  if (q.has('selftest')) return { enabled: true, seconds: Number(q.get('seconds') ?? 20), minFps: Number(q.get('minFps') ?? 30) };
+  if (q.has('selftest')) return { enabled: true, seconds: Number(q.get('seconds') ?? 20), minFps: Number(q.get('minFps') ?? 30), minSps: Number(q.get('minSps') ?? 90) };
   if (isTauri) {
     try {
       return await invoke<SelftestConfig>('selftest_config');
@@ -31,7 +32,7 @@ export async function selftestConfig(): Promise<SelftestConfig> {
       /* ältere Hülle ohne Befehl */
     }
   }
-  return { enabled: false, seconds: 0, minFps: 30 };
+  return { enabled: false, seconds: 0, minFps: 30, minSps: 90 };
 }
 
 export async function reportSelftest(result: unknown): Promise<void> {
