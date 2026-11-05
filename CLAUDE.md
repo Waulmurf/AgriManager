@@ -96,8 +96,8 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
   `askLand`/`setCrop`/`farmingDaily`/Ernte in `business.ts`, Eigenaufträge (`Order.ownLeaseId`, farmId −1), Reiter Ackerbau.
 - Biogasanlage fertig: `src/sim/biogas.ts` (Größen, Ration mit Maisdeckel, Gärrest), Bau/Ausschreibung/Substrat/
   Gülleverträge/Gärrest/`biogasDaily` in `business.ts`, `Order.sourceNode` (Silo/Lager der Anlage), Reiter Biogas.
-- Weitere Schichten (Standorte, Pacht, Ackerbau, Biogas) damit komplett. Danach laut Anforderungen: Transport,
-  Winterdienst, Kommunal.
+- Weitere Schichten (Standorte, Pacht, Ackerbau, Biogas) damit komplett. Vorschläge für die nächsten Schichten
+  (Nr. 1–18) stehen am Ende von docs/plan.md und warten auf Nils' Auswahl.
 
 ## CI (GitHub Actions)
 

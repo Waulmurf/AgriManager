@@ -755,3 +755,59 @@ Schritte: 1. Standorte und Gebäude (umgesetzt), 2. Pacht und eigener Ackerbau (
   - Sperrfrist auf Ackerland vereinfacht 1. Oktober bis 31. Januar.
 - **Später:** Wärmeverkauf, Flexzuschlag, Gärrest als Dienstleistung für viehlose Kunden,
   Gülle-Anfuhr mit eigenen Fahrzeugen, Rüben als Substrat, Silo festfahren als eigener Arbeitsgang.
+
+## Vorschläge für die nächsten Schichten (5. Nov. 2026, noch nicht bestätigt)
+
+Nils wählt aus, was umgesetzt wird. Empfehlung für den nächsten Block: 4, 1, 13 und 5.
+
+### A. Neue Geschäftsfelder
+
+1. **Transport mit Lkw:** Getreide, Rüben in der Rübenkampagne zu Nordzucker Uelzen, Kartoffeln,
+   Gülle mit dem Tankauflieger. Mit Fahrerlaubnis CE, Lenk- und Ruhezeiten und Maut.
+2. **Winterdienst:** Verträge mit Gemeinden und Gewerbe. Bei Glätte oder Schnee kommen nachts
+   Einsätze mit Streuer und Schild am Schlepper, mit Bereitschaftszuschlag (Wetter liefert
+   Frost und Niederschlag).
+3. **Kommunale Arbeiten:** Böschungs- und Grabenmähen, Heckenschnitt, Wegebau. Ausschreibungen
+   der Gemeinden und Kreise.
+4. **Weitere Ackerdienste:** Mähdrusch, Rübenroden und Kartoffelroden als eigene Ketten mit
+   Abfahrern, Rübenmiete und Verladung (siehe docs/ablaeufe.md). Dazu Saat, Pflanzenschutz
+   (Sachkunde nötig) und Ballenpressen. Eigener Ackerbau kann diese Arbeitsgänge dann selbst fahren.
+
+### B. Vertiefung der vorhandenen Systeme
+
+5. **Gärrest als Dienstleistung:** Viehlose Kunden fragen Gärrest aus der eigenen Anlage an.
+   Gülle-Anfuhr mit eigenen Fahrzeugen statt durch Dritte.
+6. **Vermarktung und Lager:** Vorkontrakte, Getreidelager am Hof, Preise schwanken übers Jahr,
+   Verkauf zum besten Zeitpunkt.
+7. **Rahmenverträge mit Kunden:** Jahresverträge, z. B. alle Gülle eines Betriebs für 3 Jahre.
+   Das gibt Planungssicherheit, bindet aber Kapazität.
+8. **Flächenkauf und Düngebedarf:** Land kaufen statt pachten, Nährstoffbilanz nach
+   Düngeverordnung, Gärrest spart gezielt Dünger.
+9. **Biogas ausbauen:** Wärmeverkauf ans Dorf, Flexzuschlag (Strom zu teuren Stunden),
+   „Silo festfahren“ als eigener Arbeitsgang.
+
+### C. Personal und Betrieb
+
+10. **Disponent im Büro (ST-08):** übernimmt Routineaufträge nach festgelegten Regeln und spart
+    Chef-Zeit, wenn der Betrieb groß wird.
+11. **Ausbildung:** Azubis, Meisterkurs, Lehrgänge (Pflanzenschutz-Sachkunde, CE-Führerschein)
+    schalten Skills frei.
+12. **Konkurrenz mit echtem Fuhrpark:** In der Ernte ist die Konkurrenz ausgebucht, sie wirbt
+    Personal ab, kleine Anbieter lassen sich übernehmen (ST-02).
+
+### D. Spielgefühl und Oberfläche
+
+13. **Auswertungen:** Diagramme zu Umsatz und Gewinn je Monat und Sparte (Lohnarbeit, Ackerbau,
+    Biogas), Auslastung je Maschine und Fahrer, Kundenkarte mit Deckungsbeitrag.
+14. **Ereignisse und Zufälle:** Unwetter, Hagel auf eigenen Flächen, Kontrollen (Lenkzeit,
+    Fahrzeug), Feldtage und Messen mit Rabatten.
+15. **Tutorial und Ziele:** geführter Einstieg, Kampagnenziele (z. B. 500 ha Kundenfläche in
+    3 Jahren), Erfolge.
+16. **Schwierigkeitsgrade und Startszenarien:** Neugründung, Hofnachfolge mit altem Fuhrpark,
+    wohlhabender Einstieg.
+
+### E. Technik
+
+17. **Leistung bei großem Betrieb:** Simulation mit 50+ eigenen Fahrzeugen messen und optimieren.
+18. **macOS-Build prüfen:** gezielter Lauf mit `[mac]` und Selbsttest (zehnfache CI-Minuten,
+    nur auf Wunsch).
