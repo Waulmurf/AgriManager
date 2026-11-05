@@ -45,6 +45,8 @@ export interface Farm {
   satisfaction: number;
   /** bei der Konkurrenz bis Spielminute (0 = Kunde ist frei); danach nur kleine Probeaufträge */
   rivalUntil: number;
+  /** erledigte Aufträge (Stammkunde ab 3, MK-03) */
+  orderCount?: number;
 }
 
 export interface FarmSet {

@@ -1,5 +1,6 @@
 /** Nachrichten zwischen Oberfläche und Simulations-Worker. */
 import type { JobEstimate, PlanBar, PlayerUnitInfo, SaveState, VehicleInfo } from './engine';
+import type { Competitor } from './market';
 import type { Company } from './economy';
 import type { ContactPreference } from './farms';
 import type { Applicant, Command, Delivery, StaffRequest, YearResult, GameEvent, Invoice, LedgerEntry, Order, QueueItem, Request } from './business';
@@ -71,6 +72,8 @@ export interface BusinessState {
   deliveries: Delivery[];
   discounts: Record<number, number>;
   machineValues: Record<number, number>;
+  /** Markt (Phase 5): Ruf, gewonnen/verloren, Konkurrenten, Stammkunden */
+  market: { reputation: number; won: number; lost: number; competitors: Competitor[]; loyalFarms: number[] };
   /** Wetter (Phase 4, Schritt 2): heute und Vorhersage */
   weather: {
     temp: number; rain: number; rainFrom: number; soil: number; frost: boolean; blocked: string | null;

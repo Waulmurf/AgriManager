@@ -87,6 +87,10 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
   Umlauf Lager↔Feld (`slurry` im Job, `startSlurrySlice`, `sliceFieldRoute`), Zubringer-Task `feeder`.
 - Schritt 4b Häckselkette fertig: Dienstleistung `haeckseln` (nur Häcksler/Komplettkette), Häcksler,
   Häckselwagen, Radlader im Katalog; `chop` im Job (`chopTick`), Tasks `haul` und `silo`, Oberfläche `ChopStart`.
+- Phase 4 damit komplett.
+- Phase 5 Markt fertig: `src/sim/market.ts` (Konkurrenten), Konkurrenzangebot je Anfrage, Stammkunden
+  (`Farm.orderCount`, `isLoyal`), Preiskampf, Ruf (`Business.reputation`, `marketDaily`), Reiter Wettbewerb.
+- Nächste Schichten laut Anforderungen: Standorte, Pacht, Ackerbau, Biogas; später Transport, Winterdienst.
 
 ## CI (GitHub Actions)
 

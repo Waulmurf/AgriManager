@@ -88,8 +88,8 @@ export interface SaveState {
   company: Company;
   business: ReturnType<Business['serialize']>;
   weather?: ReturnType<Weather['serialize']>;
-  /** je Betrieb [bekannt 0/1, Zufriedenheit, bei der Konkurrenz bis] */
-  farms: [number, number, number?][];
+  /** je Betrieb [bekannt 0/1, Zufriedenheit, bei der Konkurrenz bis, erledigte Aufträge] */
+  farms: [number, number, number?, number?][];
   vehicles: {
     state: VehicleState; node: number; seg: number; segOff: number; dist: number; waitMin: number;
     next: 'field' | 'home' | 'leave-field'; fieldNode: number; trips: number; restUntil: number; chargedRoute: number;
@@ -331,6 +331,7 @@ export class Simulation {
     for (const m of this.company.machines) this.addPlayerVehicle(m, false);
     this.business = new Business(opts.seed, this.company, this.farms, this.fields);
     this.weather = new Weather(opts.seed);
+    this.business.nodeLonLat = (node) => unproject(this.graph, this.graph.x[node], this.graph.y[node]);
     // Abgestellt am Hof: Route aus einem Punkt, damit jedes Fahrzeug eine Position hat
     for (const v of this.vehicles) {
       v.route = this.makeRoute([graph.x[this.homeNode]], [graph.y[this.homeNode]], [], 'road');
@@ -1459,7 +1460,7 @@ export class Simulation {
       company: structuredClone(this.company),
       business: structuredClone(this.business.serialize()),
       weather: structuredClone(this.weather.serialize()),
-      farms: this.farms ? this.farms.farms.map((f) => [f.known ? 1 : 0, f.satisfaction, f.rivalUntil] as [number, number, number]) : [],
+      farms: this.farms ? this.farms.farms.map((f) => [f.known ? 1 : 0, f.satisfaction, f.rivalUntil, f.orderCount ?? 0] as [number, number, number, number]) : [],
       vehicles: this.vehicles.map((v) => ({
         state: v.state, node: v.node, route: route(v.route), seg: v.seg, segOff: v.segOff, dist: v.dist,
         waitMin: v.waitMin, next: v.next, fieldNode: v.fieldNode, trips: v.trips,
@@ -1488,9 +1489,9 @@ export class Simulation {
     normalizeDrivers(this.company);
     this.business.restore(s.business);
     if (s.weather) this.weather.restore(s.weather);
-    if (this.farms) s.farms.forEach(([known, sat, rival], i) => {
+    if (this.farms) s.farms.forEach(([known, sat, rival, count], i) => {
       const f = this.farms!.farms[i];
-      if (f) { f.known = known === 1; f.satisfaction = sat; f.rivalUntil = rival ?? 0; }
+      if (f) { f.known = known === 1; f.satisfaction = sat; f.rivalUntil = rival ?? 0; f.orderCount = count ?? 0; }
     });
     this.pending = [];
     this.queue = structuredClone(s.queue ?? []).map((q) => ({ ...q, driverId: q.driverId ?? 1 }));

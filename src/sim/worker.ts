@@ -126,6 +126,11 @@ function sendBusiness(force = false) {
     busyMachines: sim.busyMachineIds(),
     plan: sim.planBoard(),
     dieselPrice: b.dieselPrice,
+    market: {
+      reputation: b.reputation, won: b.won, lost: b.lost,
+      competitors: structuredClone(b.competitors),
+      loyalFarms: (sim.farms?.farms ?? []).filter((f) => b.isLoyal(f.id)).map((f) => f.id),
+    },
     weather: (() => {
       const day = Math.floor(sim!.time / 1440);
       const w = sim!.weather.day(day);

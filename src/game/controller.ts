@@ -299,6 +299,21 @@ export class GameController {
         if (f.known !== k || f.satisfaction !== sat) { f.known = k; f.satisfaction = sat; changed = true; }
       }
       if (changed) this.setFarmData();
+      // Konkurrenten auf der Karte aktualisieren (nur bei Änderung)
+      const compKey = st.market.competitors.map((c) => `${c.id}:${c.warUntil > st.time ? 1 : 0}`).join(',');
+      if (compKey !== this.competitorKey && this.map?.getSource('competitors')) {
+        this.competitorKey = compKey;
+        const size = { gross: 'groß', mittel: 'mittel', klein: 'klein' } as const;
+        (this.map.getSource('competitors') as GeoJSONSource).setData({
+          type: 'FeatureCollection',
+          features: st.market.competitors.map((c) => ({
+            type: 'Feature', properties: {
+              name: c.name, war: c.warUntil > st.time,
+              info: `Lohnunternehmen in ${c.town}, ${size[c.size]} · Preise ${Math.round((c.priceLevel - 1) * 100)} %${c.warUntil > st.time ? ` · Preiskampf −${Math.round(c.warCut * 100)} %` : ''}`,
+            }, geometry: { type: 'Point', coordinates: c.lonLat },
+          })),
+        });
+      }
       const events = [...st.events.slice().reverse(), ...this.status.events].slice(0, 60);
       this.emit({ business: st, company: st.company, knownFarms: st.knownFarms.length, events });
       // Autosave einmal je Spieltag (beim Tageswechsel um 06:00)
@@ -389,6 +404,8 @@ export class GameController {
   }
 
   /** Spielstand speichern (Name; Standard: Autosave) */
+  private competitorKey = '';
+
   /** Spielzeit des zuletzt gespeicherten Stands (Selbsttest) */
   lastSavedTime = -1;
 
@@ -636,6 +653,23 @@ export class GameController {
       const brands = [...d.tractorBrands, ...d.implementBrands].join(', ');
       new maplibregl.Popup({ maxWidth: '260px' }).setLngLat(d.lonLat)
         .setHTML(`<strong>${d.name}</strong><br><small>${d.town} · ${brands}</small><br><small>Kauf, Bestellung und Werkstatt – Reiter Markt bzw. Fuhrpark</small>`).addTo(map);
+    });
+    // Konkurrenten (Phase 5): Standorte, rot im Preiskampf
+    map.addSource('competitors', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    map.addLayer({
+      id: 'competitors-dot', type: 'circle', source: 'competitors',
+      paint: { 'circle-radius': 5, 'circle-color': ['case', ['get', 'war'], '#c0392b', '#8a7f72'], 'circle-stroke-color': '#fff', 'circle-stroke-width': 1.5 },
+    });
+    map.addLayer({
+      id: 'competitors-label', type: 'symbol', source: 'competitors', minzoom: 9.5,
+      layout: { 'text-field': ['get', 'name'], 'text-font': ['Noto Sans Medium'], 'text-size': 10, 'text-offset': [0, 1], 'text-anchor': 'top', 'text-optional': true },
+      paint: { 'text-color': '#5a5148', 'text-halo-color': '#fff', 'text-halo-width': 1.2 },
+    });
+    map.on('click', 'competitors-dot', (e) => {
+      const p = e.features?.[0]?.properties as { name: string; info: string } | undefined;
+      if (!p) return;
+      e.preventDefault();
+      new maplibregl.Popup({ maxWidth: '240px' }).setLngLat(e.lngLat).setHTML(`<strong>${p.name}</strong><br><small>${p.info}</small>`).addTo(map);
     });
     map.addSource('farms', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
     map.addLayer({

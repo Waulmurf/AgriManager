@@ -415,8 +415,8 @@ Als Nächstes gibt Nils diese Anforderungen frei, danach baut Claude einen spiel
 | 1 | Anforderungen | dieses Doc prüfen und freigeben | Freigabe |
 | 2 | Prototyp | Karte, Hof, Auftrag, Fahrt, Rechnung | Nils spielt |
 | 3 | Fuhrpark | Kauf, Verkauf, Personal, Arbeitszeiten (umgesetzt Nov. 2026) | – |
-| 4 | Wirtschaft | Finanzen, Diesel, Wetter, Jahreslauf | – |
-| 5 | Markt | Konkurrenz, Preiskampf, Stammkunden | – |
+| 4 | Wirtschaft | Finanzen, Diesel, Wetter, Jahreslauf (umgesetzt Nov. 2026, dazu Gülle- und Häckselkette) | – |
+| 5 | Markt | Konkurrenz, Preiskampf, Stammkunden (umgesetzt Nov. 2026) | – |
 
 Danach: Standorte, Pacht, Ackerbau, Biogas · Später: Transport, Winterdienst, Kommunal
 

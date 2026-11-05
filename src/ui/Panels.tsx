@@ -130,6 +130,9 @@ function RequestItem({ r, game, time, estimate }: { r: Request; game: GameContro
         Angebot Kunde: <strong>{r.gabe ? `${(r.priceHa / r.gabe).toLocaleString('de-DE', { maximumFractionDigits: 2 })} €/m³` : `${r.priceHa.toLocaleString('de-DE')} €/ha`}</strong> = {eur(r.priceHa * r.areaHa)}
         {r.gabe ? <small className="hint"> · {r.gabe} m³/ha = {Math.round(r.areaHa * r.gabe).toLocaleString('de-DE')} m³ ab Güllelager des Kunden</small> : null}
       </div>
+      {r.competitorPriceHa !== undefined && r.status === 'offen' && (
+        <small className="hint">Konkurrenz bietet etwa {r.gabe ? `${(r.competitorPriceHa / r.gabe).toLocaleString('de-DE', { maximumFractionDigits: 2 })} €/m³` : `${Math.round(r.competitorPriceHa).toLocaleString('de-DE')} €/ha`} – deutlich darüber verliert man den Auftrag</small>
+      )}
       {r.status === 'offen' && <EstimateLine e={estimate} latest={r.latest} />}
       {r.status === 'offen' ? (
         <>
@@ -758,6 +761,54 @@ export function FleetTab({ status, game }: { status: GameStatus; game: GameContr
       </ul>
       <p className="hint">Zustand sinkt mit den Betriebsstunden, schneller bei überfälliger Wartung. Schlechter Zustand und überfällige Wartung erhöhen das Pannenrisiko. Bei einer Panne kommt der Service des nächsten Markenhändlers – je weiter weg, desto länger dauert es.</p>
       {fb.msg && <p className="feedback">{fb.msg}</p>}
+    </>
+  );
+}
+
+/** Wettbewerb (Phase 5): Ruf, Stammkunden, Konkurrenten mit Preisniveau und Preiskampf */
+export function CompetitionTab({ status, game }: { status: GameStatus; game: GameController | null }) {
+  const b = status.business;
+  if (!b) return <p className="hint">–</p>;
+  const m = b.market;
+  const quote = m.won + m.lost > 0 ? Math.round((m.won / (m.won + m.lost)) * 100) : 0;
+  const sizeName = { gross: 'groß', mittel: 'mittel', klein: 'klein' } as const;
+  return (
+    <>
+      <h2>Ruf</h2>
+      <div className="rep-bar" data-testid="reputation"><div style={{ width: `${m.reputation}%` }} /><span>{Math.round(m.reputation)} / 100</span></div>
+      <dl>
+        <dt>Aufträge gewonnen</dt><dd>{m.won}</dd>
+        <dt>an die Konkurrenz verloren</dt><dd>{m.lost}{m.won + m.lost > 0 ? ` (Quote ${quote} %)` : ''}</dd>
+        <dt>Stammkunden</dt><dd>{m.loyalFarms.length}</dd>
+      </dl>
+      <p className="hint">Der Ruf steigt mit pünktlich erledigten Aufträgen und zufriedenen Stammkunden, er sinkt bei Verspätungen, Ausfällen und unbeantworteten Anfragen. Ein guter Ruf bringt mehr Anfragen, Empfehlungen und etwas mehr Spielraum beim Preis.</p>
+      {m.loyalFarms.length > 0 && (
+        <ul className="list">
+          {m.loyalFarms.map((id) => {
+            const f = game?.farmById(id);
+            return f ? <li key={id}><button className="link" onClick={() => game?.flyToFarm(id)}>{f.name}</button><small>Stammkunde · Zufriedenheit {f.satisfaction} %</small></li> : null;
+          })}
+        </ul>
+      )}
+      <h2>Konkurrenz ({m.competitors.length})</h2>
+      <table className="tbl" data-testid="competitors">
+        <thead><tr><th>Lohnunternehmen</th><th>Ort</th><th>Größe</th><th>Preise</th><th>gewonnen</th></tr></thead>
+        <tbody>
+          {m.competitors.map((c) => {
+            const war = c.warUntil > b.time;
+            return (
+              <tr key={c.id} className={war ? 'war' : ''}>
+                <td>{c.name}</td>
+                <td>{c.town}</td>
+                <td>{sizeName[c.size]}</td>
+                <td className={war ? 'neg' : ''}>{Math.round((c.priceLevel * (war ? 1 - c.warCut : 1) - 1) * 100) >= 0 ? '+' : ''}{Math.round((c.priceLevel * (war ? 1 - c.warCut : 1) - 1) * 100)} %{war ? ` (Preiskampf bis ${fmtDay(c.warUntil)})` : ''}</td>
+                <td>{c.won}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <p className="hint">Preise relativ zum Marktpreis. Große Anbieter häckseln auch, mittlere fahren Gülle, kleine nur Bodenbearbeitung. Im Preiskampf vergleichen Kunden im Umkreis von 25 km genauer; unzufriedene Kunden wechseln dann eher.</p>
     </>
   );
 }

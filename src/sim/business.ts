@@ -13,6 +13,7 @@ import {
   serviceInterval, START_OFFERS, START_YEAR, type Company, type Loan, type MachineType, type Employee, type Machine, type MarketOffer, type Repair, type Skill,
 } from './economy';
 import { CATALOG, DEALERS, dealersFor, type CatalogModel } from '../data/catalog';
+import { COMPETITOR_RANGE_KM, PRICE_WAR_KM, generateCompetitors, kmBetween, type Competitor } from './market';
 import {
   DIESEL_MEAN, DIESEL_START, LEASE_BASE_RATE, LIABILITY_PER_YEAR, OVERDRAFT_RATE, RATING_SURCHARGE,
   afaYears, annuity, bookValue, insurancePerYear, leaseRate, loanBaseRate, profitTax, rating,
@@ -136,6 +137,9 @@ export interface Request {
   gabe?: number;
   /** Häckseln: nur Häcksler oder Komplettkette */
   chain?: 'haecksler' | 'komplett';
+  /** bestes Konkurrenzangebot (€/ha) und Anbieter (MK-02) */
+  competitorPriceHa?: number;
+  competitorId?: number;
   createdAt: number;
   /** Antwortfrist */
   replyBy: number;
@@ -316,6 +320,14 @@ export class Business {
   readonly staffRequests: StaffRequest[] = [];
   /** Zeitarbeitsfirma: verfügbare Leiharbeiter (Anfrage morgens, ab nächstem Tag im Einsatz) */
   readonly agencyPool: Applicant[] = [];
+  /** Markt (Phase 5): Konkurrenten, Ruf, Statistik gewonnen/verloren */
+  readonly competitors: Competitor[];
+  reputation = 50;
+  won = 0;
+  lost = 0;
+  private marketRng: Rng;
+  /** Hofstelle eines Betriebs als [lon, lat] (setzt der Rechenkern) */
+  nodeLonLat: ((node: number) => [number, number]) | null = null;
   /** Dieselpreis netto €/l (WF-07), schwankt täglich */
   dieselPrice = DIESEL_START;
   /** Jahresabschlüsse und laufende Sonderposten des aktuellen Jahres */
@@ -348,6 +360,9 @@ export class Business {
     readonly fields: FieldSet | null,
   ) {
     this.rng = new Rng(seed ^ 0xb051e55);
+    // eigener Zufallsstrom für den Markt, damit die übrigen Abläufe unverändert bleiben
+    this.marketRng = new Rng(seed ^ 0x3a7c0e);
+    this.competitors = generateCompetitors(() => this.marketRng.next());
   }
 
   /** Zustand für den Spielstand (ohne Betriebe/Felder, die aus dem Seed entstehen) */
@@ -369,6 +384,7 @@ export class Business {
       staffRequests: this.staffRequests,
       agencyPool: this.agencyPool,
       dieselPrice: this.dieselPrice,
+      market: { rng: this.marketRng.getState(), competitors: this.competitors, reputation: this.reputation, won: this.won, lost: this.lost },
       years: this.years,
       yearSaleGain: this.yearSaleGain,
       yearAfaSold: this.yearAfaSold,
@@ -395,6 +411,13 @@ export class Business {
     put(this.staffRequests, s.staffRequests ?? []);
     put(this.agencyPool, s.agencyPool ?? []);
     this.dieselPrice = s.dieselPrice ?? DIESEL_START;
+    if (s.market) {
+      this.marketRng.setState(s.market.rng);
+      put(this.competitors, s.market.competitors);
+      this.reputation = s.market.reputation;
+      this.won = s.market.won;
+      this.lost = s.market.lost;
+    }
     put(this.years, s.years ?? []);
     this.yearSaleGain = s.yearSaleGain ?? 0;
     this.yearAfaSold = s.yearAfaSold ?? 0;
@@ -437,6 +460,115 @@ export class Business {
       farm.rivalUntil = time + (RIVAL_MIN_DAYS + this.rng.int(RIVAL_EXTRA_DAYS + 1)) * 1440;
       for (const r of this.requests) if (r.farmId === farmId && r.status === 'offen') r.status = 'abgelaufen';
       this.emit(time, 'warnung', `${farm.name} ist unzufrieden und arbeitet ab jetzt mit einem anderen Lohnunternehmen. In einigen Wochen kann man es mit kleinen Aufträgen wieder versuchen.`, farmId);
+    }
+  }
+
+  // ---------- Markt (Phase 5) ----------
+
+  /** Stammkunde (MK-03): mindestens 3 erledigte Aufträge und zufrieden */
+  isLoyal(farmId: number): boolean {
+    const f = this.farms?.farms[farmId];
+    return !!f && (f.orderCount ?? 0) >= 3 && f.satisfaction >= 70;
+  }
+
+  private farmLonLat(farmId: number): [number, number] | null {
+    const f = this.farms?.farms[farmId];
+    return f && this.nodeLonLat ? this.nodeLonLat(f.homeNode) : null;
+  }
+
+  /** Marktpreis je ha für eine Dienstleistung (ohne Konkurrenzaufschlag) */
+  private marketPriceHa(service: Service, gabe?: number, chain?: 'haecksler' | 'komplett'): number {
+    if (gabe) return SERVICE_BASE_PRICE.guelle * gabe;
+    if (chain) return CHOP_PRICE_HA[chain];
+    return SERVICE_BASE_PRICE[service];
+  }
+
+  /** Bestes Angebot der Konkurrenz für einen Betrieb (Preisniveau, Preiskampf, Anfahrt) */
+  competitorOffer(farmId: number, service: Service, time: number, gabe?: number, chain?: 'haecksler' | 'komplett'): { priceHa: number; id: number } | null {
+    const pos = this.farmLonLat(farmId);
+    if (!pos) return null;
+    const base = this.marketPriceHa(service, gabe, chain);
+    let best: { priceHa: number; id: number } | null = null;
+    for (const c of this.competitors) {
+      if (!c.services.includes(service)) continue;
+      const km = kmBetween(c.lonLat, pos);
+      if (km > COMPETITOR_RANGE_KM + 15) continue;
+      const war = c.warUntil > time ? c.warCut : 0;
+      const price = base * c.priceLevel * (1 - war) * (1 + Math.max(0, km - 15) * 0.004);
+      if (!best || price < best.priceHa) best = { priceHa: Math.round(price * 100) / 100, id: c.id };
+    }
+    return best;
+  }
+
+  /** Preiskampf in der Nähe des Betriebs? (MK-04) */
+  private priceWarNear(farmId: number, time: number): Competitor | null {
+    const pos = this.farmLonLat(farmId);
+    if (!pos) return null;
+    for (const c of this.competitors) if (c.warUntil > time && kmBetween(c.lonLat, pos) <= PRICE_WAR_KM) return c;
+    return null;
+  }
+
+  private changeReputation(delta: number) {
+    this.reputation = Math.max(0, Math.min(100, Math.round((this.reputation + delta) * 10) / 10));
+  }
+
+  /** Auftrag an die Konkurrenz verloren (Statistik, Meldungstext) */
+  private lostTo(r: Request): string {
+    this.lost++;
+    const c = this.competitors.find((x) => x.id === r.competitorId);
+    if (c) c.won++;
+    return c ? ` Den Auftrag bekommt ${c.name} (${c.town}).` : '';
+  }
+
+  /** Täglich: Preiskämpfe starten/enden, Abwanderung, Empfehlungen (MK-03 bis MK-05) */
+  private marketDaily(time: number) {
+    const r = this.marketRng;
+    for (const c of this.competitors) {
+      if (c.warUntil > 0 && c.warUntil <= time) {
+        c.warUntil = 0;
+        c.warCut = 0;
+        this.emit(time, 'info', `${c.name} (${c.town}) beendet den Preiskampf.`);
+      }
+    }
+    // im Mittel alle drei Monate ein Preiskampf irgendwo
+    if (r.next() < 1 / 90) {
+      const free = this.competitors.filter((c) => c.warUntil === 0 && c.size !== 'klein');
+      if (free.length) {
+        const c = free[r.int(free.length)];
+        c.warCut = Math.round((0.1 + r.next() * 0.1) * 100) / 100;
+        c.warUntil = time + (30 + r.int(31)) * 1440;
+        this.emit(time, 'warnung', `Preiskampf: ${c.name} (${c.town}) senkt die Preise um ${Math.round(c.warCut * 100)} % bis ${fmtDay(c.warUntil)}. Kunden im Umkreis von ${PRICE_WAR_KM} km vergleichen jetzt genauer.`);
+      }
+    }
+    const fs = this.farms;
+    if (!fs) return;
+    // Abwanderung im Preiskampf: unzufriedene Nicht-Stammkunden in der Nähe
+    for (const f of fs.farms) {
+      if (!f.known || f.rivalUntil > time || this.isLoyal(f.id) || f.satisfaction >= 65) continue;
+      const war = this.priceWarNear(f.id, time);
+      if (war && r.next() < 0.004) {
+        f.rivalUntil = war.warUntil + 30 * 1440;
+        war.won++;
+        this.emit(time, 'warnung', `${f.name} wechselt im Preiskampf zu ${war.name}.`, f.id);
+      }
+    }
+    // Empfehlungen bei gutem Ruf (monatlich): ein unbekannter Nachbar eines Stammkunden meldet sich
+    if (gameDate(time).day === 15 && this.reputation >= 60 && r.next() < (this.reputation - 50) / 80) {
+      const loyal = fs.farms.filter((f) => this.isLoyal(f.id));
+      const unknown = fs.farms.filter((f) => !f.known && f.rivalUntil <= time);
+      if (loyal.length && unknown.length && this.nodeLonLat) {
+        const ref = loyal[r.int(loyal.length)];
+        const pos = this.nodeLonLat(ref.homeNode);
+        let best = unknown[0], bd = Infinity;
+        for (const u of unknown) { const d = kmBetween(this.nodeLonLat(u.homeNode), pos); if (d < bd) { bd = d; best = u; } }
+        best.known = true;
+        this.emit(time, 'info', `Empfehlung: ${best.name} hat von ${ref.name} gehört und meldet sich – jetzt im Adressbuch.`, best.id);
+      }
+    }
+    // Ruf: zufriedene Stammkunden stärken ihn langsam
+    if (gameDate(time).day === 1) {
+      const loyalCount = fs.farms.filter((f) => this.isLoyal(f.id)).length;
+      this.changeReputation(Math.min(3, loyalCount * 0.3));
     }
   }
 
@@ -483,7 +615,10 @@ export class Business {
     let pick = this.rng.next() * total;
     let sv = season[0];
     for (const x of season) { pick -= x.weight; if (pick < 0) { sv = x; break; } }
-    if (this.rng.next() >= (trial ? chance * 0.5 : chance) * Math.min(1, sv.weight)) return null;
+    // Ruf (MK-05), Stammkunde (MK-03) und Preiskampf in der Nähe (MK-04) wirken auf die Häufigkeit
+    let mult = (0.7 + (0.6 * this.reputation) / 100) * (this.isLoyal(farmId) ? 1.5 : 1);
+    if (this.priceWarNear(farmId, time) && !this.isLoyal(farmId)) mult *= 0.6;
+    if (this.rng.next() >= (trial ? chance * 0.5 : chance) * Math.min(1, sv.weight) * mult) return null;
     const busy = this.busyFields();
     const cand = farm.fields.filter((i) => {
       if (busy.has(i) || f.areaHa[i] > (trial ? TRIAL_MAX_HA : MAX_REQUEST_FIELD_HA)) return false;
@@ -509,6 +644,10 @@ export class Business {
       : chain
         ? Math.round((CHOP_PRICE_HA[chain] * (0.92 + this.rng.next() * 0.16)) / 5) * 5
         : Math.round(SERVICE_BASE_PRICE[sv.service] * (0.92 + this.rng.next() * 0.16) * 2) / 2;
+    // Kunde kennt das Angebot der Konkurrenz und bietet höchstens etwas darüber (Stammkunden mehr)
+    const comp = this.competitorOffer(farmId, sv.service, time, gabe, chain);
+    let offerHa = priceHa;
+    if (comp) offerHa = Math.min(priceHa, Math.round(comp.priceHa * (this.isLoyal(farmId) ? 1.06 : 1.02) * 2) / 2);
     const req: Request = {
       id: this.nextId++,
       farmId,
@@ -517,11 +656,13 @@ export class Business {
       areaHa: Math.round(ha * 100) / 100,
       earliest: time,
       latest: time + (chain ? 3 + this.rng.int(5) : 5 + this.rng.int(8)) * 1440,
-      priceHa,
+      priceHa: offerHa,
+      competitorPriceHa: comp?.priceHa,
+      competitorId: comp?.id,
       gabe,
       chain,
       createdAt: time,
-      replyBy: time + REPLY_MINUTES,
+      replyBy: time + (this.isLoyal(farmId) ? 2 * REPLY_MINUTES : REPLY_MINUTES),
       status: 'offen',
       channel,
     };
@@ -564,18 +705,20 @@ export class Business {
     this.arriveDeliveries(time);
     this.partsDaily(time);
     this.financeDaily(time);
+    this.marketDaily(time);
     // Auftrag steht wegen Panne: Kunde wartet und wird unzufriedener (MZ-07)
     for (const o of this.orders) {
       if (o.status !== 'läuft') continue;
       const down = this.company.machines.some((m) => (m.id === o.tractorId || m.id === o.implementId) && (m.downUntil ?? 0) > time);
-      if (down) this.satisfy(o.farmId, -1, time);
+      if (down) { this.satisfy(o.farmId, -1, time); this.changeReputation(-0.5); }
     }
     this.checkInvoices(time);
     for (const r of this.requests) {
       if (r.status === 'offen' && time >= r.replyBy) {
         r.status = 'abgelaufen';
-        this.emit(time, 'warnung', `${this.farmName(r.farmId)} hat sich anderweitig umgesehen (keine Antwort).`, r.farmId);
+        this.emit(time, 'warnung', `${this.farmName(r.farmId)} hat sich anderweitig umgesehen (keine Antwort).${this.lostTo(r)}`, r.farmId);
         this.satisfy(r.farmId, -5, time);
+        this.changeReputation(-1);
       }
     }
     const fs = this.farms;
@@ -599,7 +742,7 @@ export class Business {
     if (!r || r.status !== 'offen') return 'Anfrage nicht mehr offen';
     if (action === 'reject') {
       r.status = 'abgelehnt';
-      this.emit(time, 'info', `Anfrage von ${this.farmName(r.farmId)} abgelehnt.`, r.farmId);
+      this.emit(time, 'info', `Anfrage von ${this.farmName(r.farmId)} abgelehnt.${this.lostTo(r)}`, r.farmId);
       this.satisfy(r.farmId, -2, time);
       return 'abgelehnt';
     }
@@ -607,18 +750,24 @@ export class Business {
     if (action === 'counter') {
       const p = Math.max(1, priceHa ?? r.priceHa);
       const ratio = p / r.priceHa;
-      // +10 % → 60 % Zusage, +25 % → keine Zusage; günstiger nimmt jeder
-      const chance = ratio <= 1 ? 1 : Math.max(0, 1 - (ratio - 1) * 4);
+      // Obergrenze: Konkurrenzangebot + Aufschlag für Stammkunden und guten Ruf (MK-02, MK-03, MK-05)
+      const acceptable = r.competitorPriceHa !== undefined
+        ? r.competitorPriceHa * (1 + (this.isLoyal(r.farmId) ? 0.08 : 0) + this.reputation / 1000)
+        : r.priceHa * 1.25;
+      // +10 % → 60 % Zusage, +25 % → keine Zusage; günstiger nimmt jeder; über der Obergrenze keiner
+      let chance = ratio <= 1 ? 1 : Math.max(0, 1 - (ratio - 1) * 4);
+      if (p > r.priceHa) chance = Math.min(chance, Math.max(0, (acceptable - p) / Math.max(0.5, acceptable - r.priceHa)));
       if (this.rng.next() >= chance) {
         r.status = 'abgelehnt';
         this.satisfy(r.farmId, -3, time);
-        this.emit(time, 'warnung', `${this.farmName(r.farmId)} lehnt ${fmtEur(p)}/ha ab und vergibt den Auftrag anderweitig.`, r.farmId);
+        this.emit(time, 'warnung', `${this.farmName(r.farmId)} lehnt ${fmtEur(p)}/ha ab.${this.lostTo(r)}`, r.farmId);
         return 'Kunde lehnt ab';
       }
       if (ratio > 1) this.satisfy(r.farmId, -1, time);
       price = p;
     }
     r.status = 'angenommen';
+    this.won++;
     const o: Order = {
       id: this.nextId++,
       requestId: r.id,
@@ -1246,6 +1395,13 @@ export class Business {
       const onTime = time <= o.latest;
       this.emit(time, 'auftrag', `Auftrag ${this.farmName(o.farmId)} fertig${onTime ? ', pünktlich' : ', verspätet'} (${fmtHa(o.areaHa)}).`, o.farmId);
       this.satisfy(o.farmId, onTime ? 5 : -10, time);
+      this.changeReputation(onTime ? 1.5 : -3);
+      const farm = this.farms?.farms[o.farmId];
+      if (farm) {
+        const wasLoyal = this.isLoyal(farm.id);
+        farm.orderCount = (farm.orderCount ?? 0) + 1;
+        if (!wasLoyal && this.isLoyal(farm.id)) this.emit(time, 'info', `${farm.name} ist jetzt Stammkunde: fragt öfter an, gibt mehr Zeit für die Antwort und zahlt für gute Arbeit etwas mehr.`, farm.id);
+      }
       this.issueInvoice(o, time);
     }
   }

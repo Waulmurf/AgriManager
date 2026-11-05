@@ -621,3 +621,37 @@ Schritte:
 - **Später:** Mannschaftsfahrten mit dem Kleinbus, Grasernte (Pickup), Walzschlepper als
   Alternative zum Radlader, Silage-Qualität nach Verdichtung.
 
+## Phase 5: Markt und Konkurrenz (ab 5. Nov. 2026, umgesetzt)
+
+- **Konkurrenten (MK-01):** 11 erfundene Lohnunternehmen an echten Orten (`src/sim/market.ts`),
+  nach der Festlegung in `docs/anforderungen.md`.
+  - 2 große: Bodenbearbeitung, Gülle, Häckseln, Preisniveau etwa +4 %.
+  - 5 mittlere: Bodenbearbeitung und Gülle, etwa ±0.
+  - 4 kleine: nur Bodenbearbeitung, etwa −8 % (oft Nebenerwerb).
+  - Je Anbieter ±4 % Streuung. Sie sind nicht als Fahrzeuge simuliert, sondern bieten auf die
+    Anfragen mit. Auf der Karte stehen sie als graue Punkte, im Preiskampf rot.
+- **Wer den Auftrag bekommt (MK-02):** Zu jeder Anfrage gibt es das beste Konkurrenzangebot
+  (Marktpreis × Preisniveau × Preiskampf × Anfahrt, ab 15 km +0,4 % je km, Anbieter bis 45 km
+  entfernt).
+  - Der Kunde bietet höchstens 2 % darüber, Stammkunden 6 %.
+  - Gegenangebote nimmt er nur bis zum Konkurrenzangebot + 8 % (Stammkunde) + Ruf/10 % an.
+  - Abgelehnte, zu teure und unbeantwortete Anfragen gehen an den Konkurrenten
+    (Statistik gewonnen/verloren).
+- **Stammkunden (MK-03):** ab 3 erledigten Aufträgen und mindestens 70 % Zufriedenheit. Sie
+  fragen 1,5-mal so oft an, geben doppelt so lange Zeit für die Antwort und bleiben im
+  Preiskampf.
+- **Preiskampf (MK-04):** Im Mittel alle drei Monate senkt ein großer oder mittlerer Anbieter für
+  30–60 Tage die Preise um 10–20 %.
+  - Im Umkreis von 25 km fragen Nicht-Stammkunden seltener an (×0,6).
+  - Unzufriedene Kunden (unter 65 %) wechseln mit 0,4 % je Tag zum Konkurrenten.
+- **Ruf (MK-05), Start 50 von 100:**
+  - +1,5 je pünktlichem Auftrag, −3 je verspätetem.
+  - −1 je unbeantworteter Anfrage, −0,5 je Tag Stillstand durch Panne.
+  - Monatlich +0,3 je Stammkunde, höchstens +3.
+  - Wirkung: Anfragehäufigkeit ×0,7 bis ×1,3, mehr Spielraum beim Preis. Ab 60 meldet sich
+    monatlich gelegentlich ein Nachbar eines Stammkunden auf Empfehlung.
+- **Anzeige:** neuer Reiter Wettbewerb (Ruf, Quote, Stammkunden, Konkurrenten mit Preisen und
+  Preiskampf). An jeder Anfrage steht das Konkurrenzangebot.
+- **Später:** Konkurrenten mit echtem Fuhrpark und Auslastung (in der Ernte ausgebucht),
+  Abwerben von Personal durch bestimmte Konkurrenten, Übernahme kleiner Anbieter.
+

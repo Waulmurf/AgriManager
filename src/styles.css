@@ -147,3 +147,7 @@ html, body, #root { margin: 0; height: 100%; }
 .weather .wx-bad { color: #ffb38a; }
 .weather .wx-ok { color: #b9e3a0; }
 .board-day.wet { background: rgba(80, 120, 180, 0.12); }
+.rep-bar { position: relative; height: 18px; background: #ece9df; border-radius: 9px; overflow: hidden; margin: 4px 0 8px; }
+.rep-bar > div { height: 100%; background: linear-gradient(90deg, #b5512b, #c9a227 50%, #5b7f3a); }
+.rep-bar > span { position: absolute; inset: 0; text-align: center; font-size: 11px; line-height: 18px; font-weight: 600; }
+.tbl tr.war td { background: rgba(181, 81, 43, 0.08); }
