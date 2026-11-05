@@ -7,6 +7,7 @@ import type { JobEstimate } from '../sim/engine';
 import { MECHANIC_MIN, SKILLS, roleName, employerHourCost, employerMonthCost, machineValue, marketWage, takeOverFee, type Employee, type Machine } from '../sim/economy';
 import { SERVICE_NAMES, fmtDay, fmtTime, partsText, CHECK_COST, type Invoice, type Request, type Order } from '../sim/business';
 import { CATALOG, DEALERS } from '../data/catalog';
+import { leaseRate } from '../sim/finance';
 import { formatGameTime } from '../game/clock';
 
 export const eur = (v: number) => v.toLocaleString('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
@@ -513,7 +514,12 @@ export function MarketTab({ status, game }: { status: GameStatus; game: GameCont
                 </div>
                 <small>{TYPE_NAMES[m.type]} · {machineSpecs(m)} · Liste {eur(m.newPrice)} · Lieferzeit etwa {m.deliveryWeeks} Wochen</small>
                 <div className="card-actions">
-                  <button onClick={() => send({ kind: 'order', dealerId: dealer, modelKey: m.key })} data-testid="order-new">Bestellen</button>
+                  <button onClick={() => send({ kind: 'order', dealerId: dealer, modelKey: m.key })} data-testid="order-new">Kaufen</button>
+                  {[36, 48, 60].map((mo) => {
+                    const price = Math.round((m.newPrice * (1 - disc)) / 100) * 100;
+                    const rate = leaseRate(price, b.leaseRates[mo] ?? 0.059, mo);
+                    return <button key={mo} onClick={() => send({ kind: 'order', dealerId: dealer, modelKey: m.key, leaseMonths: mo })} title={`Restwert ${eur(rate.residual)}`}>Leasing {mo} M · {eur(rate.monthly)}/M</button>;
+                  })}
                 </div>
               </li>
             ))}
@@ -607,6 +613,12 @@ export function FleetTab({ status, game }: { status: GameStatus; game: GameContr
                 {(m.warrantyUntil ?? 0) > b.time ? ` · Gewährleistung bis ${fmtDay(m.warrantyUntil!)}` : ''}
               </small>
               {m.saleAt !== undefined && <small className="hint">inseriert – Käufer meldet sich bis etwa {fmtDay(m.saleAt)}</small>}
+              {m.lease && (
+                <div>
+                  <small className="hint">Leasing {eur(m.lease.monthly)}/Monat bis {fmtDay(m.lease.endsAt)} · Restwert {eur(m.lease.residual)} · am Ende {m.lease.buyout ? 'übernehmen' : 'zurückgeben'}</small>
+                  <button onClick={() => send({ kind: 'leaseBuyout', machineId: m.id, buyout: !m.lease!.buyout })}>{m.lease.buyout ? 'Doch zurückgeben' : 'Am Ende übernehmen'}</button>
+                </div>
+              )}
               {m.repair && <RepairChoice m={m} status={status} send={send} />}
               <div className="card-actions">
                 <button onClick={() => send({ kind: 'service', machineId: m.id })} disabled={busy || down} data-testid="service">Wartung</button>
@@ -725,7 +737,10 @@ export function VehicleMenu({ status, game }: { status: GameStatus; game: GameCo
   );
 }
 
-const CATEGORIES = ['Rechnung', 'Diesel', 'Maschinenkauf', 'Personal', 'Werkstatt', 'Sonstiges'] as const;
+/** Spalten der Monatsübersicht; Finanzierung = Kredit, Tilgung, Zinsen, Leasing; Abgaben = Versicherung, Steuern */
+const CATEGORIES = ['Rechnung', 'Diesel', 'Personal', 'Werkstatt', 'Maschinenkauf', 'Finanzierung', 'Abgaben', 'Sonstiges'] as const;
+const CATEGORY_GROUP: Record<string, string> = { Kredit: 'Finanzierung', Tilgung: 'Finanzierung', Zinsen: 'Finanzierung', Leasing: 'Finanzierung', Versicherung: 'Abgaben', Steuern: 'Abgaben' };
+const pct = (v: number) => `${(v * 100).toLocaleString('de-DE', { maximumFractionDigits: 2 })} %`;
 
 /** Finanzen: Konto, Monatsübersicht, Rechnungen, Auswertung je Auftrag (WF-08, WF-09) */
 function invoiceState(i: Invoice): string {
@@ -735,6 +750,50 @@ function invoiceState(i: Invoice): string {
     case 'überfällig': return i.remindedAt !== undefined ? `überfällig, erinnert am ${fmtDay(i.remindedAt)}` : `überfällig – Kunden bis ${fmtDay(i.contactBy!)} kontaktieren (Anruf oder Besuch)`;
     default: return `zahlbar bis ${fmtDay(i.dueAt)}`;
   }
+}
+
+/** Darlehen (WF-01): aufnehmen, Übersicht, Sondertilgung */
+function LoanPanel({ status, game }: { status: GameStatus; game: GameController | null }) {
+  const b = status.business!;
+  const c = status.company!;
+  const fb = useFeedback();
+  const [amount, setAmount] = useState('50000');
+  const [years, setYears] = useState(5);
+  const [extra, setExtra] = useState('5000');
+  const send = async (cmd: Parameters<GameController['command']>[0]) => fb.show(await game!.command(cmd));
+  const loans = c.loans ?? [];
+  return (
+    <>
+      <h2>Darlehen</h2>
+      <dl>
+        <dt>Kreditrahmen</dt><dd>{eur(c.creditLimit)} · frei {eur(c.creditLimit - c.loan)}</dd>
+        <dt>Offene Darlehen</dt><dd>{eur(c.loan)}</dd>
+      </dl>
+      {loans.length > 0 && (
+        <ul className="list" data-testid="loans">
+          {loans.map((l) => (
+            <li key={l.id}>
+              <span>{eur(l.principal)} · {pct(l.rate)} · Rest {eur(l.remaining)}</span>
+              <small className="hint">Rate {eur(l.monthly)}/Monat · noch etwa {Math.ceil(l.remaining / Math.max(1, l.monthly - (l.remaining * l.rate) / 12))} Monate</small>
+              <span className="counter">
+                <input value={extra} onChange={(e) => setExtra(e.target.value)} aria-label="Sondertilgung" style={{ width: 70 }} />
+                <button onClick={() => send({ kind: 'repayLoan', loanId: l.id, amount: Number(extra) })}>Sondertilgung</button>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="card-actions">
+        <input value={amount} onChange={(e) => setAmount(e.target.value)} aria-label="Darlehensbetrag" style={{ width: 80 }} data-testid="loan-amount" />
+        <select value={years} onChange={(e) => setYears(Number(e.target.value))} aria-label="Laufzeit">
+          {[3, 5, 8, 10].map((y) => <option key={y} value={y}>{y} Jahre · {pct(b.loanRates[y] ?? 0)}</option>)}
+        </select>
+        <button onClick={() => send({ kind: 'takeLoan', amount: Number(amount), years })} data-testid="take-loan">Darlehen aufnehmen</button>
+      </div>
+      <small className="hint">Annuität mit monatlicher Rate. Zins nach Laufzeit und Bonität (A–D); der Kreditrahmen richtet sich nach dem Eigenkapital. Sondertilgung ohne Gebühr.</small>
+      {fb.msg && <p className="feedback">{fb.msg}</p>}
+    </>
+  );
 }
 
 export function FinanceTab({ status, game }: { status: GameStatus; game: GameController | null }) {
@@ -748,7 +807,8 @@ export function FinanceTab({ status, game }: { status: GameStatus; game: GameCon
     const t = formatGameTime(l.time).date; // „Mo, 01.03.2027“
     const key = t.slice(-7); // „03.2027“
     const m = months.get(key) ?? {};
-    m[l.category] = (m[l.category] ?? 0) + l.amount;
+    const cat = CATEGORY_GROUP[l.category] ?? l.category;
+    m[cat] = (m[cat] ?? 0) + l.amount;
     months.set(key, m);
   }
   const openInv = b.invoices.filter((i) => i.status === 'offen' || i.status === 'überfällig');
@@ -758,14 +818,35 @@ export function FinanceTab({ status, game }: { status: GameStatus; game: GameCon
     <>
       <h2>Konto</h2>
       <dl>
-        <dt>Kontostand</dt><dd data-testid="cash-finance">{eur(c.cash)}</dd>
+        <dt>Kontostand</dt><dd data-testid="cash-finance" className={c.cash < 0 ? 'neg' : ''}>{eur(c.cash)}</dd>
+        <dt>Kontokorrent</dt><dd>{eur(c.overdraftLimit ?? 0)} Rahmen · 11 % Zins im Minus</dd>
         <dt>Offene Rechnungen</dt><dd>{eur(openInv.reduce((a, i) => a + i.amount, 0))} ({openInv.length})</dd>
         {lost.length > 0 && <><dt>Forderungsausfall</dt><dd className="neg">{eur(lost.reduce((a, i) => a + i.amount, 0))} ({lost.length})</dd></>}
-        <dt>Kreditrahmen frei</dt><dd>{eur(c.creditLimit - c.loan)}</dd>
+        <dt>Bonität</dt><dd data-testid="rating">{c.rating ?? 'A'} · Eigenkapital {eur(b.balance.equity)} ({b.balance.assets > 0 ? Math.round((b.balance.equity / b.balance.assets) * 100) : 0} %)</dd>
+        <dt>Dieselpreis</dt><dd>{b.dieselPrice.toLocaleString('de-DE', { minimumFractionDigits: 3 })} €/l netto</dd>
+        {b.taxDue && <><dt>Steuern {b.taxDue.year}</dt><dd className="neg">{eur(b.taxDue.amount)} fällig {fmtDay(b.taxDue.at)}</dd></>}
       </dl>
+      <LoanPanel status={status} game={game} />
+      <h2>Laufendes Jahr</h2>
+      <dl data-testid="year-now">
+        <dt>Umsatz</dt><dd>{eur(b.yearNow.revenue)}</dd>
+        <dt>Kosten (ohne Investitionen)</dt><dd>{eur(b.yearNow.expenses)}</dd>
+        <dt>Abschreibung (AfA)</dt><dd>{eur(b.yearNow.afa)}</dd>
+        <dt>Ergebnis vor Steuern</dt><dd className={b.yearNow.profit < 0 ? 'neg' : 'pos'}>{eur(b.yearNow.profit)}</dd>
+      </dl>
+      {b.years.length > 0 && (
+        <table className="tbl" data-testid="years">
+          <thead><tr><th>Jahr</th><th>Umsatz</th><th>Kosten</th><th>AfA</th><th>Gewinn</th><th>Steuern</th></tr></thead>
+          <tbody>
+            {b.years.slice().reverse().map((y) => (
+              <tr key={y.year}><td>{y.year}</td><td>{eur(y.revenue)}</td><td>{eur(y.expenses)}</td><td>{eur(y.afa)}</td><td className={y.profit < 0 ? 'neg' : 'pos'}>{eur(y.profit)}</td><td>{eur(y.tax)}</td></tr>
+            ))}
+          </tbody>
+        </table>
+      )}
       <h2>Monatsübersicht</h2>
       {months.size ? (
-        <table className="tbl">
+        <div className="tbl-wrap"><table className="tbl">
           <thead><tr><th>Monat</th>{CATEGORIES.map((k) => <th key={k}>{k === 'Maschinenkauf' ? 'Maschinen' : k}</th>)}<th>Saldo</th></tr></thead>
           <tbody>
             {[...months.entries()].reverse().map(([m, v]) => {
@@ -779,7 +860,7 @@ export function FinanceTab({ status, game }: { status: GameStatus; game: GameCon
               );
             })}
           </tbody>
-        </table>
+        </table></div>
       ) : (
         <p className="hint">Noch keine Buchungen.</p>
       )}
@@ -808,7 +889,7 @@ export function FinanceTab({ status, game }: { status: GameStatus; game: GameCon
       {fb.msg && <p className="feedback">{fb.msg}</p>}
       <h2>Auswertung je Auftrag</h2>
       {finished.length ? (
-        <table className="tbl">
+        <div className="tbl-wrap"><table className="tbl">
           <thead><tr><th>Kunde</th><th>Erlös</th><th>Diesel</th><th>Maschinen*</th><th>Ergebnis</th></tr></thead>
           <tbody>
             {finished.map((o) => {
@@ -824,11 +905,11 @@ export function FinanceTab({ status, game }: { status: GameStatus; game: GameCon
               ) : null;
             })}
           </tbody>
-        </table>
+        </table></div>
       ) : (
         <p className="hint">Noch keine abgeschlossenen Aufträge.</p>
       )}
-      <p className="hint">* kalkulatorisch: Reparaturkosten Schlepper 8 €/h, Verschleiß Grubber 3 €/ha (Annahmen); Lohn des Chefs nicht eingerechnet.</p>
+      <p className="hint">* kalkulatorisch: Reparaturkosten Schlepper 4 € + 0,50 € je 1.000 Betriebsstunden je Stunde, Verschleiß Grubber 3 €/ha (Annahmen); Lohn des Chefs nicht eingerechnet.</p>
       <h2>Letzte Buchungen</h2>
       <ul className="list">
         {b.ledger.slice(-15).reverse().map((l, i) => (

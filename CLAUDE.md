@@ -75,7 +75,10 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
 - Firmenwagen-Arten (Plätze), Berufe/Skills mit Stufe 0 (`ROLES`, `MACHINE_SKILL`), Pannen mit
   Entscheidung Händler/eigene Werkstatt und Ersatzteillage (`Machine.repair`, `checkRepairs`),
   Verschleißteillager am Hof (`Company.partsStock`, Werkstattwagen an Bord oder am Hof laden).
-- Phase 3 damit komplett → nächste Phase 4 (Wirtschaft: Finanzen, Kredit, Wetter, Jahreslauf).
+- Phase 3 damit komplett.
+- Phase 4 läuft (Schritte in docs/plan.md). Schritt 1 Finanzen fertig: `src/sim/finance.ts` (Annuität,
+  Leasing, AfA, Steuer, Bonität), Darlehen/Kontokorrent/Leasing/Versicherung/Jahresabschluss/Diesel in
+  `business.ts` (`financeDaily`, `closeYear`), Reiter Finanzen.
 
 ## CI (GitHub Actions)
 

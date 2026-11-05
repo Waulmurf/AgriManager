@@ -6,6 +6,7 @@
  * an die Oberfläche, neue Routen einmalig mit Geometrie.
  */
 import { DEALERS } from '../data/catalog';
+import { LEASE_BASE_RATE, RATING_SURCHARGE, loanBaseRate } from './finance';
 import { CHEF_MAX_MINUTES, Simulation, type RouteGeom } from './engine';
 import { parseRoadGraph, unproject, type RoadGraph } from './roadgraph';
 import { parseFields } from './fields';
@@ -124,6 +125,16 @@ function sendBusiness(force = false) {
     machineValues: Object.fromEntries(sim.company.machines.map((m) => [m.id, b.machineValueNow(m, sim!.time)])),
     busyMachines: sim.busyMachineIds(),
     plan: sim.planBoard(),
+    dieselPrice: b.dieselPrice,
+    yearNow: (() => {
+      const f = b.yearFigures(b.yearStart(sim!.time), sim!.time + 1);
+      return { ...f, profit: f.revenue - f.expenses - f.afa };
+    })(),
+    years: b.years.map((y) => ({ ...y })),
+    taxDue: b.taxDue ? { ...b.taxDue } : null,
+    balance: b.balance(sim.time),
+    loanRates: Object.fromEntries([3, 5, 8, 10].map((y) => [y, loanBaseRate(y) + RATING_SURCHARGE[sim!.company.rating ?? 'A']])),
+    leaseRates: Object.fromEntries([36, 48, 60].map((m) => [m, LEASE_BASE_RATE + RATING_SURCHARGE[sim!.company.rating ?? 'A']])),
     rivalFarms,
     trialFarms,
     knownFarms: known,

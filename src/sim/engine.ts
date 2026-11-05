@@ -371,6 +371,7 @@ export class Simulation {
       if (this.queue.length !== before) this.business.warn(this.time, 'Geplante Aufgaben ausgeschiedener Mitarbeiter wurden gestrichen.');
       const inUse = new Set(this.company.machines.filter((m) => this.machineBusy(m.id)).map((m) => m.id));
       this.business.completeSales(this.time, inUse);
+      this.business.endLeases(this.time, inUse);
       this.syncPlayerVehicles(); // Lieferungen und Verkäufe
     }
     // Arbeitszeit je Fahrer: zählt, solange er unterwegs ist (nicht im Feierabend)
@@ -1071,7 +1072,13 @@ export class Simulation {
         return r;
       }
       case 'order':
-        return b.order(cmd.dealerId, cmd.modelKey, t);
+        return b.order(cmd.dealerId, cmd.modelKey, t, cmd.leaseMonths);
+      case 'takeLoan':
+        return b.takeLoan(cmd.amount, cmd.years, t);
+      case 'repayLoan':
+        return b.repayLoan(cmd.loanId, cmd.amount, t);
+      case 'leaseBuyout':
+        return b.setLeaseBuyout(cmd.machineId, cmd.buyout);
       case 'check':
         return b.check(cmd.offerId, t);
       case 'sell': {

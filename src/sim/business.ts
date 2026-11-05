@@ -10,9 +10,13 @@ import { Crop, SURNAMES, type FarmSet } from './farms';
 import type { FieldSet } from './fields';
 import {
   EMPLOYER_SV, MIN_WAGE, MONTH_HOURS, ROLES, SKILLS, VACATION_DAYS, marketWage, agencyRate, takeOverFee, AGENCY_MIN_HOURS, XP_MINUTES_PER_LEVEL, baseSkills, gameDate, marketValue,
-  serviceInterval, START_OFFERS, type Company, type Employee, type Machine, type MarketOffer, type Repair, type Skill,
+  serviceInterval, START_OFFERS, START_YEAR, type Company, type Loan, type Employee, type Machine, type MarketOffer, type Repair, type Skill,
 } from './economy';
 import { CATALOG, DEALERS, dealersFor, type CatalogModel } from '../data/catalog';
+import {
+  DIESEL_MEAN, DIESEL_START, LEASE_BASE_RATE, LIABILITY_PER_YEAR, OVERDRAFT_RATE, RATING_SURCHARGE,
+  afaYears, annuity, bookValue, insurancePerYear, leaseRate, loanBaseRate, profitTax, rating,
+} from './finance';
 
 const FIRST_NAMES = [
   'Jan', 'Lars', 'Timo', 'Sven', 'Hauke', 'Malte', 'Jonas', 'Niklas', 'Lukas', 'Finn', 'Ole', 'Tobias',
@@ -138,7 +142,20 @@ export interface Invoice {
   status: InvoiceStatus;
 }
 
-export type LedgerCategory = 'Rechnung' | 'Diesel' | 'Maschinenkauf' | 'Personal' | 'Werkstatt' | 'Sonstiges';
+export type LedgerCategory =
+  | 'Rechnung' | 'Diesel' | 'Maschinenkauf' | 'Personal' | 'Werkstatt'
+  | 'Kredit' | 'Tilgung' | 'Zinsen' | 'Leasing' | 'Versicherung' | 'Steuern' | 'Sonstiges';
+
+/** Jahresabschluss (WF-08) */
+export interface YearResult {
+  year: number;
+  revenue: number;
+  expenses: number;
+  afa: number;
+  saleGain: number;
+  profit: number;
+  tax: number;
+}
 
 /** Bestellte Neumaschine (HM-06: Lieferzeit) */
 export interface Delivery {
@@ -147,6 +164,8 @@ export interface Delivery {
   dealerId: number;
   at: number;
   price: number;
+  /** geleast statt gekauft (Laufzeit in Monaten) */
+  leaseMonths?: number;
 }
 
 /** Werkstattcheck vor dem Kauf auf der Gebrauchtbörse (MZ-11) */
@@ -176,7 +195,7 @@ export type Command =
   | { kind: 'buy'; offerId: number }
   | { kind: 'recall'; vehicle: number }
   | { kind: 'remind'; invoiceId: number }
-  | { kind: 'order'; dealerId: number; modelKey: string }
+  | { kind: 'order'; dealerId: number; modelKey: string; leaseMonths?: number }
   | { kind: 'check'; offerId: number }
   | { kind: 'sell'; machineId: number; mode: 'tradein' | 'privat' }
   | { kind: 'service'; machineId: number }
@@ -189,6 +208,9 @@ export type Command =
   | { kind: 'swapDriver'; vehicle: number; driverId: number; chauffeurId?: number }
   | { kind: 'repair'; machineId: number; mode: 'dealer' | 'own'; mechanicId?: number }
   | { kind: 'buyParts'; amount: number }
+  | { kind: 'takeLoan'; amount: number; years: number }
+  | { kind: 'repayLoan'; loanId: number; amount: number }
+  | { kind: 'leaseBuyout'; machineId: number; buyout: boolean }
   | { kind: 'staffAnswer'; requestId: number; accept: boolean }
   | { kind: 'setWage'; employeeId: number; wage: number }
   | { kind: 'plan'; orderId: number; driverId: number; tractorId: number; implementId: number; notBefore?: number }
@@ -229,6 +251,15 @@ export class Business {
   readonly staffRequests: StaffRequest[] = [];
   /** Zeitarbeitsfirma: verfügbare Leiharbeiter (Anfrage morgens, ab nächstem Tag im Einsatz) */
   readonly agencyPool: Applicant[] = [];
+  /** Dieselpreis netto €/l (WF-07), schwankt täglich */
+  dieselPrice = DIESEL_START;
+  /** Jahresabschlüsse und laufende Sonderposten des aktuellen Jahres */
+  readonly years: YearResult[] = [];
+  private yearSaleGain = 0;
+  private yearAfaSold = 0;
+  private overdraftInterest = 0;
+  /** festgesetzte Steuer, fällig am */
+  taxDue: { amount: number; at: number; year: number } | null = null;
   /** Umsatz je Händler (Rabatt und Werkstattvorrang, HM-07) */
   readonly dealerSpend: Record<number, number> = {};
   /** aufgelaufene Lohnkosten des laufenden Monats (wird am Monatsersten gebucht) */
@@ -272,6 +303,12 @@ export class Business {
       deliveries: this.deliveries,
       staffRequests: this.staffRequests,
       agencyPool: this.agencyPool,
+      dieselPrice: this.dieselPrice,
+      years: this.years,
+      yearSaleGain: this.yearSaleGain,
+      yearAfaSold: this.yearAfaSold,
+      overdraftInterest: this.overdraftInterest,
+      taxDue: this.taxDue,
       dealerSpend: this.dealerSpend,
     };
   }
@@ -292,6 +329,19 @@ export class Business {
     put(this.deliveries, s.deliveries ?? []);
     put(this.staffRequests, s.staffRequests ?? []);
     put(this.agencyPool, s.agencyPool ?? []);
+    this.dieselPrice = s.dieselPrice ?? DIESEL_START;
+    put(this.years, s.years ?? []);
+    this.yearSaleGain = s.yearSaleGain ?? 0;
+    this.yearAfaSold = s.yearAfaSold ?? 0;
+    this.overdraftInterest = s.overdraftInterest ?? 0;
+    this.taxDue = s.taxDue ?? null;
+    // ältere Spielstände: Anschaffungswert zum heutigen Marktwert
+    for (const m of this.company.machines) {
+      if (m.purchasePrice !== undefined) continue;
+      m.purchasePrice = this.machineValueNow(m, 0);
+      m.boughtAt ??= 0;
+      m.afaYears = afaYears(m.type, START_YEAR - m.year);
+    }
     for (const k of Object.keys(this.dealerSpend)) delete this.dealerSpend[Number(k)];
     Object.assign(this.dealerSpend, s.dealerSpend ?? {});
     this.payrollAccrued = s.payrollAccrued ?? 0;
@@ -428,6 +478,7 @@ export class Business {
     this.updateMarket(time);
     this.arriveDeliveries(time);
     this.partsDaily(time);
+    this.financeDaily(time);
     // Auftrag steht wegen Panne: Kunde wartet und wird unzufriedener (MZ-07)
     for (const o of this.orders) {
       if (o.status !== 'läuft') continue;
@@ -505,15 +556,21 @@ export class Business {
   }
 
   /** Gerät kaufen (Startangebote); bezahlt aus dem Konto */
+  /** Verfügbare Mittel: Konto plus Kontokorrentrahmen */
+  canPay(amount: number): boolean {
+    return this.company.cash + (this.company.overdraftLimit ?? 0) >= amount;
+  }
+
   buy(offerId: number, time: number): string {
     const idx = this.offers.findIndex((o) => o.id === offerId);
     if (idx < 0) return 'Angebot nicht mehr verfügbar';
     const o = this.offers[idx];
-    if (this.company.cash < o.price) return 'Nicht genug Geld auf dem Konto';
+    if (!this.canPay(o.price)) return 'Nicht genug Geld (auch nicht mit Kontokorrent) – Kredit aufnehmen?';
     this.company.cash -= o.price;
     const id = this.nextMachineId();
     const m: Machine = {
       id, ...structuredClone(o.machine), boughtAt: time, dealerId: o.dealerId || undefined,
+      purchasePrice: o.price, afaYears: afaYears(o.machine.type, gameDate(time).year - o.machine.year),
       serviceAtH: o.machine.serviceAtH ?? o.machine.hours + serviceInterval(o.machine),
     };
     if (o.warrantyMonths) m.warrantyUntil = time + o.warrantyMonths * 30 * 1440;
@@ -533,6 +590,185 @@ export class Business {
     return id + 1;
   }
 
+  // ---------- Finanzen (Phase 4, Schritt 1) ----------
+
+  private book(time: number, text: string, amount: number, category: LedgerCategory) {
+    const a = Math.round(amount * 100) / 100;
+    this.company.cash = Math.round((this.company.cash + a) * 100) / 100;
+    this.ledger.push({ time, text, amount: a, category });
+  }
+
+  /** Beginn des Kalenderjahres der Spielminute (Spielstart 1. März: erstes Jahr ab Minute 0) */
+  yearStart(time: number): number {
+    const d = gameDate(time);
+    // Tage seit 1. Januar 06:00 rückwärts zählen
+    let t = Math.floor(time / 1440) * 1440;
+    let g = d;
+    while (t > 0 && !(g.month === 1 && g.day === 1)) { t -= 1440; g = gameDate(t); }
+    return t;
+  }
+
+  /** Eigenkapital und Bilanzsumme (vereinfacht) für die Bonität */
+  balance(time: number): { assets: number; debt: number; equity: number; receivables: number; machines: number } {
+    let machines = 0;
+    for (const m of this.company.machines) if (!m.lease) machines += this.machineValueNow(m, time);
+    const receivables = this.invoices.filter((i) => i.status === 'offen' || i.status === 'überfällig').reduce((a, i) => a + i.amount, 0);
+    const cash = this.company.cash;
+    const debt = this.company.loan + Math.max(0, -cash);
+    const assets = Math.max(0, cash) + machines + receivables + (this.company.partsStock ?? 0);
+    return { assets, debt, equity: assets - debt, receivables, machines };
+  }
+
+  /** Darlehen aufnehmen (WF-01): Annuität, Zins nach Laufzeit und Bonität */
+  takeLoan(amount: number, years: number, time: number): string {
+    if (!(amount >= 5_000)) return 'Mindestens 5.000 €';
+    if (![3, 5, 8, 10].includes(years)) return 'Laufzeit 3, 5, 8 oder 10 Jahre';
+    const free = this.company.creditLimit - this.company.loan;
+    if (amount > free) return `Kreditrahmen reicht nicht (frei ${fmtEur(free)})`;
+    const rate = loanBaseRate(years) + RATING_SURCHARGE[this.company.rating ?? 'A'];
+    const months = years * 12;
+    const loan: Loan = { id: this.nextId++, principal: amount, rate, months, monthly: annuity(amount, rate, months), remaining: amount, startAt: time };
+    (this.company.loans ??= []).push(loan);
+    this.company.loan = Math.round((this.company.loan + amount) * 100) / 100;
+    this.book(time, `Darlehen ${years} Jahre zu ${(rate * 100).toLocaleString('de-DE', { maximumFractionDigits: 2 })} %`, amount, 'Kredit');
+    this.version++;
+    this.emit(time, 'info', `Darlehen über ${fmtEur(amount)} ausgezahlt: ${years} Jahre, ${(rate * 100).toLocaleString('de-DE', { maximumFractionDigits: 2 })} %, Rate ${fmtEur(loan.monthly)} im Monat.`);
+    return `ausgezahlt, Rate ${fmtEur(loan.monthly)}/Monat`;
+  }
+
+  /** Sondertilgung (Annahme: ohne Vorfälligkeitsentschädigung) */
+  repayLoan(loanId: number, amount: number, time: number): string {
+    const l = (this.company.loans ?? []).find((x) => x.id === loanId);
+    if (!l) return 'Darlehen unbekannt';
+    const a = Math.min(amount, l.remaining);
+    if (!(a > 0)) return 'Betrag fehlt';
+    if (this.company.cash < a) return 'Nicht genug Geld auf dem Konto';
+    this.book(time, 'Sondertilgung Darlehen', -a, 'Tilgung');
+    l.remaining = Math.round((l.remaining - a) * 100) / 100;
+    this.company.loan = Math.round((this.company.loan - a) * 100) / 100;
+    if (l.remaining <= 0.01) this.company.loans = (this.company.loans ?? []).filter((x) => x !== l);
+    else {
+      // Rate bleibt, Laufzeit verkürzt sich: verbleibende Monate neu berechnen
+      let n = 0, rest = l.remaining;
+      while (rest > 0.01 && n < 600) { rest = rest * (1 + l.rate / 12) - l.monthly; n++; }
+      l.months = n;
+    }
+    this.version++;
+    return `getilgt: ${fmtEur(a)}`;
+  }
+
+  /** Leasingende: übernehmen (Restwert zahlen) oder zurückgeben */
+  setLeaseBuyout(machineId: number, buyout: boolean): string {
+    const m = this.company.machines.find((x) => x.id === machineId);
+    if (!m?.lease) return 'Keine geleaste Maschine';
+    m.lease.buyout = buyout;
+    this.version++;
+    return buyout ? `wird am ${fmtDay(m.lease.endsAt)} für ${fmtEur(m.lease.residual)} übernommen` : 'wird am Ende zurückgegeben';
+  }
+
+  /** Leasingende abwickeln (Engine ruft das täglich mit den belegten Maschinen auf) */
+  endLeases(time: number, inUse: Set<number>): void {
+    for (const m of [...this.company.machines]) {
+      const l = m.lease;
+      if (!l || time < l.endsAt || inUse.has(m.id)) continue;
+      if (l.buyout) {
+        this.book(time, `Übernahme Leasing ${m.brand} ${m.model}`, -l.residual, 'Maschinenkauf');
+        m.purchasePrice = l.residual;
+        m.boughtAt = time;
+        m.afaYears = 4;
+        m.lease = undefined;
+        this.emit(time, 'info', `${m.brand} ${m.model} aus dem Leasing übernommen (${fmtEur(l.residual)}).`);
+      } else {
+        this.company.machines.splice(this.company.machines.indexOf(m), 1);
+        this.emit(time, 'info', `${m.brand} ${m.model} an die Leasinggesellschaft zurückgegeben.`);
+      }
+      this.version++;
+    }
+  }
+
+  /**
+   * Täglich: Dieselpreis, Dispozinsen, am Monatsersten Raten, Leasing, Versicherung, Bonität;
+   * am 1. Januar Jahresabschluss, Steuer fällig am 31. Mai des Folgejahres.
+   */
+  private financeDaily(time: number) {
+    // Diesel: Zufallspfad mit Rückkehr zum Mittelwert (WF-07), ±0,6 ct am Tag
+    this.dieselPrice = Math.round((this.dieselPrice + (DIESEL_MEAN - this.dieselPrice) * 0.01 + (this.rng.next() - 0.5) * 0.012) * 1000) / 1000;
+    if (this.company.cash < 0) this.overdraftInterest += (-this.company.cash * OVERDRAFT_RATE) / 365;
+    if (this.company.cash < -(this.company.overdraftLimit ?? 0)) {
+      this.emit(time, 'warnung', `Konto über dem Kontokorrentrahmen (${fmtEur(this.company.cash)}). Neue Käufe sind gesperrt – Geld eintreiben, Maschinen verkaufen oder Darlehen aufnehmen.`);
+    }
+    const d = gameDate(time);
+    if (d.day === 1) {
+      // Darlehen: Zins und Tilgung
+      for (const l of [...(this.company.loans ?? [])]) {
+        const interest = Math.round(l.remaining * (l.rate / 12) * 100) / 100;
+        const principal = Math.min(l.remaining, Math.round((l.monthly - interest) * 100) / 100);
+        this.book(time, 'Darlehenszinsen', -interest, 'Zinsen');
+        this.book(time, 'Tilgung Darlehen', -principal, 'Tilgung');
+        l.remaining = Math.round((l.remaining - principal) * 100) / 100;
+        this.company.loan = Math.round((this.company.loan - principal) * 100) / 100;
+        if (l.remaining <= 0.01) {
+          this.company.loans = (this.company.loans ?? []).filter((x) => x !== l);
+          this.emit(time, 'info', `Darlehen über ${fmtEur(l.principal)} vollständig getilgt.`);
+        }
+      }
+      if (this.overdraftInterest > 0) {
+        this.book(time, 'Zinsen Kontokorrent', -this.overdraftInterest, 'Zinsen');
+        this.overdraftInterest = 0;
+      }
+      // Leasing
+      for (const m of this.company.machines) if (m.lease) this.book(time, `Leasingrate ${m.brand} ${m.model}`, -m.lease.monthly, 'Leasing');
+      // Versicherung (WF-05)
+      let ins = LIABILITY_PER_YEAR;
+      for (const m of this.company.machines) ins += insurancePerYear(m, m.lease ? m.newPrice * 0.7 : this.machineValueNow(m, time));
+      this.book(time, 'Versicherungen (Betrieb und Maschinen)', -ins / 12, 'Versicherung');
+      // Bonität und Kreditrahmen
+      const b = this.balance(time);
+      const last = this.years.length ? this.years[this.years.length - 1].profit : 0;
+      this.company.rating = rating(b.assets > 0 ? b.equity / b.assets : 0, last);
+      this.company.creditLimit = Math.max(this.company.loan, Math.min(1_500_000, Math.floor((Math.max(0, b.equity) * 0.8) / 10_000) * 10_000));
+      this.version++;
+    }
+    if (d.month === 1 && d.day === 1) this.closeYear(time);
+    if (this.taxDue && time >= this.taxDue.at) {
+      this.book(time, `Steuern ${this.taxDue.year} (Einkommen- und Gewerbesteuer)`, -this.taxDue.amount, 'Steuern');
+      this.emit(time, 'info', `Steuern für ${this.taxDue.year} bezahlt: ${fmtEur(this.taxDue.amount)}.`);
+      this.taxDue = null;
+    }
+  }
+
+  /** Ergebnis eines Zeitraums aus den Buchungen + AfA (WF-08) */
+  yearFigures(from: number, to: number): { revenue: number; expenses: number; afa: number } {
+    let revenue = 0, expenses = 0;
+    for (const l of this.ledger) {
+      if (l.time < from || l.time >= to) continue;
+      if (l.category === 'Rechnung') revenue += l.amount;
+      else if (l.category === 'Diesel' || l.category === 'Personal' || l.category === 'Werkstatt' || l.category === 'Zinsen' || l.category === 'Leasing' || l.category === 'Versicherung' || l.category === 'Sonstiges') expenses -= l.amount;
+    }
+    let afa = this.yearAfaSold;
+    for (const m of this.company.machines) afa += bookValue(m, Math.max(from, m.boughtAt ?? 0)) - bookValue(m, to);
+    return { revenue: Math.round(revenue), expenses: Math.round(expenses), afa: Math.round(afa) };
+  }
+
+  /** Jahresabschluss am 1. Januar: Gewinn, Steuer (fällig 31. Mai) */
+  private closeYear(time: number) {
+    const year = gameDate(time).year - 1;
+    const from = this.yearStart(time - 1440);
+    const f = this.yearFigures(from, time);
+    const profit = Math.round(f.revenue - f.expenses - f.afa + this.yearSaleGain);
+    const tax = profitTax(profit).total;
+    this.years.push({ year, revenue: f.revenue, expenses: f.expenses, afa: f.afa, saleGain: Math.round(this.yearSaleGain), profit, tax });
+    this.yearSaleGain = 0;
+    this.yearAfaSold = 0;
+    if (tax > 0) {
+      // Fälligkeit 31. Mai: Tage bis dahin zählen
+      let t = time;
+      for (let i = 0; i < 160 && !(gameDate(t).month === 5 && gameDate(t).day === 31); i++) t += 1440;
+      this.taxDue = { amount: tax, at: t, year };
+    }
+    this.emit(time, 'info', `Jahresabschluss ${year}: Umsatz ${fmtEur(f.revenue)}, Kosten ${fmtEur(f.expenses)}, AfA ${fmtEur(f.afa)}, Gewinn ${fmtEur(profit)}${tax > 0 ? `, Steuern ${fmtEur(tax)} fällig am 31.05.` : ''}.`);
+  }
+
   // ---------- Fuhrpark: Händler, Börse, Verkauf, Werkstatt ----------
 
   /** Rabatt beim Händler (HM-07): 5 % plus 1 % je 50.000 € Umsatz, höchstens 12 % */
@@ -546,14 +782,15 @@ export class Business {
   }
 
   /** Neumaschine bestellen (HM-06): Anzahlung entfällt, bezahlt wird bei Lieferung */
-  order(dealerId: number, modelKey: string, time: number): string {
+  order(dealerId: number, modelKey: string, time: number, leaseMonths?: number): string {
     const d = DEALERS.find((x) => x.id === dealerId);
     const m = CATALOG.find((x) => x.key === modelKey);
     if (!d || !m) return 'Modell nicht lieferbar';
     if (![...d.tractorBrands, ...d.implementBrands].includes(m.brand)) return `${d.name} führt ${m.brand} nicht`;
     const price = this.newPrice(dealerId, m);
-    const committed = this.deliveries.reduce((a, x) => a + x.price, 0);
-    if (this.company.cash - committed < price) return 'Nicht genug Geld für Bestellung und Lieferung';
+    const committed = this.deliveries.filter((x) => !x.leaseMonths).reduce((a, x) => a + x.price, 0);
+    if (!leaseMonths && !this.canPay(committed + price)) return 'Nicht genug Geld für Bestellung und Lieferung – Kredit oder Leasing?';
+    if (leaseMonths && ![36, 48, 60].includes(leaseMonths)) return 'Leasing über 36, 48 oder 60 Monate';
     const weeks = m.deliveryWeeks + (this.rng.int(3) - 1);
     const del: Delivery = {
       id: this.nextMachineId(),
@@ -565,8 +802,14 @@ export class Business {
       dealerId,
       at: time + weeks * 7 * 1440,
       price,
+      leaseMonths,
     };
     this.deliveries.push(del);
+    if (leaseMonths) {
+      const l = leaseRate(price, LEASE_BASE_RATE + RATING_SURCHARGE[this.company.rating ?? 'A'], leaseMonths);
+      this.emit(time, 'info', `Leasing ${m.brand} ${m.model}: ${fmtEur(l.monthly)} im Monat über ${leaseMonths} Monate, Restwert ${fmtEur(l.residual)}, Lieferung etwa ${fmtDay(del.at)}.`);
+      return `geleast, Lieferung etwa ${fmtDay(del.at)}`;
+    }
     this.emit(time, 'info', `Bestellt bei ${d.name}: ${m.brand} ${m.model} für ${fmtEur(price)}, Lieferung etwa ${fmtDay(del.at)}.`);
     return `bestellt, Lieferung etwa ${fmtDay(del.at)}`;
   }
@@ -576,9 +819,16 @@ export class Business {
       const d = this.deliveries[i];
       if (d.at > time) continue;
       this.deliveries.splice(i, 1);
-      this.company.cash = Math.round((this.company.cash - d.price) * 100) / 100;
-      this.company.machines.push({ id: d.id, ...d.machine, boughtAt: time, dealerId: d.dealerId, warrantyUntil: time + 24 * 30 * 1440 });
       this.dealerSpend[d.dealerId] = (this.dealerSpend[d.dealerId] ?? 0) + d.price;
+      const base: Machine = { id: d.id, ...d.machine, boughtAt: time, dealerId: d.dealerId, warrantyUntil: time + 24 * 30 * 1440 };
+      if (d.leaseMonths) {
+        const l = leaseRate(d.price, LEASE_BASE_RATE + RATING_SURCHARGE[this.company.rating ?? 'A'], d.leaseMonths);
+        this.company.machines.push({ ...base, lease: { monthly: l.monthly, endsAt: time + d.leaseMonths * 30 * 1440, residual: l.residual } });
+        this.emit(time, 'info', `Geliefert (Leasing): ${d.machine.brand} ${d.machine.model}, ${fmtEur(l.monthly)} im Monat bis ${fmtDay(time + d.leaseMonths * 30 * 1440)}.`);
+        continue;
+      }
+      this.company.cash = Math.round((this.company.cash - d.price) * 100) / 100;
+      this.company.machines.push({ ...base, purchasePrice: d.price, afaYears: afaYears(d.machine.type, 0) });
       this.ledger.push({ time, text: `Lieferung ${d.machine.brand} ${d.machine.model}`, amount: -d.price, category: 'Maschinenkauf' });
       this.emit(time, 'info', `Geliefert: ${d.machine.brand} ${d.machine.model} steht am Hof (${fmtEur(d.price)} bezahlt, 24 Monate Gewährleistung).`);
     }
@@ -662,6 +912,7 @@ export class Business {
   sell(machineId: number, mode: 'tradein' | 'privat', time: number): string {
     const m = this.company.machines.find((x) => x.id === machineId);
     if (!m) return 'Maschine unbekannt';
+    if (m.lease) return 'Geleaste Maschinen gehören der Leasinggesellschaft – erst am Ende übernehmen';
     if (m.type === 'firmenwagen' && this.company.machines.filter((x) => x.type === 'firmenwagen').length < 2) return 'Ohne Firmenwagen sind keine Besuche möglich';
     const value = this.machineValueNow(m, time);
     if (mode === 'tradein') {
@@ -689,6 +940,12 @@ export class Business {
   }
 
   private removeMachine(m: Machine, price: number, time: number, how: string) {
+    // Buchgewinn bzw. -verlust und AfA bis zum Verkauf für den Jahresabschluss
+    const yearStart = this.yearStart(time);
+    const bvStart = bookValue(m, Math.max(yearStart, m.boughtAt ?? 0));
+    const bvNow = bookValue(m, time);
+    this.yearAfaSold += bvStart - bvNow;
+    this.yearSaleGain += price - bvNow;
     const i = this.company.machines.indexOf(m);
     if (i >= 0) this.company.machines.splice(i, 1);
     this.company.cash = Math.round((this.company.cash + price) * 100) / 100;
@@ -776,7 +1033,7 @@ export class Business {
   /** Verschleißteile nachkaufen: Lieferung am nächsten Morgen ins Lager am Hof */
   buyParts(amount: number, time: number): string {
     if (!(amount >= 100)) return 'Mindestens 100 €';
-    if (this.company.cash < amount) return 'Nicht genug Geld';
+    if (!this.canPay(amount)) return 'Nicht genug Geld';
     const at = (Math.floor(time / 1440) + 1) * 1440 + 2 * 60;
     this.company.cash = Math.round((this.company.cash - amount) * 100) / 100;
     (this.company.partsIncoming ??= []).push({ amount, at });
@@ -892,7 +1149,7 @@ export class Business {
   /** Diesel tanken/abrechnen: Kosten sofort vom Konto, beim Auftrag mitgeschrieben */
   chargeDiesel(liters: number, order: Order | undefined, _time: number) {
     if (liters <= 0) return;
-    const cost = liters * DIESEL_PRICE;
+    const cost = liters * this.dieselPrice;
     this.company.cash = Math.round((this.company.cash - cost) * 100) / 100;
     this.dieselTotalL += liters;
     this.dieselTodayL += liters;
@@ -1187,7 +1444,7 @@ export class Business {
     const deployed = Math.max(0, Math.floor((time - (e.availableFrom ?? time)) / 1440));
     const wage = Math.max(MIN_WAGE, asKind === 'saison' ? Math.round(marketWage(e) * 1.08 * 10) / 10 : marketWage(e));
     const fee = takeOverFee(wage, deployed);
-    if (this.company.cash < fee) return `Provision ${fmtEur(fee)} – nicht genug Geld`;
+    if (!this.canPay(fee)) return `Provision ${fmtEur(fee)} – nicht genug Geld`;
     if (fee) {
       this.company.cash = Math.round((this.company.cash - fee) * 100) / 100;
       this.ledger.push({ time, text: `Übernahmeprovision ${e.name}`, amount: -fee, category: 'Personal' });

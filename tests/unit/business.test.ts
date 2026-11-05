@@ -100,7 +100,9 @@ describe('Besuch, Anfrage, Auftrag', () => {
     expect(s.company.machines[0].hours).toBeGreaterThan(hoursBefore + order.areaHa / 1.7 - 0.2);
     // Diesel: 9 l/ha bei der Arbeit plus Anfahrt
     expect(order.dieselL).toBeGreaterThan(order.areaHa * 9 - 1);
-    expect(order.dieselCost).toBeCloseTo(order.dieselL * 1.35, 0);
+    // Dieselpreis schwankt (netto um 1,58 €/l)
+    expect(order.dieselCost / order.dieselL).toBeGreaterThan(1.4);
+    expect(order.dieselCost / order.dieselL).toBeLessThan(1.8);
     runUntil(s, () => !s.chefBusy, 5000);
     expect(s.chefBusy).toBeNull();
   });

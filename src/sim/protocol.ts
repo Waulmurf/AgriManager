@@ -2,7 +2,7 @@
 import type { JobEstimate, PlanBar, PlayerUnitInfo, SaveState, VehicleInfo } from './engine';
 import type { Company } from './economy';
 import type { ContactPreference } from './farms';
-import type { Applicant, Command, Delivery, StaffRequest, GameEvent, Invoice, LedgerEntry, Order, QueueItem, Request } from './business';
+import type { Applicant, Command, Delivery, StaffRequest, YearResult, GameEvent, Invoice, LedgerEntry, Order, QueueItem, Request } from './business';
 import type { MarketOffer } from './economy';
 
 /** Spielminuten pro Sekunde Echtzeit bei 1x. 10x/100x vervielfachen die Schrittzahl. */
@@ -71,6 +71,15 @@ export interface BusinessState {
   deliveries: Delivery[];
   discounts: Record<number, number>;
   machineValues: Record<number, number>;
+  /** Finanzen (Phase 4): Dieselpreis, laufendes Jahr, Jahresabschlüsse, Steuer, Bilanz */
+  dieselPrice: number;
+  yearNow: { revenue: number; expenses: number; afa: number; profit: number };
+  years: YearResult[];
+  taxDue: { amount: number; at: number; year: number } | null;
+  balance: { assets: number; debt: number; equity: number; machines: number };
+  /** Konditionen für neue Darlehen und Leasing je Laufzeit (Bonität eingerechnet) */
+  loanRates: Record<number, number>;
+  leaseRates: Record<number, number>;
   /** Planungsboard: Balken je Fahrer */
   plan: PlanBar[];
   /** Maschinen gerade im Einsatz */

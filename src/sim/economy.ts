@@ -65,6 +65,22 @@ export interface Machine {
   /** gekauft am (Spielminute) und bei Händler */
   boughtAt?: number;
   dealerId?: number;
+  /** Anschaffungskosten und Nutzungsdauer für die AfA (WF-03) */
+  purchasePrice?: number;
+  afaYears?: number;
+  /** Leasing (WF-02): Monatsrate, Ende, Restwert; buyout = am Ende übernehmen */
+  lease?: { monthly: number; endsAt: number; residual: number; buyout?: boolean };
+}
+
+/** Darlehen (WF-01): Annuität, monatlich gebucht */
+export interface Loan {
+  id: number;
+  principal: number;
+  rate: number;
+  months: number;
+  monthly: number;
+  remaining: number;
+  startAt: number;
 }
 
 /**
@@ -345,8 +361,13 @@ export function employerMonthCost(e: Employee): number {
 export interface Company {
   name: string;
   cash: number;
+  /** Kreditrahmen für Darlehen (hängt von der Bonität ab) und Summe der offenen Darlehen */
   creditLimit: number;
   loan: number;
+  loans?: Loan[];
+  /** Kontokorrent: Konto darf bis −Rahmen ins Minus */
+  overdraftLimit?: number;
+  rating?: 'A' | 'B' | 'C' | 'D';
   /** Standort: Graph-Knoten in Groß Thondorf */
   homeNode: number;
   site: string;
@@ -374,11 +395,15 @@ export function startCompany(homeNode: number): Company {
     cash: 100_000,
     creditLimit: 150_000,
     loan: 0,
+    loans: [],
+    overdraftLimit: 30_000,
+    rating: 'A',
     homeNode,
     site: 'Unbefestigter Abstellplatz, Büro im Wohnhaus',
     machines: [
-      { id: 1, type: 'schlepper', brand: 'Fendt', model: '720 Vario', year: 2014, hours: 9000, condition: 68, newPrice: 225_000, power: 200, serviceAtH: 9200 },
-      { id: 2, type: 'firmenwagen', brand: '', model: 'Kombi', year: 2018, hours: 2800, condition: 75, newPrice: 38_000, serviceAtH: 3000, seats: 5, carKind: 'kombi' },
+      // Einlage zum Marktwert, Abschreibung über die Restnutzungsdauer (mindestens 3 Jahre)
+      { id: 1, type: 'schlepper', brand: 'Fendt', model: '720 Vario', year: 2014, hours: 9000, condition: 68, newPrice: 225_000, power: 200, serviceAtH: 9200, purchasePrice: 72_700, afaYears: 3, boughtAt: 0 },
+      { id: 2, type: 'firmenwagen', brand: '', model: 'Kombi', year: 2018, hours: 2800, condition: 75, newPrice: 38_000, serviceAtH: 3000, seats: 5, carKind: 'kombi', purchasePrice: 19_100, afaYears: 3, boughtAt: 0 },
     ],
     drivers: [chefEmployee()],
     partsStock: 1_000,
@@ -401,6 +426,9 @@ export function normalizeDrivers(c: Company): void {
   // neue Tätigkeiten aus späteren Versionen ergänzen (nicht qualifiziert)
   for (const d of c.drivers) for (const k of SKILLS) if (d.skills[k.key] === undefined) d.skills[k.key] = 0;
   if (c.partsStock === undefined) c.partsStock = 1_000;
+  c.loans ??= [];
+  c.overdraftLimit ??= 30_000;
+  c.rating ??= 'A';
   c.partsIncoming ??= [];
   // Firmenwagen älterer Spielstände sind Kombis mit 5 Plätzen
   for (const m of c.machines) if (m.type === 'firmenwagen' && m.seats === undefined) { m.seats = 5; m.carKind = 'kombi'; }

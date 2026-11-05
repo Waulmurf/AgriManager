@@ -141,3 +141,4 @@ html, body, #root { margin: 0; height: 100%; }
 .board-form select { max-width: 200px; }
 .planning-btn { font: inherit; font-size: 13px; padding: 6px 10px; border-radius: 6px; cursor: pointer; background: transparent; color: inherit; border: 1px solid rgba(255,255,255,0.35); }
 .board-bar.absence { background: repeating-linear-gradient(45deg, #c9c6bc, #c9c6bc 6px, #d8d5cc 6px, #d8d5cc 12px); color: #444; cursor: default; }
+.tbl-wrap { overflow-x: auto; max-width: 100%; }

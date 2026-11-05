@@ -438,3 +438,67 @@ Schritte:
   siehe Standorte und Gebäude).
 - Werkstattmitarbeiter senken den Verschleiß (Pflege), Schulungen heben Skills (PA-09).
 
+## Phase 4: Wirtschaft (ab 5. Nov. 2026)
+
+Schritte:
+1. **Finanzen** (umgesetzt, siehe unten)
+2. **Wetter:** Regen und Bodenfeuchte nach dem Klima von Uelzen, Vorhersage, Feldarbeit bei
+   nassem Boden gesperrt, Arbeitsdauer nach Wetter (AK-07)
+3. **Jahreslauf:** Bedarf je Jahreszeit (AK-04), Stoppelbearbeitung mit der Kurzscheibenegge
+   als zweite Dienstleistung, ruhiger Winter mit Wintercheck (MZ-05)
+4. **Arbeitsketten:** Kleinbus-Mannschaftsfahrten, Radlader/Silo, später Häcksler
+   (siehe `docs/ablaeufe.md`)
+
+### Schritt 1: Finanzen (Annahmen und Quellen)
+
+- **Darlehen (WF-01):** Annuität mit monatlicher Rate, Laufzeit 3, 5, 8 oder 10 Jahre.
+  - Zins bei Bonität A: 3,85 % (3 Jahre), 4,1 % (5), 4,4 % (8), 4,6 % (10). Anker ist der
+    LR-Basis-Satz der Rentenbank für 3 Jahre in Preisklasse A
+    ([topagrar](https://www.topagrar.com/betriebsleitung/news/200-mio-eur-programm-rentenbank-nennt-zinssatz-a-20025940.html)),
+    die längeren Laufzeiten sind angenommen.
+  - Aufschlag je Bonität: B +0,5, C +1,2, D +2,5 Prozentpunkte.
+  - Sondertilgung ohne Gebühr; die Laufzeit verkürzt sich.
+- **Bonität und Kreditrahmen:**
+  - Bonität A bei mindestens 60 % Eigenkapitalquote und keinem Verlust im Vorjahr, B ab 40 %,
+    C ab 20 %, sonst D.
+  - Kreditrahmen = 80 % des Eigenkapitals, auf 10.000 € abgerundet. Das ergibt zum Start
+    150.000 €, passend zu den Startbedingungen.
+  - Eigenkapital = Konto + Marktwert der eigenen Maschinen + offene Rechnungen +
+    Verschleißteillager − Darlehen − Minus auf dem Konto.
+  - Neu berechnet am Monatsersten.
+- **Kontokorrent:** Rahmen 30.000 € zu 11 % (Annahme Hausbank). Käufe dürfen das Konto bis zum
+  Rahmen ins Minus bringen. Dispozinsen werden täglich aufgelaufen und am Monatsersten gebucht.
+  Über dem Rahmen gibt es täglich eine Warnung, und Käufe sind gesperrt.
+- **Leasing (WF-02):** bei Neubestellung über 36, 48 oder 60 Monate, Zins 5,9 % + Aufschlag
+  nach Bonität (Annahme).
+  - Restwert 45, 35 bzw. 25 %. Die Rate ist der Barwert ohne abgezinsten Restwert, verrentet
+    über die Laufzeit.
+  - Keine Anzahlung und keine Abschreibung; die Maschine lässt sich nicht verkaufen.
+  - Am Ende wird sie zurückgegeben oder auf Wunsch zum Restwert übernommen (danach AfA über
+    4 Jahre).
+- **Abschreibung (WF-03):** linear, monatsgenau.
+  - Nutzungsdauer: Traktoren 12 Jahre nach AfA-Tabelle des BMF (laut
+    [Lexware](https://www.lexware.de/wissen/buchhaltung-finanzen/abschreibungstabelle/traktor/)),
+    Firmenwagen 6, Geräte 10 (Annahme).
+  - Gebrauchte über die Restnutzungsdauer, mindestens 3 Jahre.
+  - Die Startmaschinen gelten als Einlage zum Marktwert.
+  - Beim Verkauf zählt der Buchgewinn bzw. -verlust zum Ergebnis.
+- **Versicherung (WF-05, Annahme):** Betriebshaftpflicht 1.800 € im Jahr. Je Schlepper und
+  Fahrzeug 400 € Haftpflicht + 0,8 % vom Wert Kasko, Geräte 0,3 %. Gebucht monatlich.
+- **Steuern (WF-04, vereinfacht):** Jahresabschluss am 1. Januar. Gewinn = Umsatz − Kosten
+  (ohne Investitionen und Tilgung) − AfA ± Buchgewinne.
+  - Gewerbesteuer: (Gewinn − 24.500 €) × 3,5 % × Hebesatz 380 % (Annahme).
+  - Einkommensteuer: Grundfreibetrag 12.348 €, Grenzsatz linear von 14 % auf 42 % bis
+    68.480 €, darüber 42 %, ab 277.826 € 45 %. Die Gewerbesteuer wird bis zum 3,8-fachen
+    Messbetrag angerechnet.
+  - Fällig am 31. Mai des Folgejahres, ohne Vorauszahlungen.
+- **Diesel (WF-07):** Preis netto, ohne MwSt, Start 1,62 €/l. Zufallspfad mit Rückkehr zum
+  Mittel von 1,58 €/l, ±0,6 ct am Tag. Gebucht wird zum Tagespreis.
+  - Agrardiesel-Rückvergütung (21,48 ct/l seit 2026,
+    [topagrar](https://www.topagrar.com/management-und-politik/news/agrardiesel-ruckerstattung-zum-1-januar-2026-wieder-in-voller-hohe-20015641.html)):
+    Annahme, dass sie der Landwirt für die Lohnarbeit beantragt und nicht das Lohnunternehmen.
+    Noch zu prüfen.
+- **Übersicht (WF-08):** Reiter Finanzen mit Konto, Bonität, Darlehen, laufendem Jahr,
+  Jahresabschlüssen und Monatsübersicht (Finanzierung und Abgaben zusammengefasst).
+  Leasingangebote im Markt, Leasingverträge im Fuhrpark.
+
