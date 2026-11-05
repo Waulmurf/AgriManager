@@ -1,0 +1,250 @@
+/**
+ * Seitenleisten-Inhalte für das Spiel: Betrieb, Aufträge (Anfragen + Aufträge), Markt, Nachrichten.
+ */
+import { useState } from 'react';
+import type { GameController, GameStatus } from '../game/controller';
+import { machineValue, type Machine } from '../sim/economy';
+import { SERVICE_NAMES, fmtDay, type Request, type Order } from '../sim/business';
+import { formatGameTime } from '../game/clock';
+
+export const eur = (v: number) => v.toLocaleString('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
+const ha = (v: number) => `${v.toLocaleString('de-DE', { maximumFractionDigits: 1 })} ha`;
+const machineName = (m: Machine) => [m.brand, m.model].filter(Boolean).join(' ');
+
+function useFeedback() {
+  const [msg, setMsg] = useState<string | null>(null);
+  const show = (m: string) => {
+    setMsg(m);
+    setTimeout(() => setMsg((cur) => (cur === m ? null : cur)), 4000);
+  };
+  return { msg, show };
+}
+
+export function BusinessTab({ status, game }: { status: GameStatus; game: GameController | null }) {
+  const c = status.company;
+  const b = status.business;
+  if (!c) return <p className="hint">–</p>;
+  const unitStatus = (id: number) => b?.units.find((u) => u.machineId === id)?.status;
+  return (
+    <>
+      <h2>Mein Betrieb</h2>
+      <dl data-testid="company">
+        <dt>Konto</dt><dd data-testid="cash">{eur(c.cash)}</dd>
+        <dt>Kreditrahmen</dt><dd>{eur(c.creditLimit - c.loan)} frei</dd>
+        <dt>Standort</dt><dd>Groß Thondorf</dd>
+        <dt>Chef</dt><dd>{b?.chefBusy ?? 'im Büro'}</dd>
+      </dl>
+      <h2>Fuhrpark</h2>
+      <ul className="machines">
+        {c.machines.map((m) => (
+          <li key={m.id}>
+            <span>
+              {machineName(m)}
+              {m.power ? `, ${m.power} PS` : ''}
+              {m.width ? `, ${m.width.toLocaleString('de-DE')} m` : ''}
+            </span>
+            <small>
+              Bj. {m.year}
+              {m.hours ? ` · ${m.hours.toLocaleString('de-DE')} h` : ''} · Zustand {m.condition} % · Wert {eur(machineValue(m))}
+            </small>
+            {unitStatus(m.id) && <small className="unit-status">{unitStatus(m.id)}</small>}
+          </li>
+        ))}
+      </ul>
+      <p className="hint">{c.site}</p>
+      <h2>Kunden</h2>
+      <dl>
+        <dt>Betriebe im Gebiet</dt><dd data-testid="farm-count">{status.farmCount ? status.farmCount.toLocaleString('de-DE') : '–'}</dd>
+        <dt>im Adressbuch</dt><dd data-testid="known-count">{status.knownFarms}</dd>
+      </dl>
+      {status.farmCount ? (
+        <p className="hint">Hofstelle auf der Karte anklicken und „Besuchen“ wählen. Erst ein Besuch bringt einen Betrieb ins Adressbuch; danach melden sich Kunden auch per Anruf oder Nachricht.</p>
+      ) : (
+        <p className="hint">Keine Felddaten geladen – Kunden gibt es erst mit Kartendaten v3.</p>
+      )}
+      {b && b.knownFarms.length > 0 && (
+        <ul className="list">
+          {b.knownFarms.map((id) => {
+            const f = game?.farmById(id);
+            return f ? (
+              <li key={id}>
+                <button className="link" onClick={() => game?.flyToFarm(id)}>{f.name}</button>
+                <small>{ha(f.areaHa)} · Zufriedenheit {f.satisfaction} %</small>
+              </li>
+            ) : null;
+          })}
+        </ul>
+      )}
+    </>
+  );
+}
+
+function RequestItem({ r, game, time }: { r: Request; game: GameController | null; time: number }) {
+  const [price, setPrice] = useState(String(r.priceHa));
+  const fb = useFeedback();
+  const farm = game?.farmById(r.farmId);
+  const send = async (action: 'accept' | 'reject' | 'counter') => {
+    const msg = await game!.command({ kind: 'respond', requestId: r.id, action, priceHa: Number(price.replace(',', '.')) });
+    fb.show(msg);
+  };
+  const hoursLeft = Math.max(0, Math.round((r.replyBy - time) / 60));
+  return (
+    <li className="card" data-testid="request">
+      <div className="card-head">
+        <button className="link" onClick={() => game?.flyToFarm(r.farmId)}>{farm?.name ?? `Betrieb ${r.farmId}`}</button>
+        <small>{r.channel === 'besuch' ? 'beim Besuch' : r.channel === 'anruf' ? 'Anruf' : 'Nachricht'}</small>
+      </div>
+      <div>
+        {SERVICE_NAMES[r.service]}: {r.fields.length} {r.fields.length === 1 ? 'Feld' : 'Felder'}, {ha(r.areaHa)} · bis {fmtDay(r.latest)}
+      </div>
+      <div>
+        Angebot Kunde: <strong>{r.priceHa.toLocaleString('de-DE')} €/ha</strong> = {eur(r.priceHa * r.areaHa)}
+      </div>
+      {r.status === 'offen' ? (
+        <>
+          <small className="hint">Antwort erwartet in {hoursLeft} h</small>
+          <div className="card-actions">
+            <button onClick={() => send('accept')} data-testid="accept">Annehmen</button>
+            <button onClick={() => send('reject')}>Ablehnen</button>
+            <span className="counter">
+              <input value={price} onChange={(e) => setPrice(e.target.value)} aria-label="Gegenangebot €/ha" />
+              <button onClick={() => send('counter')}>€/ha anbieten</button>
+            </span>
+          </div>
+        </>
+      ) : (
+        <small className="hint">{r.status}</small>
+      )}
+      {fb.msg && <small className="feedback">{fb.msg}</small>}
+    </li>
+  );
+}
+
+function OrderItem({ o, game, status }: { o: Order; game: GameController | null; status: GameStatus }) {
+  const c = status.company!;
+  const tractors = c.machines.filter((m) => m.type === 'schlepper');
+  const implementsOk = c.machines.filter((m) => m.type === 'grubber');
+  const [tractor, setTractor] = useState(tractors[0]?.id ?? 0);
+  const [impl, setImpl] = useState(0);
+  const fb = useFeedback();
+  const farm = game?.farmById(o.farmId);
+  const implId = impl || implementsOk[0]?.id || 0;
+  const start = async () => {
+    fb.show(await game!.command({ kind: 'startJob', orderId: o.id, tractorId: tractor, implementId: implId }));
+  };
+  const late = status.business && o.status !== 'fertig' && status.business.time > o.latest;
+  return (
+    <li className="card" data-testid="order">
+      <div className="card-head">
+        <button className="link" onClick={() => game?.flyToFarm(o.farmId)}>{farm?.name ?? `Betrieb ${o.farmId}`}</button>
+        <small className={`badge ${o.status === 'fertig' ? 'done' : o.status === 'läuft' ? 'run' : ''}`}>{o.status}</small>
+      </div>
+      <div>
+        {SERVICE_NAMES[o.service]} {ha(o.areaHa)} zu {o.priceHa.toLocaleString('de-DE')} €/ha = {eur(o.priceHa * o.areaHa)}
+      </div>
+      <small className={late ? 'warn' : 'hint'}>
+        Zeitfenster bis {fmtDay(o.latest)}
+        {o.status === 'läuft' ? ` · ${o.doneFields.length}/${o.fields.length} Felder fertig` : ''}
+        {o.finishedAt !== undefined ? ` · fertig ${formatGameTime(o.finishedAt).date.slice(4)} ${formatGameTime(o.finishedAt).time}` : ''}
+        {late ? ' · verspätet!' : ''}
+      </small>
+      {o.status === 'offen' && (
+        <div className="card-actions">
+          <select value={tractor} onChange={(e) => setTractor(Number(e.target.value))} aria-label="Schlepper">
+            {tractors.map((m) => <option key={m.id} value={m.id}>{machineName(m)}</option>)}
+          </select>
+          {implementsOk.length ? (
+            <select value={implId} onChange={(e) => setImpl(Number(e.target.value))} aria-label="Gerät">
+              {implementsOk.map((m) => <option key={m.id} value={m.id}>{machineName(m)} ({m.width} m)</option>)}
+            </select>
+          ) : (
+            <small className="warn">Kein Grubber – im Markt kaufen</small>
+          )}
+          <button onClick={start} disabled={!implementsOk.length} data-testid="start-job">Fahrer: Chef · Starten</button>
+        </div>
+      )}
+      {fb.msg && <small className="feedback">{fb.msg}</small>}
+    </li>
+  );
+}
+
+export function OrdersTab({ status, game }: { status: GameStatus; game: GameController | null }) {
+  const b = status.business;
+  if (!b) return <p className="hint">–</p>;
+  const open = b.requests.filter((r) => r.status === 'offen');
+  const orders = b.orders.slice().reverse();
+  return (
+    <>
+      <h2>Anfragen ({open.length})</h2>
+      {open.length ? (
+        <ul className="cards">{open.map((r) => <RequestItem key={r.id} r={r} game={game} time={b.time} />)}</ul>
+      ) : (
+        <p className="hint">Keine offenen Anfragen. Kunden besuchen oder auf Anrufe warten.</p>
+      )}
+      <h2>Aufträge ({orders.filter((o) => o.status !== 'fertig').length} offen)</h2>
+      {orders.length ? (
+        <ul className="cards">{orders.map((o) => <OrderItem key={o.id} o={o} game={game} status={status} />)}</ul>
+      ) : (
+        <p className="hint">Noch keine Aufträge.</p>
+      )}
+      <h2>Planungstafel</h2>
+      <ul className="list">
+        <li><span>Chef</span><small>{b.chefBusy ?? 'frei, im Büro'}</small></li>
+        {b.units.map((u) => {
+          const m = status.company?.machines.find((x) => x.id === u.machineId);
+          return <li key={u.machineId}><span>{m ? machineName(m) : u.machineId}</span><small>{u.status}</small></li>;
+        })}
+      </ul>
+    </>
+  );
+}
+
+export function MarketTab({ status, game }: { status: GameStatus; game: GameController | null }) {
+  const b = status.business;
+  const fb = useFeedback();
+  if (!b) return <p className="hint">–</p>;
+  return (
+    <>
+      <h2>Gebrauchtgeräte</h2>
+      <p className="hint">Startangebote (Preise angelehnt an reale Inserate). Der Händlermarkt folgt in Phase 3.</p>
+      <ul className="cards">
+        {b.offers.map((o) => (
+          <li className="card" key={o.id} data-testid="offer">
+            <div className="card-head">
+              <strong>{o.machine.brand} {o.machine.model}</strong>
+              <strong>{eur(o.price)}</strong>
+            </div>
+            <small>Bj. {o.machine.year} · {o.machine.width} m · ab {o.machine.powerNeed} PS · {o.machine.haPerHour?.toLocaleString('de-DE')} ha/h · Zustand {o.machine.condition} %</small>
+            <small className="hint">{o.seller} – {o.note}</small>
+            <div className="card-actions">
+              <button onClick={async () => fb.show(await game!.command({ kind: 'buy', offerId: o.id }))} disabled={status.company!.cash < o.price} data-testid="buy">Kaufen</button>
+            </div>
+          </li>
+        ))}
+      </ul>
+      {!b.offers.length && <p className="hint">Alle Angebote verkauft.</p>}
+      {fb.msg && <p className="feedback">{fb.msg}</p>}
+    </>
+  );
+}
+
+export function NewsTab({ status, game }: { status: GameStatus; game: GameController | null }) {
+  if (!status.events.length) return <p className="hint">Noch keine Nachrichten.</p>;
+  return (
+    <ul className="news">
+      {status.events.map((e, i) => {
+        const t = formatGameTime(e.time);
+        return (
+          <li key={`${e.time}-${i}`} className={e.kind}>
+            <small>{t.date} {t.time}</small>
+            {e.farmId !== undefined ? (
+              <button className="link" onClick={() => game?.flyToFarm(e.farmId!)}>{e.text}</button>
+            ) : (
+              <span>{e.text}</span>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}

@@ -11,6 +11,7 @@ import { parseFields } from './fields';
 import {
   MAX_SNAPSHOTS_PER_SECOND,
   STEPS_PER_SECOND_AT_1X,
+  type BusinessState,
   type FarmSummary,
   type FromWorker,
   type Speed,
@@ -28,6 +29,7 @@ let anchorSteps = 0; // Schrittzahl bei anchorTime
 let lastSend = 0;
 let lastSentTime = -1;
 let pendingRoutes: WireRoute[] = [];
+let sentBusinessVersion = -1;
 let timer: ReturnType<typeof setTimeout> | null = null;
 
 // gleitende Messwerte
@@ -78,8 +80,32 @@ function toWire(r: RouteGeom): WireRoute {
   return { id: r.id, kind: r.kind, coords, cum: r.cum.slice() };
 }
 
+function sendBusiness(force = false) {
+  if (!sim) return;
+  const b = sim.business;
+  if (!force && b.version === sentBusinessVersion) return;
+  sentBusinessVersion = b.version;
+  const known: number[] = [];
+  const satisfaction: Record<number, number> = {};
+  for (const f of sim.farms?.farms ?? []) if (f.known) { known.push(f.id); satisfaction[f.id] = f.satisfaction; }
+  const state: BusinessState = {
+    time: sim.time,
+    company: structuredClone(sim.company),
+    requests: b.requests.filter((r) => r.status === 'offen' || sim!.time - r.createdAt < 3 * 1440).map((r) => ({ ...r })),
+    orders: b.orders.map((o) => ({ ...o, fields: [...o.fields], doneFields: [...o.doneFields] })),
+    offers: structuredClone(b.offers),
+    units: sim.playerUnits(),
+    chefBusy: sim.chefBusy,
+    knownFarms: known,
+    satisfaction,
+    events: b.drainEvents(),
+  };
+  post({ type: 'business', state });
+}
+
 function send(now: number) {
   if (!sim) return;
+  sendBusiness();
   const positions = sim.snapshot();
   const routes = pendingRoutes;
   pendingRoutes = [];
@@ -181,9 +207,14 @@ self.onmessage = (ev: MessageEvent<ToWorker>) => {
         fieldFarm: sim.farms ? sim.farms.fieldFarm.slice() : new Int32Array(0),
         fieldCrop: sim.farms ? sim.farms.fieldCrop.slice() : new Uint8Array(0),
       });
+      sendBusiness(true);
       setSpeed(speed);
     } else if (msg.type === 'speed') {
       setSpeed(msg.speed);
+    } else if (msg.type === 'command') {
+      const message = sim ? sim.command(msg.cmd) : 'Simulation nicht bereit';
+      post({ type: 'commandResult', id: msg.id, message });
+      sendBusiness(true);
     } else if (msg.type === 'stepOnce') {
       if (sim) {
         doSteps(1);

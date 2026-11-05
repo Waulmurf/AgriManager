@@ -11,6 +11,7 @@ import { BRANDS, COMPANY_CAR } from '../data/brands';
 import { fieldPattern, type FieldSet } from './fields';
 import { generateFarms, type FarmSet } from './farms';
 import { startCompany, type Company } from './economy';
+import { Business, VISIT_MINUTES, type Command } from './business';
 import { appendEdgePoints, nearestNode, RoadClass, type RoadGraph } from './roadgraph';
 
 export const STEP_SECONDS = 60;
@@ -38,6 +39,8 @@ export interface VehicleInfo {
   name: string;
   brand: string;
   profile: ProfileKey;
+  owner: 'test' | 'player';
+  machineId?: number;
 }
 
 interface Vehicle extends VehicleInfo {
@@ -53,7 +56,15 @@ interface Vehicle extends VehicleInfo {
   next: 'field' | 'home' | 'leave-field';
   fieldNode: number;
   trips: number;
+  /** Testfahrzeug (zufällige Fahrten) oder Fahrzeug des Spielers (Aufgaben) */
+  owner: 'test' | 'player';
+  machineId?: number;
+  task?: PlayerTask;
 }
+
+type PlayerTask =
+  | { kind: 'visit'; farmId: number; phase: 'to' | 'at' | 'back' }
+  | { kind: 'job'; orderId: number; queue: number[]; current: number; phase: 'to' | 'work' | 'back'; width: number; haPerHour: number };
 
 export interface SimOptions {
   seed: number;
@@ -88,6 +99,8 @@ export class Simulation {
   readonly farms: FarmSet | null;
   /** Betrieb des Spielers */
   readonly company: Company;
+  /** Anfragen, Aufträge, Markt, Ereignisse */
+  readonly business: Business;
   readonly homeNode: number;
   /** Spielzeit in Minuten seit Start */
   time = 0;
@@ -121,8 +134,34 @@ export class Simulation {
         next: 'field',
         fieldNode: -1,
         trips: 0,
+        owner: 'test',
       });
     }
+    // Fahrzeuge des Spielers (Schlepper, Firmenwagen) nach den Testfahrzeugen
+    for (const m of this.company.machines) {
+      if (m.type !== 'schlepper' && m.type !== 'firmenwagen') continue;
+      const profile: ProfileKey = m.type === 'firmenwagen' ? 'car' : 'tractor';
+      this.vehicles.push({
+        id: this.vehicles.length,
+        name: [m.brand, m.model].filter(Boolean).join(' '),
+        brand: profile === 'car' ? COMPANY_CAR.name : m.brand,
+        profile,
+        prof: PROFILES[profile],
+        state: VehicleState.Waiting,
+        node: this.homeNode,
+        route: null,
+        seg: 0,
+        segOff: 0,
+        dist: 0,
+        waitMin: 0,
+        next: 'home',
+        fieldNode: -1,
+        trips: 0,
+        owner: 'player',
+        machineId: m.id,
+      });
+    }
+    this.business = new Business(opts.seed, this.company, this.farms, this.fields);
     // Abgestellt am Hof: Route aus einem Punkt, damit jedes Fahrzeug eine Position hat
     for (const v of this.vehicles) {
       v.route = this.makeRoute([graph.x[this.homeNode]], [graph.y[this.homeNode]], [], 'road');
@@ -131,13 +170,85 @@ export class Simulation {
   }
 
   get vehicleInfo(): VehicleInfo[] {
-    return this.vehicles.map(({ id, name, brand, profile }) => ({ id, name, brand, profile }));
+    return this.vehicles.map(({ id, name, brand, profile, owner, machineId }) => ({ id, name, brand, profile, owner, machineId }));
   }
 
   /** Ein Schritt = 1 Spielminute. */
   step(): void {
     this.time++;
-    for (const v of this.vehicles) this.stepVehicle(v);
+    if (this.time % 1440 === 0) this.business.daily(this.time); // täglich 06:00
+    for (const v of this.vehicles) {
+      if (v.owner === 'player') this.stepPlayer(v);
+      else this.stepVehicle(v);
+    }
+  }
+
+  /** Der Chef ist der einzige Fahrer: beschäftigt, solange ein Spielerfahrzeug eine Aufgabe hat. */
+  get chefBusy(): string | null {
+    for (const v of this.vehicles) {
+      if (v.owner !== 'player' || !v.task) continue;
+      return v.task.kind === 'visit' ? `Chef ist auf Besuch bei ${this.business.farmName(v.task.farmId)}` : 'Chef fährt einen Auftrag';
+    }
+    return null;
+  }
+
+  /** Was die Spielerfahrzeuge gerade tun (für die Oberfläche). */
+  playerUnits(): { machineId: number; vehicle: number; status: string }[] {
+    return this.vehicles
+      .filter((v) => v.owner === 'player')
+      .map((v) => {
+        let status = 'am Hof';
+        const t = v.task;
+        if (t?.kind === 'visit') status = t.phase === 'to' ? `fährt zu ${this.business.farmName(t.farmId)}` : t.phase === 'at' ? `Besuch bei ${this.business.farmName(t.farmId)}` : 'fährt zurück zum Hof';
+        if (t?.kind === 'job') {
+          const o = this.business.orders.find((x) => x.id === t.orderId);
+          const who = o ? this.business.farmName(o.farmId) : '';
+          status = t.phase === 'to' ? `fährt zum Feld (${who})` : t.phase === 'work' ? `grubbert für ${who} (Feld ${t.current + 1}/${t.queue.length})` : 'fährt zurück zum Hof';
+        }
+        return { machineId: v.machineId!, vehicle: v.id, status };
+      });
+  }
+
+  /** Spielerbefehl ausführen (zwischen zwei Schritten); liefert eine Rückmeldung. */
+  command(cmd: Command): string {
+    const b = this.business;
+    const t = this.time;
+    switch (cmd.kind) {
+      case 'respond':
+        return b.respond(cmd.requestId, cmd.action, t, cmd.priceHa);
+      case 'buy':
+        return b.buy(cmd.offerId, t);
+      case 'visit': {
+        const farm = this.farms?.farms[cmd.farmId];
+        if (!farm) return 'Betrieb unbekannt';
+        const busy = this.chefBusy;
+        if (busy) return busy;
+        const car = this.vehicles.find((v) => v.owner === 'player' && v.profile === 'car');
+        if (!car) return 'Kein Firmenwagen';
+        car.task = { kind: 'visit', farmId: farm.id, phase: 'to' };
+        if (!this.driveTo(car, farm.homeNode)) return 'Hof nicht erreichbar';
+        b.version++;
+        return `Fahrt zu ${farm.name}`;
+      }
+      case 'startJob': {
+        const o = b.orders.find((x) => x.id === cmd.orderId);
+        if (!o || o.status !== 'offen') return 'Auftrag nicht startbar';
+        const tractor = this.company.machines.find((m) => m.id === cmd.tractorId && m.type === 'schlepper');
+        const impl = this.company.machines.find((m) => m.id === cmd.implementId);
+        if (!tractor || !impl) return 'Maschine fehlt';
+        if (impl.type !== 'grubber') return 'Für Grubbern wird ein Grubber gebraucht';
+        if ((impl.powerNeed ?? 0) > (tractor.power ?? 0)) return 'Schlepper zu schwach für das Gerät';
+        const busy = this.chefBusy;
+        if (busy) return busy;
+        const unit = this.vehicles.find((v) => v.owner === 'player' && v.machineId === tractor.id);
+        if (!unit || unit.task) return 'Schlepper nicht verfügbar';
+        if (!this.fields) return 'Keine Felddaten';
+        unit.task = { kind: 'job', orderId: o.id, queue: o.fields.slice(), current: 0, phase: 'to', width: impl.width ?? 3, haPerHour: impl.haPerHour ?? 1.5 };
+        if (!this.driveTo(unit, this.fields.access[o.fields[0]])) return 'Feld nicht erreichbar';
+        b.orderStarted(o, tractor.id, impl.id, t);
+        return 'Auftrag gestartet';
+      }
+    }
   }
 
   run(steps: number): void {
@@ -187,6 +298,9 @@ export class Simulation {
     mix(this.time);
     mix(this.nextRouteId);
     for (const s of this.rng.getState()) mix(s);
+    mix(this.company.cash);
+    mix(this.business.requests.length);
+    mix(this.business.orders.length);
     for (const v of this.vehicles) {
       mix(v.state); mix(v.node); mix(v.route ? v.route.id : 0); mix(v.seg); mix(v.segOff);
       mix(v.dist); mix(v.waitMin); mix(v.trips); mix(v.fieldNode);
@@ -254,7 +368,9 @@ export class Simulation {
       target = this.homeNode;
     } else if (this.fields) {
       // echtes Feld: fieldNode enthält den Feld-Index, Ziel ist die Feldzufahrt
-      const fi = this.rng.int(this.fields.count);
+      let fi = this.rng.int(this.fields.count);
+      // Testfahrten: keine Riesen-Feldblöcke (bis 3 Versuche, deterministisch)
+      for (let k = 0; k < 3 && this.fields.areaHa[fi] > 60; k++) fi = this.rng.int(this.fields.count);
       v.fieldNode = fi;
       target = this.fields.access[fi];
     } else {
@@ -310,6 +426,103 @@ export class Simulation {
     this.pending.push(r);
   }
 
+  // ---------- Spielerfahrzeuge ----------
+
+  private stepPlayer(v: Vehicle) {
+    let budget = STEP_SECONDS;
+    for (let guard = 0; budget > 0 && guard < 8; guard++) {
+      if (v.state === VehicleState.Waiting) {
+        if (!v.task || v.waitMin <= 0) return;
+        v.waitMin--;
+        if (v.waitMin > 0) return;
+        this.playerWaitDone(v);
+        continue;
+      }
+      budget = this.advance(v, budget);
+      if (budget > 0 || v.dist >= v.route!.total) this.playerArrive(v);
+    }
+  }
+
+  /** Fahrt zum Knoten starten; false, wenn nicht erreichbar */
+  private driveTo(v: Vehicle, target: number): boolean {
+    const path = this.router.route(v.node, target, v.prof);
+    if (!path) {
+      this.business.warn(this.time, `${v.name}: Ziel nicht erreichbar.`);
+      v.task = undefined;
+      v.state = VehicleState.Waiting;
+      return false;
+    }
+    const r = path.length
+      ? this.buildRoadRoute(v.node, path, v.prof)
+      : this.makeRoute([this.graph.x[v.node]], [this.graph.y[v.node]], [], 'road');
+    this.startRoute(v, r);
+    v.node = target;
+    return true;
+  }
+
+  private playerArrive(v: Vehicle) {
+    const t = v.task;
+    const b = this.business;
+    if (!t) { v.state = VehicleState.Waiting; return; }
+    if (t.kind === 'visit') {
+      if (t.phase === 'to') {
+        t.phase = 'at';
+        v.state = VehicleState.Waiting;
+        v.waitMin = VISIT_MINUTES;
+        b.version++;
+      } else {
+        v.task = undefined;
+        v.state = VehicleState.Waiting;
+        b.version++;
+      }
+      return;
+    }
+    // Auftrag
+    const o = b.orders.find((x) => x.id === t.orderId);
+    if (t.phase === 'to') {
+      const fi = t.queue[t.current];
+      v.fieldNode = fi;
+      this.startRoute(v, this.buildRealFieldRoute(v.node, fi, t.width, t.haPerHour));
+      t.phase = 'work';
+      b.version++;
+    } else if (t.phase === 'work') {
+      if (o) b.fieldDone(o, t.queue[t.current], this.time);
+      this.addMachineHours(v, t);
+      t.current++;
+      if (t.current < t.queue.length) {
+        t.phase = 'to';
+        this.driveTo(v, this.fields!.access[t.queue[t.current]]);
+      } else {
+        t.phase = 'back';
+        this.driveTo(v, this.homeNode);
+      }
+    } else {
+      v.task = undefined;
+      v.state = VehicleState.Waiting;
+      b.version++;
+    }
+  }
+
+  private playerWaitDone(v: Vehicle) {
+    const t = v.task;
+    if (t?.kind === 'visit' && t.phase === 'at') {
+      this.business.onVisit(t.farmId, this.time);
+      t.phase = 'back';
+      this.driveTo(v, this.homeNode);
+    }
+  }
+
+  /** Betriebsstunden für Schlepper und Gerät nach erledigtem Feld */
+  private addMachineHours(v: Vehicle, t: Extract<PlayerTask, { kind: 'job' }>) {
+    const fi = t.queue[t.current];
+    const hours = this.fields!.areaHa[fi] / t.haPerHour;
+    const o = this.business.orders.find((x) => x.id === t.orderId);
+    for (const id of [v.machineId, o?.implementId]) {
+      const m = this.company.machines.find((x) => x.id === id);
+      if (m) m.hours = Math.round((m.hours + hours) * 10) / 10;
+    }
+  }
+
   private buildRoadRoute(from: number, path: Uint32Array, p: VehicleProfile): RouteGeom {
     const g = this.graph;
     const xs: number[] = [g.x[from]];
@@ -328,11 +541,11 @@ export class Simulation {
    * Bahnen über ein echtes Feld: von der Zufahrt ins Feld, Bahnen im Feldumriss, zurück.
    * Die Dauer folgt der Flächenleistung (ha/h), nicht der Bahnlänge.
    */
-  private buildRealFieldRoute(node: number, fi: number): RouteGeom {
+  private buildRealFieldRoute(node: number, fi: number, width = TEST_WORK_WIDTH, haPerHour = TEST_HA_PER_HOUR): RouteGeom {
     const g = this.graph;
     const f = this.fields!;
     const s0 = f.ptStart[fi], n = f.ptCount[fi];
-    const pat = fieldPattern(f.px.subarray(s0, s0 + n), f.py.subarray(s0, s0 + n), TEST_WORK_WIDTH, 150);
+    const pat = fieldPattern(f.px.subarray(s0, s0 + n), f.py.subarray(s0, s0 + n), width, 150);
     const xs = [g.x[node], ...pat.xs, g.x[node]];
     const ys = [g.y[node], ...pat.ys, g.y[node]];
     let len = 0;
@@ -340,7 +553,7 @@ export class Simulation {
       const dx = xs[i] - xs[i - 1], dy = ys[i] - ys[i - 1];
       len += Math.sqrt(dx * dx + dy * dy);
     }
-    const seconds = (f.areaHa[fi] / TEST_HA_PER_HOUR) * 3600;
+    const seconds = (f.areaHa[fi] / haPerHour) * 3600;
     const speed = len > 0 && seconds > 0 ? len / seconds : WORK_SPEED;
     return this.makeRoute(xs, ys, new Array(xs.length - 1).fill(speed), 'field');
   }

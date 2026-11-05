@@ -22,6 +22,7 @@ async function waitForGame(page: Page) {
     const g = (window as any).__game;
     return g && g.status.phase === 'running' && g.status.tilesLoaded;
   }, null, { timeout: 60_000 });
+  await page.evaluate(() => (window as any).__game.showTestVehicles(true));
 }
 
 const status = (page: Page) => page.evaluate(() => {
@@ -140,7 +141,44 @@ test('Leistung: 100x mit 30 Fahrzeugen', async ({ page }, info) => {
   await info.attach('selftest.json', { body: JSON.stringify(r, null, 2), contentType: 'application/json' });
   console.log('Selbsttest', info.project.name, JSON.stringify(r));
   expect(r.basemapFeatures).toBeGreaterThan(200);
-  expect(r.vehiclesOnMap).toBe(30);
+  expect(r.vehiclesOnMap).toBeGreaterThanOrEqual(30);
   expect(r.tileErrors).toBe(0);
   expect(r.failures).toEqual([]);
+});
+
+test('Kern-Schleife: Besuch → Anfrage → Gerät kaufen → Auftrag starten', async ({ page }) => {
+  await page.goto('./');
+  await waitForGame(page);
+  const fields = await page.evaluate(() => (window as any).__game.status.fieldCount);
+  test.skip(!fields, 'keine Felddaten (Kartendaten v3 nötig)');
+  await expect(page.getByTestId('farm-count')).not.toHaveText('–');
+  await page.getByTestId('speed-100').click();
+  const near: number[] = await page.evaluate(() => {
+    const g = (window as any).__game;
+    const r = g.status.region;
+    return g.farmList()
+      .map((f: any) => ({ id: f.id, d: Math.hypot(f.home[0] - r.center.lon, f.home[1] - r.center.lat) }))
+      .sort((a: any, b: any) => a.d - b.d).slice(0, 20).map((x: any) => x.id);
+  });
+  for (const id of near) {
+    await page.evaluate((id) => (window as any).__game.command({ kind: 'visit', farmId: id }), id);
+    await page.waitForFunction(() => {
+      const b = (window as any).__game.status.business;
+      return b && !b.chefBusy;
+    }, null, { timeout: 90_000 });
+    await page.waitForTimeout(200);
+    if (await page.evaluate(() => (window as any).__game.status.business.requests.some((r: any) => r.status === 'offen'))) break;
+  }
+  await page.getByTestId('speed-0').click();
+  expect(Number(await page.getByTestId('known-count').textContent())).toBeGreaterThan(0);
+  await page.getByTestId('tab-auftraege').click();
+  await expect(page.getByTestId('request').first()).toBeVisible();
+  await page.getByTestId('tab-markt').click();
+  await page.getByTestId('buy').first().click();
+  await expect(page.getByTestId('cash')).toHaveText(/87\.500/);
+  await page.getByTestId('tab-auftraege').click();
+  await page.getByTestId('accept').first().click();
+  await expect(page.getByTestId('order').first()).toBeVisible();
+  await page.getByTestId('start-job').first().click();
+  await expect(page.getByTestId('order').first()).toContainText('läuft');
 });

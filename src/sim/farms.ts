@@ -192,13 +192,14 @@ export function generateFarms(g: RoadGraph, f: FieldSet, seed: number): FarmSet 
     }
 
     let name = '';
-    for (let tries = 0; tries < 20; tries++) {
+    for (let tries = 0; tries < 300; tries++) {
       const n = SURNAMES[rng.int(SURNAMES.length)];
-      const form = FORMS[rng.int(FORMS.length)];
+      // nach vielen Versuchen immer mit Vornamen-Initial (mehr Kombinationen)
+      const form = tries < 30 ? FORMS[rng.int(FORMS.length)] : 'Hof {i}. {n}';
       name = form.replace('{n}', n).replace('{i}', FIRST_INITIALS[rng.int(FIRST_INITIALS.length)]);
       if (!usedNames.has(name)) break;
     }
-    if (usedNames.has(name)) name = `${name} (${s + 1})`;
+    if (usedNames.has(name)) name = `${name} ${FIRST_INITIALS[s % FIRST_INITIALS.length]}${FIRST_INITIALS[(s >> 4) % FIRST_INITIALS.length]}`;
     usedNames.add(name);
 
     const fallbackNode = fl.length ? f.access[fl[0]] : 0;

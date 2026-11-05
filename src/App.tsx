@@ -4,9 +4,16 @@ import { formatGameTime } from './game/clock';
 import { runSelftest } from './game/selftest';
 import { forwardLogsToHost, platformName, selftestConfig } from './platform';
 import type { Speed } from './sim/protocol';
-import { machineValue } from './sim/economy';
+import { BusinessTab, MarketTab, NewsTab, OrdersTab } from './ui/Panels';
 
-const eur = (v: number) => v.toLocaleString('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
+const TABS = [
+  { id: 'betrieb', label: 'Betrieb' },
+  { id: 'auftraege', label: 'Aufträge' },
+  { id: 'markt', label: 'Markt' },
+  { id: 'nachrichten', label: 'Nachrichten' },
+  { id: 'technik', label: 'Technik' },
+] as const;
+type TabId = (typeof TABS)[number]['id'];
 
 const SPEEDS: { value: Speed; label: string; key: string }[] = [
   { value: 0, label: 'Pause', key: 'Leertaste' },
@@ -20,6 +27,7 @@ export function App() {
   const [game, setGame] = useState<GameController | null>(null);
   const [status, setStatus] = useState<GameStatus | null>(null);
   const [selftest, setSelftest] = useState<string | null>(null);
+  const [tab, setTab] = useState<TabId>('betrieb');
 
   useEffect(() => {
     const g = new GameController();
@@ -65,6 +73,7 @@ export function App() {
 
   const clock = formatGameTime(status?.time ?? 0);
   const st = status?.stats;
+  const openRequests = status?.business?.requests.filter((r) => r.status === 'offen').length ?? 0;
 
   return (
     <div className="app">
@@ -104,35 +113,28 @@ export function App() {
         )}
 
         <aside className="panel" data-testid="panel">
-          <h2>Mein Betrieb</h2>
-          {status?.company ? (
+          <nav className="tabs" role="tablist">
+            {TABS.map((t) => (
+              <button key={t.id} role="tab" aria-selected={tab === t.id} className={tab === t.id ? 'active' : ''} onClick={() => setTab(t.id)} data-testid={`tab-${t.id}`}>
+                {t.label}
+                {t.id === 'auftraege' && openRequests > 0 ? <span className="dot">{openRequests}</span> : null}
+              </button>
+            ))}
+          </nav>
+          {status && (
             <>
-              <dl data-testid="company">
-                <dt>Konto</dt><dd data-testid="cash">{eur(status.company.cash)}</dd>
-                <dt>Kreditrahmen</dt><dd>{eur(status.company.creditLimit - status.company.loan)} frei</dd>
-                <dt>Standort</dt><dd>Groß Thondorf</dd>
-                <dt>Fahrer</dt><dd>{status.company.drivers.length} (nur du)</dd>
-              </dl>
-              <ul className="machines">
-                {status.company.machines.map((m) => (
-                  <li key={m.id}>
-                    <span>{[m.brand, m.model].filter(Boolean).join(' ')}{m.power ? `, ${m.power} PS` : ''}</span>
-                    <small>Bj. {m.year} · {m.hours.toLocaleString('de-DE')} h · Zustand {m.condition} % · Wert {eur(machineValue(m))}</small>
-                  </li>
-                ))}
-              </ul>
-              <p className="hint">{status.company.site}</p>
+              <section hidden={tab !== 'betrieb'}><BusinessTab status={status} game={game} /></section>
+              <section hidden={tab !== 'auftraege'}><OrdersTab status={status} game={game} /></section>
+              <section hidden={tab !== 'markt'}><MarketTab status={status} game={game} /></section>
+              <section hidden={tab !== 'nachrichten'}><NewsTab status={status} game={game} /></section>
             </>
-          ) : (
-            <p className="hint">–</p>
           )}
-          <h2>Kunden</h2>
-          <dl>
-            <dt>Betriebe im Gebiet</dt><dd data-testid="farm-count">{status?.farmCount ? status.farmCount.toLocaleString('de-DE') : '–'}</dd>
-            <dt>im Adressbuch</dt><dd>{status?.knownFarms ?? 0}</dd>
-          </dl>
-          {status?.farmCount ? <p className="hint">Hofstellen anklicken für Details. Erst ein Besuch bringt einen Betrieb ins Adressbuch.</p> : null}
+          <section hidden={tab !== 'technik'}>
           <h2>Testfahrzeuge</h2>
+          <label className="toggle">
+            <input type="checkbox" checked={status?.testVehiclesVisible ?? false} onChange={(e) => game?.showTestVehicles(e.target.checked)} data-testid="toggle-test-vehicles" />
+            auf der Karte zeigen (zufälliger Verkehr für Leistungstests)
+          </label>
           <dl>
             <dt>Fahrzeuge</dt><dd data-testid="vehicle-count">{status?.vehicles ?? 0}</dd>
             <dt>unterwegs</dt><dd>{st?.driving ?? 0}</dd>
@@ -161,6 +163,7 @@ export function App() {
             <button onClick={() => game?.fitRegion()}>Ganzes Gebiet</button>
             <button onClick={() => game?.zoomHome(13)}>Zum Hof</button>
           </div>
+          </section>
           {selftest && <p className="selftest" data-testid="selftest">Selbsttest: {selftest}</p>}
         </aside>
       </main>

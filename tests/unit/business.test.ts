@@ -1,0 +1,152 @@
+import { describe, expect, it } from 'vitest';
+import { parseRoadGraph, RoadClass } from '../../src/sim/roadgraph';
+import { parseFields } from '../../src/sim/fields';
+import { Simulation, SNAPSHOT_STRIDE, VehicleState } from '../../src/sim/engine';
+import { gameDate } from '../../src/sim/economy';
+import { buildRoadGraphBuffer } from './helpers/grid';
+import { buildFieldsBuffer } from './helpers/fields';
+
+/** 8×8 km Gitter mit Ortsstraßen und 200 Feldern (Mais, Rüben, Kartoffeln kommen vor) */
+function world(seed = 3) {
+  const n = 9;
+  const nodes: [number, number][] = [];
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) nodes.push([i * 1000 - 4000, j * 1000 - 4000]);
+  const edges: { u: number; v: number; cls: number }[] = [];
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+    const a = j * n + i;
+    if (i + 1 < n) edges.push({ u: a, v: a + 1, cls: j % 2 === 0 ? RoadClass.Residential : RoadClass.Track });
+    if (j + 1 < n) edges.push({ u: a, v: a + n, cls: RoadClass.Tertiary });
+  }
+  const polys: [number, number][][] = [];
+  const access: number[] = [];
+  for (let k = 0; k < 200; k++) {
+    const x = -3900 + (k % 20) * 390, y = -3900 + Math.floor(k / 20) * 780;
+    polys.push([[x, y], [x + 350, y], [x + 350, y + 300], [x, y + 300]]); // 10,5 ha
+    access.push(Math.round((y + 4000) / 1000) * n + Math.round((x + 4000) / 1000));
+  }
+  const g = parseRoadGraph(buildRoadGraphBuffer(nodes, edges));
+  const f = parseFields(buildFieldsBuffer(polys, access));
+  return new Simulation(g, { seed, vehicleCount: 0, fields: f });
+}
+
+const runUntil = (s: Simulation, cond: () => boolean, max = 5000) => {
+  for (let i = 0; i < max && !cond(); i++) s.step();
+};
+
+describe('Spielkalender', () => {
+  it('rechnet Minuten in Datum um', () => {
+    expect(gameDate(0)).toEqual({ year: 2027, month: 3, day: 1, hour: 6, minute: 0 });
+    expect(gameDate(1440 * 31)).toMatchObject({ month: 4, day: 1 });
+    expect(gameDate(1440 * 306)).toMatchObject({ year: 2028, month: 1, day: 1 });
+  });
+});
+
+describe('Besuch, Anfrage, Auftrag', () => {
+  it('Besuch mit dem Firmenwagen bringt den Betrieb ins Adressbuch', () => {
+    const s = world();
+    const farm = s.farms!.farms.find((f) => f.homeNode !== s.homeNode)!;
+    expect(s.command({ kind: 'visit', farmId: farm.id })).toMatch(/Fahrt zu/);
+    expect(s.chefBusy).toMatch(/Besuch/);
+    // zweiter Befehl während der Fahrt: Chef ist beschäftigt
+    expect(s.command({ kind: 'visit', farmId: farm.id })).toMatch(/Besuch/);
+    runUntil(s, () => farm.known);
+    expect(farm.known).toBe(true);
+    const ev = s.business.drainEvents();
+    expect(ev.some((e) => e.farmId === farm.id)).toBe(true);
+    runUntil(s, () => !s.chefBusy);
+    expect(s.chefBusy).toBeNull();
+    expect(s.playerUnits().every((u) => u.status === 'am Hof')).toBe(true);
+  });
+
+  it('Anfrage annehmen, Grubber kaufen, Auftrag fahren', () => {
+    const s = world(5);
+    // Betriebe besuchen, bis eine Anfrage kommt
+    let req = undefined;
+    for (const farm of s.farms!.farms) {
+      s.command({ kind: 'visit', farmId: farm.id });
+      runUntil(s, () => !s.chefBusy);
+      req = s.business.requests.find((r) => r.status === 'offen');
+      if (req) break;
+    }
+    expect(req).toBeDefined();
+    expect(req!.priceHa).toBeGreaterThan(45);
+    expect(req!.priceHa).toBeLessThan(65);
+    expect(s.command({ kind: 'respond', requestId: req!.id, action: 'accept' })).toBe('Auftrag angelegt');
+    const order = s.business.orders[0];
+    // ohne Grubber geht es nicht
+    expect(s.command({ kind: 'startJob', orderId: order.id, tractorId: 1, implementId: 2 })).toMatch(/Grubber/);
+    expect(s.command({ kind: 'buy', offerId: 1 })).toBe('gekauft');
+    expect(s.company.cash).toBe(100_000 - 12_500);
+    const grubber = s.company.machines.find((m) => m.type === 'grubber')!;
+    const hoursBefore = s.company.machines[0].hours;
+    expect(s.command({ kind: 'startJob', orderId: order.id, tractorId: 1, implementId: grubber.id })).toBe('Auftrag gestartet');
+    expect(order.status).toBe('läuft');
+    let sawWork = false;
+    const start = s.time;
+    runUntil(s, () => {
+      const snap = s.snapshot();
+      for (let k = 0; k < snap.length; k += SNAPSHOT_STRIDE) if (snap[k + 2] === VehicleState.Working && order.fields.includes(snap[k + 3])) sawWork = true;
+      return order.status === 'fertig';
+    }, 20000);
+    expect(order.status).toBe('fertig');
+    expect(sawWork).toBe(true);
+    // Arbeitszeit mindestens Fläche / Flächenleistung (1,7 ha/h)
+    expect(s.time - start).toBeGreaterThanOrEqual((order.areaHa / 1.7) * 60 - 1);
+    expect(s.company.machines[0].hours).toBeCloseTo(hoursBefore + order.areaHa / 1.7, 0);
+    runUntil(s, () => !s.chefBusy, 5000);
+    expect(s.chefBusy).toBeNull();
+  });
+
+  it('Gegenangebot: zu teuer wird abgelehnt, günstiger angenommen', () => {
+    const s = world(8);
+    const reqs = () => s.business.requests.filter((r) => r.status === 'offen');
+    for (const farm of s.farms!.farms) {
+      if (reqs().length >= 2) break;
+      s.command({ kind: 'visit', farmId: farm.id });
+      runUntil(s, () => !s.chefBusy);
+    }
+    const [a, b] = reqs();
+    expect(s.command({ kind: 'respond', requestId: a.id, action: 'counter', priceHa: a.priceHa * 1.5 })).toBe('Kunde lehnt ab');
+    expect(a.status).toBe('abgelehnt');
+    expect(s.command({ kind: 'respond', requestId: b.id, action: 'counter', priceHa: b.priceHa - 2 })).toBe('Auftrag angelegt');
+    expect(s.business.orders.at(-1)!.priceHa).toBe(b.priceHa - 2);
+  });
+
+  it('unbeantwortete Anfragen verfallen nach zwei Tagen', () => {
+    const s = world(5);
+    for (const farm of s.farms!.farms) {
+      s.command({ kind: 'visit', farmId: farm.id });
+      runUntil(s, () => !s.chefBusy);
+      if (s.business.requests.length) break;
+    }
+    const r = s.business.requests[0];
+    const sat = s.farms!.farms[r.farmId].satisfaction;
+    s.run(3 * 1440);
+    expect(r.status).toBe('abgelaufen');
+    expect(s.farms!.farms[r.farmId].satisfaction).toBeLessThan(sat);
+  });
+
+  it('bekannte Betriebe melden sich per Anruf oder Nachricht', () => {
+    const s = world(11);
+    for (const farm of s.farms!.farms.slice(0, 15)) {
+      s.command({ kind: 'visit', farmId: farm.id });
+      runUntil(s, () => !s.chefBusy);
+    }
+    for (const r of s.business.requests) if (r.status === 'offen') s.command({ kind: 'respond', requestId: r.id, action: 'reject' });
+    s.run(20 * 1440);
+    expect(s.business.requests.some((r) => r.channel === 'anruf' || r.channel === 'nachricht')).toBe(true);
+  });
+
+  it('bleibt mit Spielerbefehlen deterministisch', () => {
+    const play = () => {
+      const s = world(4);
+      for (const farm of s.farms!.farms.slice(0, 5)) {
+        s.command({ kind: 'visit', farmId: farm.id });
+        runUntil(s, () => !s.chefBusy);
+      }
+      s.run(2000);
+      return s.hash();
+    };
+    expect(play()).toBe(play());
+  });
+});

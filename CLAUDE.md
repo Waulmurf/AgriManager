@@ -47,15 +47,13 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
 ## Stand (5. Nov. 2026)
 
 - Phase 1 (technischer Prototyp) fertig: Windows getestet (läuft gut laut Nils), macOS arm64 gemessen.
-- Phase 2, Schritt 1 (echte Felder) programmiert und lokal mit synthetischen Feldern getestet.
-  **Offen:** Kartendaten `map-data-v3` (mit `fields.bin`, `fields.pmtiles`) sind noch nicht
-  gebaut. GitHub Actions war wegen Ausgabenlimit gesperrt. Lokal bauen mit `npm run map-data:build`,
-  danach `npx vitest run tests/unit/real-map-data.test.ts` (prüft echte Felder) und die App ansehen.
-  Ohne `fields.bin` läuft die App mit gedachten Feldern weiter.
+- Phase 2, Schritt 1 (echte Felder) fertig: Kartendaten `map-data-v3` (40.204 Felder, 312.455 ha).
 - Phase 2, Schritt 2 (Kundenbetriebe, Startbetrieb) umgesetzt: `src/sim/farms.ts`, `src/sim/economy.ts`.
 - Repo ist öffentlich (Actions kostenlos).
-- Nächste Schritte: Phase 2, Schritte 3–5 laut `docs/plan.md` (Kunden/Hof, Anfrage→Auftrag
-  mit Grubbern, Fahrt+Arbeit mit LWK-Werten, Rechnung/Konto, SQLite-Spielstand).
+- Phase 2, Schritt 3 (Besuch, Anfrage, Verhandeln, Auftrag, Gerätekauf, Planungstafel) fertig:
+  `src/sim/business.ts`, Spielerfahrzeuge in `engine.ts`, Oberfläche `src/ui/Panels.tsx`.
+- Nächste Schritte: Schritt 4 (Fahrprofile, Diesel, Rüstzeiten, Arbeitszeit des Chefs) und
+  Schritt 5 (Rechnung, Konto, SQLite-Spielstand) laut `docs/plan.md`.
 
 ## CI (GitHub Actions)
 

@@ -2,14 +2,14 @@
 
 exports[`Simulation > hat einen plattformunabhängigen Referenzzustand 1`] = `
 {
-  "hash": "3becf3c8",
+  "hash": "59c23c4a",
   "stats": {
     "cacheHits": 1312,
     "driving": 7,
     "searches": 2342,
     "time": 5000,
     "trips": 2794,
-    "waiting": 19,
+    "waiting": 21,
     "working": 4,
   },
 }

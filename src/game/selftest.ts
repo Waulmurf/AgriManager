@@ -46,6 +46,7 @@ export async function runSelftest(
   const t0 = performance.now();
   while (game.status.phase === 'loading' && performance.now() - t0 < 30000) await wait(100);
   game.fitRegion();
+  game.showTestVehicles(true);
   await wait(300);
   while (!game.status.tilesLoaded && performance.now() - t0 < 45000) await wait(100);
   const tileLoadMs = performance.now() - t0;
@@ -109,7 +110,7 @@ export async function runSelftest(
   if (!webgl2) failures.push('kein WebGL2');
   if (basemapFeatures < 200) failures.push(`Grundkarte nicht gezeichnet (${basemapFeatures} Objekte)`);
   if (result.tileErrors > 0) failures.push(`${result.tileErrors} Kartenfehler`);
-  if (result.vehicles !== 30 || result.vehiclesOnMap !== 30) failures.push('nicht alle 30 Fahrzeuge auf der Karte');
+  if (result.vehicles !== 30 || result.vehiclesOnMap < 30) failures.push('nicht alle 30 Fahrzeuge auf der Karte');
   if (result.stepsPerSecond < minSps) failures.push(`nur ${result.stepsPerSecond} Schritte/s bei 100x`);
   if (result.fpsAvg < minFps) failures.push(`Bildrate ${result.fpsAvg} fps unter ${minFps} fps`);
   result.ok = failures.length === 0;

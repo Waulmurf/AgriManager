@@ -2,6 +2,8 @@
 import type { VehicleInfo } from './engine';
 import type { Company } from './economy';
 import type { ContactPreference } from './farms';
+import type { Command, GameEvent, Order, Request } from './business';
+import type { MarketOffer } from './economy';
 
 /** Spielminuten pro Sekunde Echtzeit bei 1x. 10x/100x vervielfachen die Schrittzahl. */
 export const STEPS_PER_SECOND_AT_1X = 1;
@@ -13,7 +15,8 @@ export type Speed = 0 | 1 | 10 | 100;
 export type ToWorker =
   | { type: 'init'; graph: ArrayBuffer; fields?: ArrayBuffer; seed: number; vehicleCount: number }
   | { type: 'speed'; speed: Speed }
-  | { type: 'stepOnce' };
+  | { type: 'stepOnce' }
+  | { type: 'command'; id: number; cmd: Command };
 
 export interface WireRoute {
   id: number;
@@ -39,6 +42,20 @@ export interface FarmSummary {
   satisfaction: number;
   /** Fläche je Kultur (Index = Crop) in ha */
   cropHa: number[];
+}
+
+/** Geschäftszustand für die Oberfläche (bei Änderung gesendet) */
+export interface BusinessState {
+  time: number;
+  company: Company;
+  requests: Request[];
+  orders: Order[];
+  offers: MarketOffer[];
+  units: { machineId: number; vehicle: number; status: string }[];
+  chefBusy: string | null;
+  knownFarms: number[];
+  satisfaction: Record<number, number>;
+  events: GameEvent[];
 }
 
 export interface WorkerStats {
@@ -81,4 +98,6 @@ export type FromWorker =
       routes: WireRoute[];
       stats: WorkerStats;
     }
+  | { type: 'business'; state: BusinessState }
+  | { type: 'commandResult'; id: number; message: string }
   | { type: 'error'; message: string };

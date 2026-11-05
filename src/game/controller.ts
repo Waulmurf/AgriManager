@@ -11,7 +11,8 @@ import { assetBase, mapDataUrl } from '../platform';
 import { addFallbackImages, BASEMAP_SOURCE, buildStyle, circlePolygon } from '../map/style';
 import { addVehicleIcons, vehicleIconId } from '../map/icons';
 import { VehicleInterpolator, type VehicleSample } from '../map/interpolator';
-import type { FarmSummary, FromWorker, Speed, ToWorker, WorkerStats } from '../sim/protocol';
+import type { BusinessState, FarmSummary, FromWorker, Speed, ToWorker, WorkerStats } from '../sim/protocol';
+import type { Command, GameEvent } from '../sim/business';
 import type { Company } from '../sim/economy';
 import { CROP_NAMES } from '../sim/farms';
 import type { VehicleInfo } from '../sim/engine';
@@ -46,6 +47,10 @@ export interface GameStatus {
   company: Company | null;
   farmCount: number;
   knownFarms: number;
+  business: BusinessState | null;
+  testVehiclesVisible: boolean;
+  /** letzte Ereignisse, neueste zuerst */
+  events: GameEvent[];
   tilesLoaded: boolean;
   tileErrors: number;
 }
@@ -72,11 +77,13 @@ export class GameController {
   private fields: FieldSet | null = null;
   private activeFields = new Set<number>();
   private farms: FarmSummary[] = [];
+  private cmdId = 1;
+  private pendingCmds = new Map<number, (msg: string) => void>();
   private fieldFarm: Int32Array = new Int32Array(0);
   private fieldCrop: Uint8Array = new Uint8Array(0);
   status: GameStatus = {
     phase: 'loading', speed: 0, time: 0, simTime: 0, vehicles: 0, stats: null, fps: 0, frameP95: 0, updateMs: 0,
-    region: null, graph: null, fieldCount: 0, company: null, farmCount: 0, knownFarms: 0, tilesLoaded: false, tileErrors: 0,
+    region: null, graph: null, fieldCount: 0, company: null, farmCount: 0, knownFarms: 0, business: null, events: [], testVehiclesVisible: false, tilesLoaded: false, tileErrors: 0,
   };
 
   subscribe(fn: (s: GameStatus) => void): () => void {
@@ -117,7 +124,7 @@ export class GameController {
         zoom: 9.3,
         minZoom: 7,
         maxZoom: 17.5,
-        attributionControl: { compact: false },
+        attributionControl: { compact: true },
         // keine Telemetrie, keine Online-Ressourcen
         localIdeographFontFamily: 'sans-serif',
       });
@@ -224,7 +231,7 @@ export class GameController {
       this.features = msg.vehicles.map((v) => ({
         type: 'Feature',
         id: v.id,
-        properties: { icon: vehicleIconId(v.brand, v.profile), bearing: 0, state: 0, name: v.name },
+        properties: { icon: vehicleIconId(v.brand, v.profile), bearing: 0, state: 0, name: v.name, player: v.owner === 'player' },
         geometry: { type: 'Point', coordinates: [msg.home[0], msg.home[1]] },
       }));
       (this.map!.getSource('home') as GeoJSONSource).setData({
@@ -236,7 +243,7 @@ export class GameController {
       this.setFarmData();
       this.emit({
         phase: 'running',
-        vehicles: msg.vehicles.length,
+        vehicles: msg.vehicles.filter((v) => v.owner === 'test').length,
         graph: { nodes: msg.nodeCount, edges: msg.edgeCount },
         fieldCount: msg.fieldCount,
         company: msg.company,
@@ -247,6 +254,21 @@ export class GameController {
       this.interp.addTick(msg.time, msg.speed, msg.positions, msg.routes, performance.now());
       this.status.stats = msg.stats;
       this.status.simTime = msg.time;
+    } else if (msg.type === 'business') {
+      const st = msg.state;
+      let changed = false;
+      const known = new Set(st.knownFarms);
+      for (const f of this.farms) {
+        const k = known.has(f.id);
+        const sat = st.satisfaction[f.id] ?? f.satisfaction;
+        if (f.known !== k || f.satisfaction !== sat) { f.known = k; f.satisfaction = sat; changed = true; }
+      }
+      if (changed) this.setFarmData();
+      const events = [...st.events.slice().reverse(), ...this.status.events].slice(0, 60);
+      this.emit({ business: st, company: st.company, knownFarms: st.knownFarms.length, events });
+    } else if (msg.type === 'commandResult') {
+      this.pendingCmds.get(msg.id)?.(msg.message);
+      this.pendingCmds.delete(msg.id);
     } else if (msg.type === 'error') {
       this.emit({ phase: 'error', message: msg.message });
     }
@@ -319,6 +341,33 @@ export class GameController {
     };
   }
 
+  /** Spielerbefehl an die Simulation; liefert die Rückmeldung. */
+  command(cmd: Command): Promise<string> {
+    const id = this.cmdId++;
+    return new Promise((res) => {
+      this.pendingCmds.set(id, res);
+      this.post({ type: 'command', id, cmd });
+    });
+  }
+
+  farmById(id: number): FarmSummary | undefined {
+    return this.farms[id];
+  }
+
+  /** Testfahrzeuge (zufälliger Verkehr für Leistungstests) ein- oder ausblenden */
+  showTestVehicles(show: boolean) {
+    const map = this.map;
+    if (!map?.getLayer('vehicles')) return;
+    map.setFilter('vehicles', show ? null : ['==', ['get', 'player'], true]);
+    this.emit({ testVehiclesVisible: show });
+  }
+
+  /** Karte auf einen Betrieb ausrichten */
+  flyToFarm(id: number) {
+    const f = this.farms[id];
+    if (f && this.map) this.map.flyTo({ center: f.home, zoom: Math.max(this.map.getZoom(), 13), duration: 800 });
+  }
+
   /** Kundenbetriebe (für Tests und Oberfläche). */
   farmList(): FarmSummary[] {
     return this.farms;
@@ -350,7 +399,8 @@ export class GameController {
       `${f.areaHa.toLocaleString('de-DE', { maximumFractionDigits: 0 })} ha auf ${f.fieldCount} ${f.fieldCount === 1 ? 'Feld' : 'Feldern'}` +
       `${f.livestock ? ', mit Viehhaltung' : ', reiner Ackerbau'}<br>` +
       `<small>${crops}</small><br>` +
-      `<small>${f.known ? `Zufriedenheit ${f.satisfaction} %` : 'Noch nicht besucht – erst nach einem Besuch im Adressbuch'}</small>`
+      `<small>${f.known ? `Im Adressbuch · Zufriedenheit ${f.satisfaction} % · bevorzugt ${f.contact === 'anruf' ? 'Anrufe' : 'Nachrichten'}` : 'Noch nicht besucht – erst nach einem Besuch im Adressbuch'}</small>` +
+      `<div class="popup-actions"><button data-visit="${f.id}">${f.known ? 'Erneut besuchen' : 'Besuchen'}</button><span class="popup-msg"></span></div>`
     );
   }
 
@@ -473,15 +523,37 @@ export class GameController {
       const farm = id === undefined ? undefined : this.farms[Number(id)];
       if (!farm) return;
       e.preventDefault();
-      new maplibregl.Popup({ maxWidth: '280px' }).setLngLat(farm.home).setHTML(this.farmPopupHtml(farm)).addTo(map);
+      const popup = new maplibregl.Popup({ maxWidth: '280px' }).setLngLat(farm.home).setHTML(this.farmPopupHtml(farm)).addTo(map);
+      const el = popup.getElement();
+      el.querySelector<HTMLButtonElement>('[data-visit]')?.addEventListener('click', async (ev) => {
+        const btn = ev.currentTarget as HTMLButtonElement;
+        btn.disabled = true;
+        const msg = await this.command({ kind: 'visit', farmId: farm.id });
+        const out = el.querySelector('.popup-msg');
+        if (out) out.textContent = msg;
+      });
     });
     map.on('mouseenter', 'farms-dot', () => (map.getCanvas().style.cursor = 'pointer'));
     map.on('mouseleave', 'farms-dot', () => (map.getCanvas().style.cursor = ''));
     map.addSource('vehicles', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    // eigene Fahrzeuge: farbiger Ring darunter
+    map.addLayer({
+      id: 'vehicles-player-halo',
+      type: 'circle',
+      source: 'vehicles',
+      filter: ['==', ['get', 'player'], true],
+      paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 9, 12, 13, 16, 20],
+        'circle-color': 'rgba(255, 222, 0, 0.35)',
+        'circle-stroke-color': '#c79a00',
+        'circle-stroke-width': 2,
+      },
+    });
     map.addLayer({
       id: 'vehicles',
       type: 'symbol',
       source: 'vehicles',
+      filter: ['==', ['get', 'player'], true],
       layout: {
         'icon-image': ['get', 'icon'],
         'icon-rotate': ['get', 'bearing'],
