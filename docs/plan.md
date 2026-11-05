@@ -762,7 +762,7 @@ Nils wählt aus, was umgesetzt wird. Empfehlung für den nächsten Block: 4, 1, 
 
 ### A. Neue Geschäftsfelder
 
-1. **Transport mit Lkw:** Getreide, Rüben in der Rübenkampagne zu Nordzucker Uelzen, Kartoffeln,
+1. **Transport mit Lkw** (umgesetzt, siehe unten): Getreide, Rüben in der Rübenkampagne zu Nordzucker Uelzen, Kartoffeln,
    Gülle mit dem Tankauflieger. Mit Fahrerlaubnis CE, Lenk- und Ruhezeiten und Maut.
 2. **Winterdienst:** Verträge mit Gemeinden und Gewerbe. Bei Glätte oder Schnee kommen nachts
    Einsätze mit Streuer und Schild am Schlepper, mit Bereitschaftszuschlag (Wetter liefert
@@ -853,3 +853,30 @@ Nils wählt aus, was umgesetzt wird. Empfehlung für den nächsten Block: 4, 1, 
   holt der Landhandel am Feldrand ab), sonst bleibt sie Fremdleistung.
 - **Später:** Überladewagen, Kartoffelroden, Rübenmaus und Lkw-Abfuhr (Vorschlag 1),
   Schneidwerkswagen und Straßenfahrt mit Überbreite.
+
+## Umsetzung Vorschlag 1: Lkw-Transport (5. Nov. 2026)
+
+- **Lkw (`src/data/catalog.ts`, Händler Lkw-Zentrum Uelzen):** MAN TGX 18.510, Mercedes-Benz
+  Actros 1848, Scania R 500, jeweils mit Kippsattel (25–26 t, 178.000–192.000 €).
+  - Fahrer brauchen den Führerschein CE (Skill Lkw ab Stufe 1).
+  - Fahrprofil Lkw (`astar.ts`): bis 80 km/h, Landstraße 60 km/h, innerorts 45 km/h,
+    Feldwege 12 km/h.
+- **Aufträge (`transport`):**
+  - Rübenabfuhr in der Kampagne (20.9. bis 15.1.) von der Feldrandmiete zur Zuckerfabrik Uelzen.
+  - Korn vom Hoflager zum nächsten Landhandel (25.7. bis 15.9.). Landhandel und Getreidelager in
+    Uelzen, Bad Bevensen, Lüchow, Wittingen und Salzwedel sind erfunden (`src/data/destinations.ts`).
+  - Menge = Fläche × Ertrag (Rüben 80 t/ha, Weizen 7,5, Raps 3,8). Verhandelt wird in €/t.
+  - Fracht: 1,80 €/t + 0,12 €/t je Straßen-km (Straße ≈ Luftlinie × 1,3). Eine Rübenfuhre über
+    20 km bringt also etwa 4–5 €/t.
+- **Ablauf:** Der Lkw pendelt Ladestelle → Ziel, bis alles abgefahren ist.
+  - Laden: Rübenmaus an der Miete 8 min, Hoflager 15 min.
+  - Abladen inkl. Waage und Probe: Zuckerfabrik 20 min, Landhandel 15 min.
+  - Lenkzeit: nach 4,5 h Fahrt 45 min Pause.
+  - Reicht die Arbeitszeit nicht mehr für eine Runde, fährt der Lkw heim und macht am nächsten
+    Morgen weiter. Erreicht der Fahrer die Höchstarbeitszeit unterwegs, steht der Lkw über Nacht.
+  - Kein Wetterstopp.
+- **Kosten:** Diesel 32 l/100 km. Maut 0,35 €/km auf Abschnitten ab 65 km/h (Bundesstraßen,
+  Autobahn), täglich gebucht (Kategorie „Maut“) und in der Auftragsauswertung als Fremdkosten.
+- **Später:** mehrere Lkw je Auftrag, Abfuhrplan der Zuckerfabrik mit Zeitfenstern,
+  Wartezeiten an der Waage, Fahrtenschreiber und Wochenlenkzeit, Kartoffeltransporte,
+  Rückfracht (z. B. Kalk oder Dünger).

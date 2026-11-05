@@ -7,7 +7,7 @@ import { BRANDS, CAR_COLORS, COMPANY_CAR, brandKey, type BrandColors } from '../
 
 const SIZE = 40;
 
-function draw(colors: BrandColors, kind: 'tractor' | 'car', ratio: number): ImageData {
+function draw(colors: BrandColors, kind: 'tractor' | 'car' | 'truck', ratio: number): ImageData {
   const px = SIZE * ratio;
   const c = document.createElement('canvas');
   c.width = c.height = px;
@@ -40,6 +40,20 @@ function draw(colors: BrandColors, kind: 'tractor' | 'car', ratio: number): Imag
     // Kabinendach
     g.fillStyle = 'rgba(255,255,255,0.35)';
     g.fillRect(14.5, 23, 11, 8);
+  } else if (kind === 'truck') {
+    // Sattelzug: Fahrerhaus vorn in Markenfarbe, grauer Kipper-Auflieger dahinter
+    g.fillStyle = '#8a8f94';
+    g.strokeStyle = 'rgba(0,0,0,0.55)';
+    g.lineWidth = 1.2;
+    g.fillRect(13, 13, 14, 25);
+    g.strokeRect(13, 13, 14, 25);
+    g.shadowBlur = 0;
+    g.fillStyle = colors.main;
+    g.beginPath();
+    g.roundRect(12.5, 2, 15, 10, 2);
+    g.fill(); g.stroke();
+    g.fillStyle = colors.accent;
+    g.fillRect(14.5, 3.5, 11, 3); // Frontscheibe
   } else {
     g.fillStyle = colors.main;
     g.strokeStyle = colors.accent;
@@ -63,6 +77,7 @@ export function addVehicleIcons(map: MlMap): void {
   const ratio = Math.min(3, Math.max(1, Math.round(window.devicePixelRatio || 1)));
   for (const b of BRANDS) {
     map.addImage(vehicleIconId(b.name, 'tractor'), draw(b, 'tractor', ratio), { pixelRatio: ratio });
+    map.addImage(vehicleIconId(b.name, 'truck'), draw(b, 'truck', ratio), { pixelRatio: ratio });
   }
   map.addImage(vehicleIconId(COMPANY_CAR.name, 'car'), draw(COMPANY_CAR, 'car', ratio), { pixelRatio: ratio });
   for (const c of Object.values(CAR_COLORS)) {

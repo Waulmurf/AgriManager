@@ -30,15 +30,16 @@ const MONTH_START: Record<number, number> = { 3: 0, 4: 31, 5: 61, 6: 92, 7: 122,
 const at = (month: number, day: number) => (MONTH_START[month] + day - 1) * 1440 + 60;
 
 describe('Jahreslauf', () => {
-  it('Saisonkalender: Frühjahr Grubbern, Sommer Stoppel, Herbst Grubbern, Winter nichts', () => {
+  it('Saisonkalender: Frühjahr Grubbern, Sommer Stoppel, Herbst Grubbern, Winter nur Rübenabfuhr', () => {
     expect(seasonServices(at(4, 10)).map((x) => x.service)).toEqual(['grubbern', 'guelle', 'guelle']);
     expect(seasonServices(at(6, 15))).toEqual([]);
     expect(seasonServices(at(7, 20)).map((x) => x.service)).toEqual(['stoppel', 'drusch', 'drusch']);
-    expect(seasonServices(at(8, 20)).map((x) => x.service)).toEqual(['stoppel', 'guelle', 'drusch']);
-    expect(seasonServices(at(9, 10)).map((x) => x.service).sort()).toEqual(['grubbern', 'guelle', 'haeckseln', 'stoppel']);
-    expect(seasonServices(at(9, 25)).map((x) => x.service).sort()).toEqual(['grubbern', 'haeckseln', 'roden']);
-    expect(seasonServices(at(11, 20)).map((x) => x.service)).toEqual(['roden']);
-    expect(seasonServices(at(12, 1))).toEqual([]);
+    expect(seasonServices(at(8, 20)).map((x) => x.service)).toEqual(['stoppel', 'guelle', 'drusch', 'transport']);
+    expect(seasonServices(at(9, 10)).map((x) => x.service).sort()).toEqual(['grubbern', 'guelle', 'haeckseln', 'stoppel', 'transport']);
+    expect(seasonServices(at(9, 25)).map((x) => x.service).sort()).toEqual(['grubbern', 'haeckseln', 'roden', 'transport']);
+    expect(seasonServices(at(11, 20)).map((x) => x.service)).toEqual(['roden', 'transport']);
+    // Winter: nur noch Rübenabfuhr (Kampagne bis Mitte Januar)
+    expect(seasonServices(at(12, 1)).map((x) => x.service)).toEqual(['transport']);
   });
 
   it('im Sommer kommen Anfragen zur Stoppelbearbeitung, im Winter keine', () => {
@@ -53,7 +54,8 @@ describe('Jahreslauf', () => {
     s.run(at(12, 1) - s.time);
     const w0 = s.business.requests.length;
     s.run(60 * 1440);
-    expect(s.business.requests.length).toBe(w0);
+    // im Winter nur noch Rübenabfuhr (Lkw), keine Feldarbeit
+    expect(s.business.requests.slice(w0).every((r) => r.service === 'transport')).toBe(true);
   });
 
   it('Stoppelauftrag braucht eine Kurzscheibenegge', () => {

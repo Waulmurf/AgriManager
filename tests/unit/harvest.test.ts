@@ -110,3 +110,37 @@ describe('Rübenroden', () => {
     expect(o.doneT!).toBeLessThan(o.areaHa * 80 * 1.15);
   });
 });
+
+describe('Lkw-Transport', () => {
+  it('Rübenabfuhr: Anfrage in €/t, Lkw pendelt Miete → Zuckerfabrik, Rechnung nach der letzten Fuhre', () => {
+    const s = world(5);
+    for (let i = 0; i < s.farms!.fieldCrop.length; i += 2) s.farms!.fieldCrop[i] = Crop.Zuckerrueben;
+    s.run(at(10, 5) - s.time);
+    for (const f of s.farms!.farms) { f.known = true; f.satisfaction = 60; f.rivalUntil = 0; }
+    let req;
+    for (let d = 0; d < 30 && !req; d++) { s.run(1440); req = s.business.requests.find((r) => r.status === 'offen' && r.service === 'transport'); }
+    expect(req).toBeDefined();
+    expect(req!.tPerHa).toBe(80);
+    expect(req!.destName).toBe('Zuckerfabrik Uelzen');
+    const perT = req!.priceHa / req!.tPerHa!;
+    expect(perT).toBeGreaterThan(1.5);
+    expect(perT).toBeLessThan(15);
+    req!.fields = req!.fields.slice(0, 1);
+    req!.areaHa = Math.min(1.5, s.fields!.areaHa[req!.fields[0]]);
+    s.command({ kind: 'respond', requestId: req!.id, action: 'accept' });
+    const o = s.business.orders.find((x) => x.requestId === req!.id)!;
+    const lkw = addMachine(s, { type: 'lkw', brand: 'MAN', model: 'TGX', power: 510, payloadT: 25 });
+    const chef = s.company.drivers[0];
+    chef.skills.transport = 0;
+    expect(s.command({ kind: 'startJob', orderId: o.id, tractorId: lkw.id, implementId: lkw.id })).toMatch(/CE/);
+    chef.skills.transport = 2;
+    runUntil(s, () => s.time % 1440 > 10 && s.time % 1440 < 60, 2 * 1440);
+    expect(s.command({ kind: 'startJob', orderId: o.id, tractorId: lkw.id, implementId: lkw.id })).toMatch(/gestartet/);
+    const total = o.areaHa * 80;
+    runUntil(s, () => o.status === 'fertig', 8 * 1440);
+    expect(o.status).toBe('fertig');
+    expect(o.doneT!).toBeCloseTo(total, 0);
+    expect(s.business.invoices.some((i) => i.orderId === o.id && i.text.includes('Zuckerfabrik'))).toBe(true);
+  });
+});
+

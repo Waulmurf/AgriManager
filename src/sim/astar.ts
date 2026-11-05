@@ -45,12 +45,14 @@ function profile(
  * Fahrprofile (Annahmen, siehe docs/plan.md „Fahrprofile“):
  * - Schlepper 40 km/h bauartbedingt; Landstraße im Schnitt 38, innerorts 30, Feldwege 15 km/h
  * - Firmenwagen (Pkw) bis 100 km/h; Landstraße 85–95, innerorts 45, Feldwege 25 km/h
+ * - Lkw (40 t) bis 80 km/h, außerorts auf Landstraßen 60 km/h (StVO), Feldwege 12 km/h
  * Tempolimits aus OSM (maxspeed) begrenzen zusätzlich; vor Kurven wird abgebremst.
  * Fähre: Überfahrt inkl. Warten grob 8 km/h.
  */
 export const PROFILES = {
   tractor: profile('Schlepper', 40, { 1: 38, 2: 38, 3: 38, 4: 36, 5: 32, 6: 25, 7: 15, 8: 15, 9: 8 }, 30, 1, [10, 15, 25, 32], 25),
   car: profile('Firmenwagen', 100, { 1: 95, 2: 90, 3: 85, 4: 75, 5: 60, 6: 30, 7: 20, 8: 25, 9: 8 }, 45, 0.95, [15, 25, 45, 70], 40),
+  truck: profile('Lkw', 80, { 1: 78, 2: 70, 3: 60, 4: 55, 5: 45, 6: 30, 7: 15, 8: 12, 9: 8 }, 45, 0.95, [10, 20, 35, 50], 50),
 } as const;
 
 const speedCache = new WeakMap<RoadGraph, Map<string, Float64Array>>();

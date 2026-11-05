@@ -19,6 +19,7 @@ import {
   BIOGAS, BIOGAS_AFA_YEARS, EEG_MAX_CT, FIXED_SHARE, GAER_GABE, GAER_SELL_EUR, GAER_VALUE_EUR, GUELLE_HAUL_EUR, OPEX_CT,
   SUBSTRATE_NAME, SUBSTRATE_PRICE, dailyTarget, farmSlurryPerDay, gaerBlocked, gaerOf, ration, type BiogasSize, type Feed, type Substrate,
 } from './biogas';
+import { DESTINATIONS } from '../data/destinations';
 import { COMPETITOR_RANGE_KM, PRICE_WAR_KM, generateCompetitors, kmBetween, type Competitor } from './market';
 import {
   DIESEL_MEAN, DIESEL_START, LEASE_BASE_RATE, LIABILITY_PER_YEAR, OVERDRAFT_RATE, RATING_SURCHARGE,
@@ -76,13 +77,13 @@ export const TRIAL_MAX_HA = 10;
 export const REPAIR_TRACTOR_EUR_H = 8;
 export const WEAR_GRUBBER_EUR_HA = 3;
 
-export type Service = 'grubbern' | 'stoppel' | 'guelle' | 'haeckseln' | 'drusch' | 'roden';
-export const SERVICE_NAMES: Record<Service, string> = { grubbern: 'Grubbern', stoppel: 'Stoppelbearbeitung', guelle: 'Gülle ausbringen', haeckseln: 'Maishäckseln', drusch: 'Mähdrusch', roden: 'Rübenroden' };
+export type Service = 'grubbern' | 'stoppel' | 'guelle' | 'haeckseln' | 'drusch' | 'roden' | 'transport';
+export const SERVICE_NAMES: Record<Service, string> = { grubbern: 'Grubbern', stoppel: 'Stoppelbearbeitung', guelle: 'Gülle ausbringen', haeckseln: 'Maishäckseln', drusch: 'Mähdrusch', roden: 'Rübenroden', transport: 'Lkw-Transport' };
 /** Gerät je Dienstleistung und Tätigkeitswort für die Anzeige */
-export const SERVICE_IMPLEMENT: Record<Service, MachineType> = { grubbern: 'grubber', stoppel: 'kurzscheibenegge', guelle: 'guellefass', haeckseln: 'feldhaecksler', drusch: 'maehdrescher', roden: 'ruebenroder' };
-export const SERVICE_VERB: Record<Service, string> = { grubbern: 'grubbert', stoppel: 'bearbeitet Stoppeln', guelle: 'bringt Gülle aus', haeckseln: 'häckselt', drusch: 'drischt', roden: 'rodet Rüben' };
+export const SERVICE_IMPLEMENT: Record<Service, MachineType> = { grubbern: 'grubber', stoppel: 'kurzscheibenegge', guelle: 'guellefass', haeckseln: 'feldhaecksler', drusch: 'maehdrescher', roden: 'ruebenroder', transport: 'lkw' };
+export const SERVICE_VERB: Record<Service, string> = { grubbern: 'grubbert', stoppel: 'bearbeitet Stoppeln', guelle: 'bringt Gülle aus', haeckseln: 'häckselt', drusch: 'drischt', roden: 'rodet Rüben', transport: 'fährt Lkw' };
 /** Tätigkeit des Fahrers je Dienstleistung (Skill) */
-export const SERVICE_SKILL: Record<Service, Skill> = { grubbern: 'boden', stoppel: 'boden', guelle: 'guelle', haeckseln: 'haecksler', drusch: 'drescher', roden: 'roder' };
+export const SERVICE_SKILL: Record<Service, Skill> = { grubbern: 'boden', stoppel: 'boden', guelle: 'guelle', haeckseln: 'haecksler', drusch: 'drescher', roden: 'roder', transport: 'transport' };
 /** Erntedienste: selbstfahrende Hauptmaschine (Fahrzeug und Gerät zugleich), Abfahrer-Wagen (falls nötig) */
 export const HARVEST_SERVICES: Service[] = ['haeckseln', 'drusch', 'roden'];
 export const HAULER_TYPE: Partial<Record<Service, MachineType>> = { haeckseln: 'haeckselwagen', drusch: 'kipper' };
@@ -116,7 +117,20 @@ export const HIRED_ROLLER_EUR_H = 110;
  * Grubbern. Gülle wird je m³ abgerechnet: 4 €/m³ (Spanne für Lohnausbringung 2,50–8 €/m³ je nach
  * Entfernung und System laut LK Niederösterreich); priceHa = €/m³ × Gabe.
  */
-export const SERVICE_BASE_PRICE: Record<Service, number> = { grubbern: 55, stoppel: 38, guelle: 4, haeckseln: 230, drusch: 150, roden: 280 };
+export const SERVICE_BASE_PRICE: Record<Service, number> = { grubbern: 55, stoppel: 38, guelle: 4, haeckseln: 230, drusch: 150, roden: 280, transport: 0 };
+/**
+ * Lkw-Transport (Annahme): Fracht 1,80 €/t Grundpreis + 0,12 €/t je Straßen-km (Straße ≈ Luftlinie × 1,3);
+ * Diesel 32 l/100 km; Maut 0,35 €/km auf Bundesstraßen und Autobahn (Strecken ab 65 km/h); Laden an der
+ * Miete mit Rübenmaus 8 min, am Hoflager 15 min.
+ */
+export const FREIGHT_BASE_EUR_T = 1.8;
+export const FREIGHT_EUR_TKM = 0.12;
+export const DIESEL_TRUCK_L_KM = 0.32;
+export const TOLL_EUR_KM = 0.35;
+export const TRUCK_LOAD_MIN = { rueben: 8, korn: 15 } as const;
+/** Lenkzeit: nach 4,5 h Fahrt 45 min Pause (EU-Lenkzeitregeln, vereinfacht) */
+export const DRIVE_BREAK_AFTER_MIN = 270;
+export const DRIVE_BREAK_MIN = 45;
 
 /**
  * Jahreslauf (AK-04): welche Dienstleistung wann gefragt ist, für welche Kulturen, und wie stark.
@@ -145,6 +159,9 @@ export function seasonServices(time: number): { service: Service; crops: Crop[];
   if (md >= 720 && md <= 830) out.push({ service: 'drusch', crops: [Crop.Getreide], weight: md >= 801 && md <= 820 ? 1.5 : 1 });
   // Rübenroden: Kampagne Nordzucker Uelzen ab Mitte September, Roden bis Ende November
   if (md >= 915 && md <= 1130) out.push({ service: 'roden', crops: [Crop.Zuckerrueben], weight: md >= 1001 && md <= 1115 ? 1.3 : 0.8 });
+  // Lkw-Transport: Rübenabfuhr in der Kampagne (bis Mitte Januar), Korn vom Hoflager zum Landhandel
+  if (md >= 920 || md <= 115) out.push({ service: 'transport', crops: [Crop.Zuckerrueben], weight: 1 });
+  if (md >= 725 && md <= 915) out.push({ service: 'transport', crops: [Crop.Getreide, Crop.Raps], weight: 0.6 });
   return out;
 }
 
@@ -166,6 +183,11 @@ export interface Request {
   gabe?: number;
   /** Häckseln: nur Häcksler oder Komplettkette */
   chain?: 'haecksler' | 'komplett';
+  /** Transport: Menge je ha (t), Ladestelle, Ziel (Knoten, Name) */
+  tPerHa?: number;
+  pickupNode?: number;
+  destNode?: number;
+  destName?: string;
   /** bestes Konkurrenzangebot (€/ha) und Anbieter (MK-02) */
   competitorPriceHa?: number;
   competitorId?: number;
@@ -196,6 +218,11 @@ export interface Order {
   externalCost?: number;
   /** Eigenauftrag auf eigener Pachtfläche (keine Rechnung) */
   ownLeaseId?: number;
+  /** Transport: Menge je ha (t), Ladestelle, Ziel; abgeliefert steht in doneT */
+  tPerHa?: number;
+  pickupNode?: number;
+  destNode?: number;
+  destName?: string;
   /** Lager/Silo statt Hofstelle des Kunden (Biogasanlage) */
   sourceNode?: number;
   /** Gärrest auf eigene Fläche (m³ schon aus dem Lager genommen) */
@@ -244,7 +271,7 @@ export interface Invoice {
 export type LedgerCategory =
   | 'Rechnung' | 'Diesel' | 'Maschinenkauf' | 'Personal' | 'Werkstatt'
   | 'Kredit' | 'Tilgung' | 'Zinsen' | 'Leasing' | 'Versicherung' | 'Steuern' | 'Gebäude' | 'Bau'
-  | 'Pacht' | 'Ackerbau' | 'Ernte' | 'Strom' | 'Biogas' | 'Sonstiges';
+  | 'Pacht' | 'Ackerbau' | 'Ernte' | 'Strom' | 'Biogas' | 'Maut' | 'Sonstiges';
 
 /** Biogasanlage (PB-07 bis PB-10) */
 export interface BiogasPlant {
@@ -448,6 +475,8 @@ export class Business {
   readonly leases: Lease[] = [];
   /** Wetterabfrage für Ertrag (Regen eines Tages in mm; setzt der Rechenkern) */
   rainOfDay: ((day: number) => number) | null = null;
+  /** nächster Straßenknoten zu [lon, lat] (setzt der Rechenkern) */
+  lonLatNode: ((lonLat: [number, number]) => number) | null = null;
   /** eigene Biogasanlage */
   biogas: BiogasPlant | null = null;
   /** Markt (Phase 5): Konkurrenten, Ruf, Statistik gewonnen/verloren */
@@ -474,6 +503,8 @@ export class Business {
   /** heute verbrauchter Diesel, wird täglich als eine Buchung zusammengefasst */
   private dieselTodayL = 0;
   private dieselTodayEur = 0;
+  /** Maut des Tages (Lkw), einmal täglich gebucht */
+  private tollToday = 0;
   readonly offers: MarketOffer[] = START_OFFERS.map((o) => ({ ...o, machine: { ...o.machine } }));
   private events: GameEvent[] = [];
   private rng: Rng;
@@ -508,6 +539,7 @@ export class Business {
       dieselTotalL: this.dieselTotalL,
       dieselTodayL: this.dieselTodayL,
       dieselTodayEur: this.dieselTodayEur,
+      tollToday: this.tollToday,
       applicants: this.applicants,
       payrollAccrued: this.payrollAccrued,
       deliveries: this.deliveries,
@@ -539,6 +571,7 @@ export class Business {
     this.dieselTotalL = s.dieselTotalL;
     this.dieselTodayL = s.dieselTodayL;
     this.dieselTodayEur = s.dieselTodayEur;
+    this.tollToday = s.tollToday ?? 0;
     put(this.applicants, s.applicants ?? []);
     put(this.deliveries, s.deliveries ?? []);
     put(this.staffRequests, s.staffRequests ?? []);
@@ -1395,7 +1428,11 @@ export class Business {
     // Drusch: die meisten Betriebe fahren das Korn selbst ab
     const chain = sv.service === 'haeckseln' ? (this.rng.next() < 0.3 + 0.5 * farm.mechanization ? 'haecksler' : 'komplett')
       : sv.service === 'drusch' ? (this.rng.next() < 0.55 + 0.35 * farm.mechanization ? 'haecksler' : 'komplett') : undefined;
-    const priceHa = gabe
+    // Transport: Ladestelle (Miete am Feld bzw. Hoflager), nächstes passendes Ziel, Fracht je t
+    const tr = sv.service === 'transport' ? this.transportTerms(farm.id, picked[0]) : null;
+    const priceHa = tr
+      ? tr.priceHa
+      : gabe
       ? Math.round(SERVICE_BASE_PRICE.guelle * (0.9 + this.rng.next() * 0.25) * 10) / 10 * gabe
       : chain
         ? Math.round(((sv.service === 'drusch' ? THRESH_PRICE_HA : CHOP_PRICE_HA)[chain] * (0.92 + this.rng.next() * 0.16)) / 5) * 5
@@ -1411,12 +1448,16 @@ export class Business {
       fields: picked,
       areaHa: Math.round(ha * 100) / 100,
       earliest: time,
-      latest: time + (chain ? 3 + this.rng.int(5) : 5 + this.rng.int(8)) * 1440,
+      latest: time + (chain ? 3 + this.rng.int(5) : tr ? 7 + this.rng.int(7) : 5 + this.rng.int(8)) * 1440,
       priceHa: offerHa,
       competitorPriceHa: comp?.priceHa,
       competitorId: comp?.id,
       gabe,
       chain,
+      tPerHa: tr?.tPerHa,
+      pickupNode: tr?.pickupNode,
+      destNode: tr?.destNode,
+      destName: tr?.destName,
       createdAt: time,
       replyBy: time + (this.isLoyal(farmId) ? 2 * REPLY_MINUTES : REPLY_MINUTES),
       status: 'offen',
@@ -1424,6 +1465,34 @@ export class Business {
     };
     this.requests.push(req);
     return req;
+  }
+
+  /** Transportbedingungen: Ware nach Kultur, Ladestelle, nächstes Ziel, Fracht je t (als €/ha × t/ha) */
+  private transportTerms(farmId: number, field: number) {
+    const fs = this.farms!, f = this.fields!;
+    const farm = fs.farms[farmId];
+    const crop = fs.fieldCrop[field];
+    const goods = crop === Crop.Zuckerrueben ? 'rueben' : 'korn';
+    const tPerHa = goods === 'rueben' ? BEET_YIELD_T_HA : crop === Crop.Raps ? RAPE_YIELD_T_HA : GRAIN_YIELD_T_HA;
+    const pickupNode = goods === 'rueben' ? f.access[field] : farm.homeNode;
+    const pos = this.nodeLonLat ? this.nodeLonLat(pickupNode) : null;
+    let best = DESTINATIONS.find((d) => d.goods.includes(goods))!;
+    let km = 30;
+    if (pos) {
+      km = Infinity;
+      for (const d of DESTINATIONS) {
+        if (!d.goods.includes(goods)) continue;
+        const k = kmBetween(d.lonLat, pos);
+        if (k < km) { km = k; best = d; }
+      }
+    }
+    const roadKm = km * 1.3;
+    const perT = Math.round((FREIGHT_BASE_EUR_T + FREIGHT_EUR_TKM * roadKm) * (0.92 + this.rng.next() * 0.16) * 100) / 100;
+    return {
+      tPerHa, pickupNode, destName: best.name, roadKm,
+      destNode: this.lonLatNode ? this.lonLatNode(best.lonLat) : farm.homeNode,
+      priceHa: Math.round(perT * tPerHa * 100) / 100,
+    };
   }
 
   /** Besuch abgeschlossen: Betrieb kommt ins Adressbuch; „Steht etwas an?“ (KK-04) */
@@ -1539,7 +1608,11 @@ export class Business {
       gabe: r.gabe,
       doneM3: r.gabe ? 0 : undefined,
       chain: r.chain,
-      doneT: isHarvest(r.service) ? 0 : undefined,
+      doneT: isHarvest(r.service) || r.service === 'transport' ? 0 : undefined,
+      tPerHa: r.tPerHa,
+      pickupNode: r.pickupNode,
+      destNode: r.destNode,
+      destName: r.destName,
       earliest: r.earliest,
       latest: r.latest,
       status: 'offen',
@@ -1740,7 +1813,7 @@ export class Business {
     for (const l of this.ledger) {
       if (l.time < from || l.time >= to) continue;
       if (l.category === 'Rechnung' || l.category === 'Ernte' || l.category === 'Strom') revenue += l.amount;
-      else if (l.category === 'Diesel' || l.category === 'Personal' || l.category === 'Werkstatt' || l.category === 'Zinsen' || l.category === 'Leasing' || l.category === 'Versicherung' || l.category === 'Gebäude' || l.category === 'Pacht' || l.category === 'Ackerbau' || l.category === 'Biogas' || l.category === 'Sonstiges') expenses -= l.amount;
+      else if (l.category === 'Diesel' || l.category === 'Personal' || l.category === 'Werkstatt' || l.category === 'Zinsen' || l.category === 'Leasing' || l.category === 'Versicherung' || l.category === 'Gebäude' || l.category === 'Pacht' || l.category === 'Ackerbau' || l.category === 'Biogas' || l.category === 'Maut' || l.category === 'Sonstiges') expenses -= l.amount;
     }
     let afa = this.yearAfaSold + this.buildingAfa(from, to) + this.biogasAfa(from, to);
     for (const m of this.company.machines) afa += bookValue(m, Math.max(from, m.boughtAt ?? 0)) - bookValue(m, to);
@@ -1965,6 +2038,14 @@ export class Business {
   private workshopBusy(time: number): boolean {
     const mo = gameDate(time).month;
     return mo >= 7 && mo <= 10;
+  }
+
+  /** Maut (Lkw) als Fremdkosten des Auftrags und Buchung */
+  chargeToll(eur: number, o: Order | undefined, time: number) {
+    this.tollToday = Math.round((this.tollToday + eur) * 100) / 100;
+    if (o) o.externalCost = Math.round(((o.externalCost ?? 0) + eur) * 100) / 100;
+    this.version++;
+    void time;
   }
 
   /** Wartung beim Händler (MZ-05): Maschine einen Arbeitstag weg, Zustand +3, Intervall neu */
@@ -2214,6 +2295,10 @@ export class Business {
 
   /** Dieselkosten des Tages als eine Buchung */
   private bookDiesel(time: number) {
+    if (this.tollToday > 0) {
+      this.ledger.push({ time, text: 'Lkw-Maut', amount: -Math.round(this.tollToday * 100) / 100, category: 'Maut' });
+      this.tollToday = 0;
+    }
     if (this.dieselTodayEur <= 0) return;
     this.ledger.push({
       time,
@@ -2243,6 +2328,8 @@ export class Business {
       farmId: o.farmId,
       text: o.chain
         ? `${SERVICE_NAMES[o.service]} (${chainName(o.service, o.chain)}) ${fmtHa(o.areaHa)} à ${fmtEur(o.priceHa)}/ha, ${Math.round(o.doneT ?? 0)} t`
+        : o.tPerHa
+        ? `${SERVICE_NAMES[o.service]} nach ${o.destName ?? 'Ziel'}: ${Math.round(o.areaHa * o.tPerHa).toLocaleString('de-DE')} t à ${fmtEur(o.priceHa / o.tPerHa)}/t`
         : o.gabe
         ? `${SERVICE_NAMES[o.service]} ${fmtM3(o.areaHa * o.gabe)} à ${fmtEur(o.priceHa / o.gabe)}/m³ (${fmtHa(o.areaHa)})`
         : `${SERVICE_NAMES[o.service]} ${fmtHa(o.areaHa)} à ${fmtEur(o.priceHa)}/ha`,

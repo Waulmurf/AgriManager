@@ -99,7 +99,9 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
 - Weitere Schichten (Standorte, Pacht, Ackerbau, Biogas) damit komplett.
 - Vorschlag 4 fertig: Mähdrusch (`drusch`, Korntank, nur Drusch/mit Abfuhr per Kipper, `Weather.threshBlocked`) und
   Rübenroden (`roden`, Bunker, Feldrandmiete) als Erntedienste (`isHarvest`, `HAULER_TYPE`, `ChopState.bunker/miete`).
-  Nils hat „Mache weiter mit dem Plan“ gesagt: Reihenfolge laut Empfehlung 4 → 1 → 13 → 5. Vorschläge für die nächsten Schichten
+  Nils hat „Mache weiter mit dem Plan“ gesagt: Reihenfolge laut Empfehlung 4 → 1 → 13 → 5.
+- Vorschlag 1 fertig: Lkw-Transport (`transport`, Task `truck` in `engine.ts`, Profil `truck`, Ziele `src/data/destinations.ts`,
+  Fracht je t über `Order.tPerHa`, Lenkzeitpause, Maut `chargeToll`). Vorschläge für die nächsten Schichten
   (Nr. 1–19) stehen am Ende von docs/plan.md und warten auf Nils' Auswahl.
 
 ## CI (GitHub Actions)

@@ -26,6 +26,10 @@ export const BRANDS: BrandColors[] = [
   // Rübenroder (Annahme, Lacknäherung)
   { name: 'Grimme', main: '#C4161C', accent: '#3A3A3A' },
   { name: 'Ropa', main: '#4C8C2B', accent: '#F2F2F2' },
+  // Lkw (Annahme, Lacknäherung)
+  { name: 'MAN', main: '#D7D9DB', accent: '#E2001A' },
+  { name: 'Mercedes-Benz', main: '#B9BDC1', accent: '#1A1A1A' },
+  { name: 'Scania', main: '#0F1E46', accent: '#D6001C' },
 ];
 
 /** Firmenwagen ohne Marke (Kombi) */

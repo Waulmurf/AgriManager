@@ -111,13 +111,15 @@ export function BusinessTab({ status, game }: { status: GameStatus; game: GameCo
 }
 
 function RequestItem({ r, game, time, estimate }: { r: Request; game: GameController | null; time: number; estimate?: JobEstimate }) {
-  // Gülle wird je m³ verhandelt, intern als €/ha (× Gabe)
-  const [price, setPrice] = useState(String(r.gabe ? Math.round((r.priceHa / r.gabe) * 100) / 100 : r.priceHa));
+  // Gülle wird je m³, Transport je t verhandelt, intern als €/ha (× Gabe bzw. × t/ha)
+  const unitF = r.gabe ?? r.tPerHa;
+  const unit = r.gabe ? '€/m³' : r.tPerHa ? '€/t' : '€/ha';
+  const [price, setPrice] = useState(String(unitF ? Math.round((r.priceHa / unitF) * 100) / 100 : r.priceHa));
   const fb = useFeedback();
   const farm = game?.farmById(r.farmId);
   const send = async (action: 'accept' | 'reject' | 'counter') => {
     const p = Number(price.replace(',', '.'));
-    const msg = await game!.command({ kind: 'respond', requestId: r.id, action, priceHa: r.gabe ? p * r.gabe : p });
+    const msg = await game!.command({ kind: 'respond', requestId: r.id, action, priceHa: unitF ? p * unitF : p });
     fb.show(msg);
   };
   const hoursLeft = Math.max(0, Math.round((r.replyBy - time) / 60));
@@ -128,10 +130,10 @@ function RequestItem({ r, game, time, estimate }: { r: Request; game: GameContro
         <small>{r.channel === 'besuch' ? 'beim Besuch' : r.channel === 'anruf' ? 'Anruf' : 'Nachricht'}</small>
       </div>
       <div>
-        {SERVICE_NAMES[r.service]}{r.chain ? ` (${r.chain === 'komplett' ? 'Komplettkette: Häcksler, Abfahrer, Walzen' : 'nur Häcksler'})` : ''}: {r.fields.length} {r.fields.length === 1 ? 'Feld' : 'Felder'}, {ha(r.areaHa)} · bis {fmtDay(r.latest)}
+        {SERVICE_NAMES[r.service]}{r.chain ? ` (${chainName(r.service, r.chain)})` : ''}: {r.tPerHa ? `${Math.round(r.areaHa * r.tPerHa).toLocaleString('de-DE')} t ${r.tPerHa >= 50 ? 'Rüben ab Feldrandmiete' : 'Korn ab Hoflager'} nach ${r.destName}` : `${r.fields.length} ${r.fields.length === 1 ? 'Feld' : 'Felder'}, ${ha(r.areaHa)}`} · bis {fmtDay(r.latest)}
       </div>
       <div>
-        Angebot Kunde: <strong>{r.gabe ? `${(r.priceHa / r.gabe).toLocaleString('de-DE', { maximumFractionDigits: 2 })} €/m³` : `${r.priceHa.toLocaleString('de-DE')} €/ha`}</strong> = {eur(r.priceHa * r.areaHa)}
+        Angebot Kunde: <strong>{unitF ? `${(r.priceHa / unitF).toLocaleString('de-DE', { maximumFractionDigits: 2 })} ${unit}` : `${r.priceHa.toLocaleString('de-DE')} €/ha`}</strong> = {eur(r.priceHa * r.areaHa)}
         {r.gabe ? <small className="hint"> · {r.gabe} m³/ha = {Math.round(r.areaHa * r.gabe).toLocaleString('de-DE')} m³ ab Güllelager des Kunden</small> : null}
       </div>
       {r.competitorPriceHa !== undefined && r.status === 'offen' && (
@@ -146,7 +148,7 @@ function RequestItem({ r, game, time, estimate }: { r: Request; game: GameContro
             <button onClick={() => send('reject')}>Ablehnen</button>
             <span className="counter">
               <input value={price} onChange={(e) => setPrice(e.target.value)} aria-label="Gegenangebot €/ha" />
-              <button onClick={() => send('counter')}>{r.gabe ? '€/m³' : '€/ha'} anbieten</button>
+              <button onClick={() => send('counter')}>{unit} anbieten</button>
             </span>
           </div>
         </>
@@ -248,6 +250,28 @@ function ChopStart({ o, game, status, show }: { o: Order; game: GameController |
   );
 }
 
+/** Lkw-Transport starten: Lkw und Fahrer mit Führerschein CE */
+function TruckStart({ o, game, status, show }: { o: Order; game: GameController | null; status: GameStatus; show: (m: string) => void }) {
+  const c = status.company!;
+  const trucks = c.machines.filter((m) => m.type === 'lkw');
+  const drivers = c.drivers;
+  const [lkw, setLkw] = useState(trucks[0]?.id ?? 0);
+  const [d, setD] = useState(drivers.find((x) => (x.skills.transport ?? 0) >= 1)?.id ?? 1);
+  if (!trucks.length) return <small className="warn">Kein Lkw im Fuhrpark – im Markt beim Lkw-Zentrum kaufen oder leasen</small>;
+  return (
+    <div className="card-actions">
+      <select value={lkw} onChange={(e) => setLkw(Number(e.target.value))} aria-label="Lkw">
+        {trucks.map((m) => <option key={m.id} value={m.id}>{machineName(m)} ({m.payloadT} t)</option>)}
+      </select>
+      <select value={d} onChange={(e) => setD(Number(e.target.value))} aria-label="Lkw-Fahrer">
+        {drivers.map((x) => <option key={x.id} value={x.id}>{x.isPlayer ? 'Chef' : x.name} · Lkw {x.skills.transport ?? 0}</option>)}
+      </select>
+      <button onClick={async () => show(await game!.command({ kind: 'startJob', orderId: o.id, tractorId: lkw, implementId: lkw, driverId: d }))} data-testid="start-truck">Transport starten</button>
+      <small className="hint">Der Lkw pendelt, bis alles abgefahren ist. Nach 4,5 h Fahrt 45 min Pause, Feierabend nach der Höchstarbeitszeit. Maut auf Bundesstraßen.</small>
+    </div>
+  );
+}
+
 function OrderItem({ o, game, status }: { o: Order; game: GameController | null; status: GameStatus }) {
   const c = status.company!;
   const tractors = c.machines.filter((m) => m.type === 'schlepper');
@@ -285,9 +309,9 @@ function OrderItem({ o, game, status }: { o: Order; game: GameController | null;
         <small className={`badge ${o.status === 'fertig' ? 'done' : o.status === 'läuft' ? 'run' : ''}`}>{o.status}</small>
       </div>
       <div>
-        {SERVICE_NAMES[o.service]}{o.chain ? ` (${chainName(o.service, o.chain)})` : ''} {ha(o.areaHa)}{o.gaerrest ? ' Gärrest (Eigenauftrag)' : o.ownLeaseId !== undefined ? ' (Eigenauftrag, keine Rechnung)' : o.biogasPriceT !== undefined ? ` (Mais auf dem Halm à ${o.biogasPriceT} €/t, ins eigene Silo)` : <> zu {o.gabe ? `${(o.priceHa / o.gabe).toLocaleString('de-DE', { maximumFractionDigits: 2 })} €/m³ (${Math.round(o.areaHa * o.gabe).toLocaleString('de-DE')} m³)` : `${o.priceHa.toLocaleString('de-DE')} €/ha`} = {eur(o.priceHa * o.areaHa)}</>}
+        {SERVICE_NAMES[o.service]}{o.chain ? ` (${chainName(o.service, o.chain)})` : ''} {ha(o.areaHa)}{o.gaerrest ? ' Gärrest (Eigenauftrag)' : o.ownLeaseId !== undefined ? ' (Eigenauftrag, keine Rechnung)' : o.biogasPriceT !== undefined ? ` (Mais auf dem Halm à ${o.biogasPriceT} €/t, ins eigene Silo)` : o.tPerHa ? ` nach ${o.destName}: ${Math.round(o.areaHa * o.tPerHa).toLocaleString('de-DE')} t à ${(o.priceHa / o.tPerHa).toLocaleString('de-DE', { maximumFractionDigits: 2 })} €/t = ${eur(o.priceHa * o.areaHa)}` : <> zu {o.gabe ? `${(o.priceHa / o.gabe).toLocaleString('de-DE', { maximumFractionDigits: 2 })} €/m³ (${Math.round(o.areaHa * o.gabe).toLocaleString('de-DE')} m³)` : `${o.priceHa.toLocaleString('de-DE')} €/ha`} = {eur(o.priceHa * o.areaHa)}</>}
         {o.gabe && o.status === 'läuft' ? <small className="hint"> · ausgebracht {Math.round(o.doneM3 ?? 0).toLocaleString('de-DE')} m³</small> : null}
-        {isHarvest(o.service) && o.status !== 'offen' ? <small className="hint"> · {o.service === 'roden' ? 'in der Miete' : o.service === 'drusch' ? 'abgefahren' : 'am Silo'} {Math.round(o.doneT ?? 0).toLocaleString('de-DE')} t</small> : null}
+        {(isHarvest(o.service) || o.tPerHa) && o.status !== 'offen' ? <small className="hint"> · {o.tPerHa ? 'abgeliefert' : o.service === 'roden' ? 'in der Miete' : o.service === 'drusch' ? 'abgefahren' : 'am Silo'} {Math.round(o.doneT ?? 0).toLocaleString('de-DE')} t</small> : null}
       </div>
       <small className={late ? 'warn' : 'hint'}>
         Zeitfenster bis {fmtDay(o.latest)}
@@ -298,7 +322,8 @@ function OrderItem({ o, game, status }: { o: Order; game: GameController | null;
       </small>
       {o.status !== 'fertig' && <EstimateLine e={status.business?.estimates[o.id]} latest={o.latest} />}
       {o.status === 'offen' && isHarvest(o.service) && <ChopStart o={o} game={game} status={status} show={fb.show} />}
-      {o.status === 'offen' && !isHarvest(o.service) && (
+      {o.status === 'offen' && o.service === 'transport' && <TruckStart o={o} game={game} status={status} show={fb.show} />}
+      {o.status === 'offen' && !isHarvest(o.service) && o.service !== 'transport' && (
         <div className="card-actions">
           <select value={tractor} onChange={(e) => setTractor(Number(e.target.value))} aria-label="Schlepper">
             {tractors.map((m) => <option key={m.id} value={m.id}>{machineName(m)}</option>)}
@@ -578,7 +603,7 @@ export function StaffTab({ status, game }: { status: GameStatus; game: GameContr
   );
 }
 
-const TYPE_NAMES: Record<string, string> = { schlepper: 'Schlepper', grubber: 'Grubber', kurzscheibenegge: 'Kurzscheibenegge', firmenwagen: 'Firmenwagen', guellefass: 'Güllefass', zubringer: 'Zubringerfass', feldhaecksler: 'Feldhäcksler', haeckselwagen: 'Häckselwagen', radlader: 'Radlader', maehdrescher: 'Mähdrescher', kipper: 'Kipper', ruebenroder: 'Rübenroder' };
+const TYPE_NAMES: Record<string, string> = { schlepper: 'Schlepper', grubber: 'Grubber', kurzscheibenegge: 'Kurzscheibenegge', firmenwagen: 'Firmenwagen', guellefass: 'Güllefass', zubringer: 'Zubringerfass', feldhaecksler: 'Feldhäcksler', haeckselwagen: 'Häckselwagen', radlader: 'Radlader', maehdrescher: 'Mähdrescher', kipper: 'Kipper', ruebenroder: 'Rübenroder', lkw: 'Lkw' };
 
 function machineSpecs(m: Pick<Machine, 'type' | 'power' | 'width' | 'powerNeed' | 'haPerHour' | 'seats' | 'tankM3' | 'payloadT' | 'weightT'>): string {
   if (m.type === 'schlepper') return `${m.power} PS`;
@@ -586,6 +611,7 @@ function machineSpecs(m: Pick<Machine, 'type' | 'power' | 'width' | 'powerNeed' 
   if (m.type === 'feldhaecksler') return `${m.power} PS · ${m.haPerHour?.toLocaleString('de-DE')} ha/h Silomais`;
   if (m.type === 'haeckselwagen' || m.type === 'kipper') return `${m.payloadT} t · ab ${m.powerNeed} PS`;
   if (m.type === 'maehdrescher') return `${m.power} PS · ${m.width?.toLocaleString('de-DE')} m · ${m.haPerHour?.toLocaleString('de-DE')} ha/h Weizen · Korntank ${m.payloadT} t`;
+  if (m.type === 'lkw') return `${m.power} PS · Kippsattel ${m.payloadT} t · Führerschein CE`;
   if (m.type === 'ruebenroder') return `${m.power} PS · 6-reihig · ${m.haPerHour?.toLocaleString('de-DE')} ha/h · Bunker ${m.payloadT} t`;
   if (m.type === 'radlader') return `${m.weightT} t Betriebsgewicht · walzt etwa ${(m.weightT ?? 0) * 4} t/h`;
   if (m.type === 'guellefass') return `${m.tankM3} m³ · ${m.width} m · ab ${m.powerNeed} PS`;
@@ -626,6 +652,7 @@ export function MarketTab({ status, game }: { status: GameStatus; game: GameCont
           <option value="maehdrescher">Mähdrescher</option>
           <option value="kipper">Kipper</option>
           <option value="ruebenroder">Rübenroder</option>
+          <option value="lkw">Lkw</option>
           <option value="firmenwagen">Firmenwagen</option>
         </select>
       </div>

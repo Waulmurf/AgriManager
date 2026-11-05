@@ -13,7 +13,8 @@ import { Crop, generateFarms, type FarmSet } from './farms';
 import { MACHINE_SKILL, MECHANIC_MIN, SELF_PROPELLED, START_OFFERS, normalizeDrivers, skillDiesel, skillSpeed, startCompany, type CarKind, type Company, type Machine } from './economy';
 import { DEALERS } from '../data/catalog';
 import { SITE_OFFERS } from '../data/sites';
-import { Business, BEET_YIELD_T_HA, GRAIN_YIELD_T_HA, HAULER_TYPE, RAPE_YIELD_T_HA, isHarvest, HIRED_ROLLER_EUR_H, REMIND_CALL_MINUTES, SERVICE_IMPLEMENT, SILAGE_YIELD_T_HA, SERVICE_NAMES, SERVICE_SKILL, SERVICE_VERB, type Order, VISIT_MINUTES, WEAR_GRUBBER_EUR_HA, type Service, fmtDay, fmtHa, fmtTime, type Command, type QueueCommand, type QueueItem } from './business';
+import { DESTINATIONS } from '../data/destinations';
+import { Business, DIESEL_TRUCK_L_KM, DRIVE_BREAK_AFTER_MIN, DRIVE_BREAK_MIN, TOLL_EUR_KM, TRUCK_LOAD_MIN, BEET_YIELD_T_HA, GRAIN_YIELD_T_HA, HAULER_TYPE, RAPE_YIELD_T_HA, isHarvest, HIRED_ROLLER_EUR_H, REMIND_CALL_MINUTES, SERVICE_IMPLEMENT, SILAGE_YIELD_T_HA, SERVICE_NAMES, SERVICE_SKILL, SERVICE_VERB, type Order, VISIT_MINUTES, WEAR_GRUBBER_EUR_HA, type Service, fmtDay, fmtHa, fmtTime, type Command, type QueueCommand, type QueueItem } from './business';
 import { appendEdgePoints, nearestNode, project, RoadClass, unproject, type RoadGraph } from './roadgraph';
 import { surchargeFactor } from './calendar';
 import { Weather } from './weather';
@@ -212,6 +213,12 @@ type PlayerTask =
       phase: 'prep' | 'toField' | 'wait' | 'load' | 'toSilo' | 'waitSilo' | 'unload' | 'back' | 'unhitch';
     }
   | {
+      /** Lkw-Transport: pendelt zwischen Ladestelle und Ziel, bis die Menge abgefahren ist */
+      kind: 'truck'; driverId: number; orderId: number; from: number; to: number; cap: number; load: number;
+      loadMin: number; unloadMin: number; driveMin: number;
+      phase: 'toLoad' | 'load' | 'toUnload' | 'unload' | 'break' | 'back' | 'night';
+    }
+  | {
       /** Überführung zu einem anderen Standort (ggf. mit angehängtem Gerät) */
       kind: 'transfer'; driverId: number; siteId: number; implementId?: number;
     }
@@ -344,6 +351,7 @@ export class Simulation {
     this.weather = new Weather(opts.seed);
     this.business.nodeLonLat = (node) => unproject(this.graph, this.graph.x[node], this.graph.y[node]);
     this.business.rainOfDay = (day) => this.weather.day(day).rain;
+    this.business.lonLatNode = (ll) => { const [x, y] = project(graph, ll[0], ll[1]); return nearestNode(graph, x, y); };
     this.ensureSites();
     // Abgestellt am Hof: Route aus einem Punkt, damit jedes Fahrzeug eine Position hat
     for (const v of this.vehicles) {
@@ -365,6 +373,7 @@ export class Simulation {
   /** Wettersperre für einen Auftrag: Mähdrusch braucht trockenes Korn, sonst zählt der Boden */
   private weatherFor(orderId: number): string | null {
     const o = this.business.orders.find((x) => x.id === orderId);
+    if (o?.service === 'transport') return null;
     return o?.service === 'drusch' ? this.weather.threshBlocked(this.time) : this.weather.fieldBlocked(this.time);
   }
 
@@ -372,7 +381,7 @@ export class Simulation {
   private addPlayerVehicle(m: Machine, park = true): void {
     if (!SELF_PROPELLED.includes(m.type) && m.type !== 'firmenwagen') return;
     if (this.vehicles.some((v) => v.owner === 'player' && v.machineId === m.id)) return;
-    const profile: ProfileKey = m.type === 'firmenwagen' ? 'car' : 'tractor';
+    const profile: ProfileKey = m.type === 'firmenwagen' ? 'car' : m.type === 'lkw' ? 'truck' : 'tractor';
     const startNode = (this.company.sites ?? []).find((x) => x.id === (m.siteId ?? 1))?.node ?? this.homeNode;
     this.vehicles.push({
       id: this.vehicles.length,
@@ -523,6 +532,7 @@ export class Simulation {
       if (v.task.kind === 'feeder') return `${who} fährt Zubringer`;
       if (v.task.kind === 'haul') return `${who} fährt Abfahrer`;
       if (v.task.kind === 'transfer') return `${who} überführt eine Maschine`;
+      if (v.task.kind === 'truck') return `${who} fährt Lkw`;
       if (v.task.kind === 'silo') return `${who} walzt am Silo`;
       return v.task.kind === 'visit' ? `${who} ist auf Besuch bei ${this.business.farmName(v.task.farmId)}` : `${who} fährt einen Auftrag`;
     }
@@ -794,6 +804,11 @@ export class Simulation {
         const end = this.time + 30;
         if (t.kind === 'transfer') {
           bars.push({ key: `r${v.id}`, driverId: t.driverId, kind: 'visit', label: 'Überführung', start: this.time, end: this.time + 60, warnings: [] });
+          continue;
+        }
+        if (t.kind === 'truck') {
+          const o = b.orders.find((x) => x.id === t.orderId);
+          bars.push({ key: `r${v.id}`, driverId: t.driverId, kind: 'running', vehicle: v.id, orderId: t.orderId, farmId: o?.farmId, label: `Lkw ${o ? b.farmName(o.farmId) : ''}`, start: o?.startedAt ?? this.time, end: Math.max(this.time + 60, o?.latest ?? this.time), tractorId: v.machineId, latest: o?.latest, warnings: [] });
           continue;
         }
         if (t.kind === 'haul' || t.kind === 'silo') {
@@ -1118,6 +1133,16 @@ export class Simulation {
     }
     const driver = this.company.drivers.find((d) => d.id === (cmd.driverId ?? 1));
     if (!driver) return 'Fahrer gibt es nicht mehr';
+    const tOrder = b.orders.find((x) => x.id === cmd.orderId);
+    if (tOrder?.service === 'transport') {
+      if (tOrder.status !== 'offen') return 'Auftrag nicht startbar';
+      const lkw = this.company.machines.find((m) => m.id === cmd.tractorId && m.type === 'lkw');
+      if (!lkw) return 'Lkw wählen';
+      if ((driver.skills.transport ?? 0) < 1) return `${this.driverName(driver.id)} hat keinen Lkw-Führerschein (CE)`;
+      if (!this.vehicles.some((v) => v.owner === 'player' && v.machineId === lkw.id)) return 'Lkw nicht verfügbar';
+      if (this.queue.some((q) => q.id !== ignoreQueueId && q.cmd.kind === 'startJob' && q.cmd.orderId === tOrder.id)) return 'Auftrag ist schon eingeplant';
+      return null;
+    }
     const need = MACHINE_SKILL.schlepper!;
     if ((driver.skills[need.skill] ?? 0) < need.min) return `${this.driverName(driver.id)} ist nicht als Traktorfahrer qualifiziert`;
     const o = b.orders.find((x) => x.id === cmd.orderId);
@@ -1229,6 +1254,18 @@ export class Simulation {
     const unit = this.vehicles.find((v) => v.owner === 'player' && v.machineId === tractor.id);
     if (!unit || unit.task) return 'Schlepper nicht verfügbar';
     const driverId = cmd.driverId ?? 1;
+    if (o.service === 'transport') {
+      const rueben = (o.tPerHa ?? 0) >= 50;
+      const dest = DESTINATIONS.find((d) => d.name === o.destName);
+      unit.task = {
+        kind: 'truck', driverId, orderId: o.id, from: o.pickupNode ?? this.homeNode, to: o.destNode ?? this.homeNode,
+        cap: tractor.payloadT ?? 25, load: 0, loadMin: rueben ? TRUCK_LOAD_MIN.rueben : TRUCK_LOAD_MIN.korn, unloadMin: dest?.unloadMin ?? 15,
+        driveMin: 0, phase: 'toLoad',
+      };
+      this.driveTo(unit, unit.task.from);
+      b.orderStarted(o, tractor.id, tractor.id, t, this.driverName(driverId));
+      return `Transport gestartet (${this.driverName(driverId)})`;
+    }
     const skill = this.company.drivers.find((d) => d.id === driverId)?.skills[SERVICE_SKILL[o.service]] ?? 1;
     const queue = o.fields.filter((f) => !o.doneFields.includes(f));
     unit.task = {
@@ -1313,6 +1350,13 @@ export class Simulation {
             load: `fährt neben dem Häcksler (${Math.round(t.load)} von ${t.cap} t)`, toSilo: `bringt ${Math.round(t.load)} t zum Silo`,
             waitSilo: 'wartet am Silo (Walze kommt nicht nach)', unload: 'kippt am Silo ab', back: 'fährt zurück zum Hof', unhitch: 'stellt den Wagen ab',
           } as Record<string, string>)[t.phase];
+        }
+        if (t?.kind === 'truck') {
+          const o = b.orders.find((x) => x.id === t.orderId);
+          status = ({
+            toLoad: 'fährt zur Ladestelle', load: 'wird beladen', toUnload: `bringt ${Math.round(t.load)} t nach ${o?.destName ?? 'Ziel'}`,
+            unload: 'lädt ab (Waage, Probe)', break: 'Lenkzeitpause', back: 'fährt zurück zum Hof', night: 'Feierabend, morgen weiter',
+          } as Record<string, string>)[t.phase] + (o ? ` · ${Math.round(o.doneT ?? 0)} von ${Math.round(o.areaHa * (o.tPerHa ?? 0))} t` : '');
         }
         if (t?.kind === 'transfer') status = `wird überführt nach ${(this.company.sites ?? []).find((x) => x.id === t.siteId)?.name ?? ''}`;
         if (t?.kind === 'silo') status = t.phase === 'work' ? 'verteilt und walzt am Silo' : t.phase === 'to' ? 'fährt zum Silo' : 'fährt zurück zum Hof';
@@ -1845,6 +1889,11 @@ export class Simulation {
       }
       if (down) return;
     }
+    if (t?.kind === 'truck' && (t.phase === 'toLoad' || t.phase === 'toUnload') && this.minutesOf(t.driverId) >= CHEF_MAX_MINUTES) {
+      v.restUntil = Math.max(this.time + (1440 - (this.time % 1440)), this.time + 11 * 60);
+      this.business.warn(this.time, `${v.name}: Höchstarbeitszeit erreicht – Lkw steht über Nacht, weiter morgen um 06:00.`);
+      return;
+    }
     if (t?.kind === 'feeder' && t.phase === 'wait') { this.feederWait(v); return; }
     if (t?.kind === 'haul' && (t.phase === 'wait' || t.phase === 'load')) return; // Häcksler steuert
     if (t?.kind === 'haul' && t.phase === 'waitSilo') { this.haulAtSilo(v); return; }
@@ -1931,6 +1980,27 @@ export class Simulation {
       } else {
         v.task = undefined;
         v.state = VehicleState.Waiting;
+      }
+      b.version++;
+      return;
+    }
+    if (t.kind === 'truck') {
+      // Lenkzeit: Fahrminuten seit der letzten Pause
+      const r = v.route;
+      if (r && r.kind === 'road') t.driveMin += r.duration / 60;
+      v.state = VehicleState.Waiting;
+      const pause = t.driveMin >= DRIVE_BREAK_AFTER_MIN ? DRIVE_BREAK_MIN : 0;
+      if (pause) { t.driveMin = 0; b.info(this.time, `${v.name}: 45 Minuten Lenkzeitpause (${this.driverName(t.driverId)}).`); }
+      if (t.phase === 'toLoad') { t.phase = 'load'; v.waitMin = t.loadMin + pause; }
+      else if (t.phase === 'toUnload') { t.phase = 'unload'; v.waitMin = t.unloadMin + pause; }
+      else if (t.phase === 'back') {
+        const o = b.orders.find((x) => x.id === t.orderId);
+        if (o && o.status !== 'fertig') {
+          // Feierabend am Hof, morgen weiter
+          t.phase = 'night';
+          v.restUntil = Math.max(this.time + (1440 - (this.time % 1440)), this.time + 11 * 60);
+          v.waitMin = 1;
+        } else { v.task = undefined; }
       }
       b.version++;
       return;
@@ -2038,6 +2108,7 @@ export class Simulation {
       this.business.version++;
       return;
     }
+    if (t.kind === 'truck') { this.truckWaitDone(v, t); return; }
     if (t.kind === 'visit' && t.phase === 'at') {
       this.business.onVisit(t.farmId, this.time);
       t.phase = 'back';
@@ -2103,10 +2174,18 @@ export class Simulation {
     if (!r || r.kind !== 'road' || r.total <= 0 || v.chargedRoute === r.id) return;
     v.chargedRoute = r.id;
     const km = (partial ? v.dist : r.total) / 1000;
-    const lPerKm = v.profile === 'car' ? DIESEL_CAR_L_KM : DIESEL_TRACTOR_ROAD_L_KM;
+    const lPerKm = v.profile === 'car' ? DIESEL_CAR_L_KM : v.profile === 'truck' ? DIESEL_TRUCK_L_KM : DIESEL_TRACTOR_ROAD_L_KM;
     const t = v.task;
-    const o = t?.kind === 'job' ? this.business.orders.find((x) => x.id === t.orderId) : undefined;
+    const o = t?.kind === 'job' || t?.kind === 'truck' ? this.business.orders.find((x) => x.id === t.orderId) : undefined;
     this.business.chargeDiesel(km * lPerKm, o, this.time);
+    if (v.profile === 'truck') {
+      // Maut auf Bundesstraßen und Autobahn: Abschnitte ab 65 km/h
+      let tollM = 0;
+      const end = partial ? v.dist : r.total;
+      for (let i = 0; i < r.speed.length && r.cum[i] < end; i++) if (r.speed[i] >= 65 / 3.6) tollM += Math.min(r.cum[i + 1], end) - r.cum[i];
+      const toll = Math.round((tollM / 1000) * TOLL_EUR_KM * 100) / 100;
+      if (toll > 0) this.business.chargeToll(toll, o, this.time);
+    }
     // Betriebsstunden auch für Straßenfahrten (Schlepper)
     if (v.profile === 'tractor') {
       const m = this.company.machines.find((x) => x.id === v.machineId);
@@ -2212,6 +2291,45 @@ export class Simulation {
     }
     if (c.attached.load >= c.attached.cap) this.detachWagon(v, c);
     if (budget > 0 || v.dist >= r.total) this.playerArrive(v);
+  }
+
+  /** Noch nicht geladene Menge eines Transportauftrags (t) */
+  private truckLeft(o: Order, exceptVehicle = -1): number {
+    let onBoard = 0;
+    for (const v of this.vehicles) if (v.id !== exceptVehicle && v.task?.kind === 'truck' && v.task.orderId === o.id) onBoard += v.task.load;
+    return Math.max(0, o.areaHa * (o.tPerHa ?? 0) - (o.doneT ?? 0) - onBoard);
+  }
+
+  /** Lkw: Laden, Abladen, nächste Runde oder Feierabend */
+  private truckWaitDone(v: Vehicle, t: Extract<PlayerTask, { kind: 'truck' }>) {
+    const b = this.business;
+    const o = b.orders.find((x) => x.id === t.orderId);
+    if (!o) { v.task = undefined; return; }
+    if (t.phase === 'load') {
+      t.load = Math.round(Math.min(t.cap, this.truckLeft(o, v.id)) * 10) / 10;
+      t.phase = 'toUnload';
+      this.driveTo(v, t.to);
+    } else if (t.phase === 'unload') {
+      o.doneT = Math.round(((o.doneT ?? 0) + t.load) * 10) / 10;
+      t.load = 0;
+      const left = this.truckLeft(o, v.id);
+      if (left < 0.5) {
+        // fertig: alle Felder als erledigt melden (Rechnung)
+        for (const f of o.fields) if (!o.doneFields.includes(f)) b.fieldDone(o, f, this.time);
+        t.phase = 'back';
+        this.driveTo(v, this.homeOf(v));
+      } else {
+        // reicht die Arbeitszeit noch für eine Runde? (Hin- und Rückweg ≈ doppelte letzte Fahrt + Laden/Abladen)
+        const cycle = 2 * ((v.route?.duration ?? 1800) / 60) + t.loadMin + t.unloadMin;
+        if (this.minutesOf(t.driverId) + cycle > CHEF_MAX_MINUTES) { t.phase = 'back'; this.driveTo(v, this.homeOf(v)); }
+        else { t.phase = 'toLoad'; this.driveTo(v, t.from); }
+      }
+    } else if (t.phase === 'night') {
+      t.driveMin = 0;
+      t.phase = 'toLoad';
+      this.driveTo(v, t.from);
+    }
+    b.version++;
   }
 
   /** Bunker leeren (Miete am Feldrand bzw. Anhänger am Feldrand): zählt als abgefahren */

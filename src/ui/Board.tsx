@@ -75,6 +75,12 @@ export function PlanningBoard({ status, game, onClose }: { status: GameStatus; g
     const notBefore = dayStart <= b.time ? undefined : dayStart;
     if (data.kind === 'order') {
       const o = b.orders.find((x) => x.id === data.orderId);
+      if (o?.service === 'transport') {
+        const lkw = c.machines.find((m) => m.type === 'lkw');
+        if (!lkw) { show('Kein Lkw im Fuhrpark'); return; }
+        void send({ kind: 'plan', orderId: data.orderId, driverId, tractorId: lkw.id, implementId: lkw.id, notBefore });
+        return;
+      }
       if (o && isHarvest(o.service)) {
         if (o.chain === 'komplett') { show('Kette mit Abfahrern (mehrere Fahrer) bitte im Reiter Aufträge einteilen'); return; }
         const hv = c.machines.find((m) => m.type === SERVICE_IMPLEMENT[o.service]);

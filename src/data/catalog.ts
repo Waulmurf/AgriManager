@@ -106,6 +106,10 @@ export const CATALOG: CatalogModel[] = [
   // Rübenroder-Selbstfahrer 6-reihig, Bunker ≈ 30 t (docs/ablaeufe.md); Flächenleistung 1,6–1,8 ha/h (Annahme)
   { key: 'grimme-rexor6300', type: 'ruebenroder', brand: 'Grimme', model: 'Rexor 6300 Platinum', power: 627, width: 2.7, haPerHour: 1.6, workKmh: 6, dieselLHa: 32, payloadT: 30, newPrice: 690_000, deliveryWeeks: 20 },
   { key: 'ropa-tiger6s', type: 'ruebenroder', brand: 'Ropa', model: 'Tiger 6S', power: 796, width: 2.7, haPerHour: 1.8, workKmh: 6, dieselLHa: 34, payloadT: 33, newPrice: 760_000, deliveryWeeks: 20 },
+  // Lkw: Sattelzugmaschine mit Kippauflieger (≈ 27 m³ Rüben/Getreide, 25 t Nutzlast; Annahme Neupreis Zug + Auflieger)
+  { key: 'man-tgx', type: 'lkw', brand: 'MAN', model: 'TGX 18.510 + Kippsattel', power: 510, payloadT: 25, newPrice: 185_000, deliveryWeeks: 12 },
+  { key: 'mb-actros', type: 'lkw', brand: 'Mercedes-Benz', model: 'Actros 1848 + Kippsattel', power: 480, payloadT: 25, newPrice: 178_000, deliveryWeeks: 12 },
+  { key: 'scania-r500', type: 'lkw', brand: 'Scania', model: 'R 500 + Kippsattel', power: 500, payloadT: 26, newPrice: 192_000, deliveryWeeks: 14 },
   // Radlader zum Verteilen und Walzen am Silo (Annahme): Walzleistung ≈ Betriebsgewicht × 4 t Frischmasse je Stunde
   { key: 'jcb-437', type: 'radlader', brand: 'JCB', model: '437 HT Agri', weightT: 13, power: 200, newPrice: 150_000, deliveryWeeks: 8 },
   { key: 'liebherr-l526', type: 'radlader', brand: 'Liebherr', model: 'L 526', weightT: 12, power: 160, newPrice: 170_000, deliveryWeeks: 10 },
@@ -136,6 +140,7 @@ export const DEALERS: Dealer[] = [
   { id: 5, name: 'Landtechnik Altmark', town: 'Salzwedel', lonLat: [11.1500, 52.8500], tractorBrands: ['Case IH', 'New Holland'], implementBrands: ['Kverneland', 'Joskin', 'Krampe', 'Fliegl'] },
   { id: 6, name: 'Agrarservice Wittingen', town: 'Wittingen', lonLat: [10.7300, 52.7270], tractorBrands: ['Deutz-Fahr'], implementBrands: ['Rabe', 'Köckerling'] },
   { id: 7, name: 'Nutzfahrzeuge Uelzen', town: 'Uelzen', lonLat: [10.5450, 52.9560], tractorBrands: ['Firmenwagen'], implementBrands: [] },
+  { id: 9, name: 'Lkw-Zentrum Uelzen', town: 'Uelzen', lonLat: [10.5350, 52.9700], tractorBrands: ['MAN', 'Mercedes-Benz', 'Scania'], implementBrands: [] },
   { id: 8, name: 'Baumaschinen Lüneburg', town: 'Lüneburg', lonLat: [10.4350, 53.2380], tractorBrands: ['JCB', 'Liebherr', 'Volvo'], implementBrands: [] },
 ];
 
