@@ -65,6 +65,8 @@ export interface Machine {
   /** gekauft am (Spielminute) und bei Händler */
   boughtAt?: number;
   dealerId?: number;
+  /** Wintercheck gemacht am (MZ-05) */
+  winterCheckAt?: number;
   /** Anschaffungskosten und Nutzungsdauer für die AfA (WF-03) */
   purchasePrice?: number;
   afaYears?: number;

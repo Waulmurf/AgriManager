@@ -81,6 +81,8 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
   `business.ts` (`financeDaily`, `closeYear`), Reiter Finanzen.
 - Schritt 2 Wetter fertig: `src/sim/weather.ts` (Regen, Temperatur, Bodenfeuchte, Vorhersage), Feldarbeit
   ruht bei Nässe/Frost (`Simulation.weatherHold`, Warteschlange), Anzeige oben und im Board.
+- Schritt 3 Jahreslauf fertig: Dienstleistungen `Service` (grubbern, stoppel) mit `SERVICE_IMPLEMENT`,
+  Saisonkalender `seasonServices`, Wintercheck (`Machine.winterCheckAt`).
 
 ## CI (GitHub Actions)
 

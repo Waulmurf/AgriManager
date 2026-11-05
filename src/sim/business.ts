@@ -10,7 +10,7 @@ import { Crop, SURNAMES, type FarmSet } from './farms';
 import type { FieldSet } from './fields';
 import {
   EMPLOYER_SV, MIN_WAGE, MONTH_HOURS, ROLES, SKILLS, VACATION_DAYS, marketWage, agencyRate, takeOverFee, AGENCY_MIN_HOURS, XP_MINUTES_PER_LEVEL, baseSkills, gameDate, marketValue,
-  serviceInterval, START_OFFERS, START_YEAR, type Company, type Loan, type Employee, type Machine, type MarketOffer, type Repair, type Skill,
+  serviceInterval, START_OFFERS, START_YEAR, type Company, type Loan, type MachineType, type Employee, type Machine, type MarketOffer, type Repair, type Skill,
 } from './economy';
 import { CATALOG, DEALERS, dealersFor, type CatalogModel } from '../data/catalog';
 import {
@@ -69,8 +69,29 @@ export const TRIAL_MAX_HA = 10;
 export const REPAIR_TRACTOR_EUR_H = 8;
 export const WEAR_GRUBBER_EUR_HA = 3;
 
-export type Service = 'grubbern';
-export const SERVICE_NAMES: Record<Service, string> = { grubbern: 'Grubbern' };
+export type Service = 'grubbern' | 'stoppel';
+export const SERVICE_NAMES: Record<Service, string> = { grubbern: 'Grubbern', stoppel: 'Stoppelbearbeitung' };
+/** Gerät je Dienstleistung und Tätigkeitswort für die Anzeige */
+export const SERVICE_IMPLEMENT: Record<Service, MachineType> = { grubbern: 'grubber', stoppel: 'kurzscheibenegge' };
+export const SERVICE_VERB: Record<Service, string> = { grubbern: 'grubbert', stoppel: 'bearbeitet Stoppeln' };
+/** Startpreis je ha inkl. Schlepper, Fahrer, Diesel (Annahme): Stoppelbearbeitung flach, günstiger als Grubbern */
+export const SERVICE_BASE_PRICE: Record<Service, number> = { grubbern: 55, stoppel: 38 };
+
+/**
+ * Jahreslauf (AK-04): welche Dienstleistung wann gefragt ist, für welche Kulturen, und wie stark.
+ * Grubbern im Frühjahr vor Mais, Rüben, Kartoffeln (1.3.–15.5.) und im Herbst als
+ * Grundbodenbearbeitung nach Getreide und Raps (1.9.–31.10.); Stoppelbearbeitung direkt nach der
+ * Ernte von Raps (ab Mitte Juli) und Getreide (bis Mitte September). Winter: keine Bodenbearbeitung.
+ */
+export function seasonServices(time: number): { service: Service; crops: Crop[]; weight: number }[] {
+  const d = gameDate(time);
+  const md = d.month * 100 + d.day;
+  const out: { service: Service; crops: Crop[]; weight: number }[] = [];
+  if (md >= 301 && md <= 515) out.push({ service: 'grubbern', crops: [Crop.Mais, Crop.Zuckerrueben, Crop.Kartoffeln], weight: md >= 401 && md <= 430 ? 1.2 : 1 });
+  if (md >= 715 && md <= 915) out.push({ service: 'stoppel', crops: md < 801 ? [Crop.Raps] : [Crop.Getreide, Crop.Raps], weight: md >= 801 && md <= 831 ? 1.3 : 0.8 });
+  if (md >= 901 && md <= 1031) out.push({ service: 'grubbern', crops: [Crop.Getreide, Crop.Raps, Crop.Ackerfutter], weight: md <= 1015 ? 0.9 : 0.6 });
+  return out;
+}
 
 export type RequestStatus = 'offen' | 'angenommen' | 'abgelehnt' | 'abgelaufen';
 export type OrderStatus = 'offen' | 'läuft' | 'fertig';
@@ -398,28 +419,26 @@ export class Business {
     return s;
   }
 
-  /** Saison für Grubbern: Frühjahr vor Mais/Rüben/Kartoffeln (März–Mai), Stoppel (Aug–Okt) */
-  private grubberSeason(time: number): boolean {
-    const m = gameDate(time).month;
-    return (m >= 3 && m <= 5) || (m >= 8 && m <= 10);
-  }
-
-  /** Erzeugt ggf. eine Grubber-Anfrage eines Betriebs */
+  /** Erzeugt ggf. eine Anfrage eines Betriebs für eine Dienstleistung der Saison */
   private maybeRequest(farmId: number, time: number, chance: number, channel: Request['channel']): Request | null {
     const fs = this.farms;
     const f = this.fields;
-    if (!fs || !f || !this.grubberSeason(time)) return null;
+    const season = seasonServices(time);
+    if (!fs || !f || !season.length) return null;
     const farm = fs.farms[farmId];
     if (this.isRival(farmId, time)) return null;
     if (this.requests.some((r) => r.farmId === farmId && r.status === 'offen')) return null;
     const trial = this.isTrial(farmId, time);
-    if (this.rng.next() >= (trial ? chance * 0.5 : chance)) return null;
-    const spring = gameDate(time).month <= 5;
+    // Dienstleistung der Saison wählen (bei mehreren nach Gewicht)
+    const total = season.reduce((a, x) => a + x.weight, 0);
+    let pick = this.rng.next() * total;
+    let sv = season[0];
+    for (const x of season) { pick -= x.weight; if (pick < 0) { sv = x; break; } }
+    if (this.rng.next() >= (trial ? chance * 0.5 : chance) * Math.min(1, sv.weight)) return null;
     const busy = this.busyFields();
     const cand = farm.fields.filter((i) => {
       if (busy.has(i) || f.areaHa[i] > (trial ? TRIAL_MAX_HA : MAX_REQUEST_FIELD_HA)) return false;
-      const c = fs.fieldCrop[i];
-      return spring ? c === Crop.Mais || c === Crop.Zuckerrueben || c === Crop.Kartoffeln : c !== Crop.Gruenland;
+      return sv.crops.includes(fs.fieldCrop[i] as Crop);
     });
     if (!cand.length) return null;
     // bis zu 3 Felder, zusammen höchstens 60 ha
@@ -432,11 +451,11 @@ export class Business {
       picked.push(i);
       ha += f.areaHa[i];
     }
-    const priceHa = Math.round(BASE_PRICE_GRUBBERN * (0.92 + this.rng.next() * 0.16) * 2) / 2;
+    const priceHa = Math.round(SERVICE_BASE_PRICE[sv.service] * (0.92 + this.rng.next() * 0.16) * 2) / 2;
     const req: Request = {
       id: this.nextId++,
       farmId,
-      service: 'grubbern',
+      service: sv.service,
       fields: picked,
       areaHa: Math.round(ha * 100) / 100,
       earliest: time,
@@ -462,7 +481,7 @@ export class Business {
     for (const inv of this.invoices) if (inv.farmId === farmId && inv.status === 'überfällig' && inv.remindedAt === undefined) this.remindInvoice(inv, time, 'besuch');
     const req = this.maybeRequest(farmId, time, 0.2 + 0.7 * (1 - farm.mechanization), 'besuch');
     if (req) {
-      this.emit(time, 'anfrage', `${farm.name}: Grubbern auf ${req.fields.length} ${req.fields.length === 1 ? 'Feld' : 'Feldern'}, ${fmtHa(req.areaHa)} für ${fmtEur(req.priceHa)}/ha`, farmId);
+      this.emit(time, 'anfrage', `${farm.name}: ${SERVICE_NAMES[req.service]} auf ${req.fields.length} ${req.fields.length === 1 ? 'Feld' : 'Feldern'}, ${fmtHa(req.areaHa)} für ${fmtEur(req.priceHa)}/ha`, farmId);
     } else {
       const rival = this.isRival(farmId, time);
       this.emit(time, 'besuch', `${farm.name}: ${first ? 'Kennengelernt, jetzt im Adressbuch.' : 'Besuch beendet.'} ${rival ? 'Arbeitet zurzeit mit einem anderen Lohnunternehmen.' : 'Zurzeit steht nichts an.'}`, farmId);
@@ -470,9 +489,16 @@ export class Business {
   }
 
   /** Täglich um 06:00: Anfragen per Anruf/Nachricht von bekannten Betrieben, Fristen prüfen */
+  /** zuletzt bekannte Spielminute (für zeitabhängige Prüfungen ohne Zeitparameter) */
+  lastTime = 0;
+
   daily(time: number, workedMinutes: Record<number, number> = {}, surcharge: Record<number, number> = {}, busyDrivers: Set<number> = new Set()) {
+    this.lastTime = time;
     this.bookDiesel(time);
     this.payroll(time, workedMinutes, surcharge);
+    if (gameDate(time).month === 11 && gameDate(time).day === 1) {
+      this.emit(time, 'info', 'Winter: Bodenbearbeitung ruht bis März. Zeit für den Wintercheck – Wartung beim Händler bis Ende Februar 20 % günstiger, senkt das Pannenrisiko in der Saison.');
+    }
     this.staffDaily(time, workedMinutes, busyDrivers);
     this.updateApplicants(time);
     this.updateMarket(time);
@@ -503,7 +529,7 @@ export class Business {
       }
       const req = this.maybeRequest(farm.id, time, 0.06 + 0.1 * (1 - farm.mechanization), farm.contact);
       if (req) {
-        this.emit(time, 'anfrage', `${farm.contact === 'anruf' ? 'Anruf' : 'Nachricht'} von ${farm.name}: Grubbern ${fmtHa(req.areaHa)}, bis ${fmtDay(req.latest)}, ${fmtEur(req.priceHa)}/ha`, farm.id);
+        this.emit(time, 'anfrage', `${farm.contact === 'anruf' ? 'Anruf' : 'Nachricht'} von ${farm.name}: ${SERVICE_NAMES[req.service]} ${fmtHa(req.areaHa)}, bis ${fmtDay(req.latest)}, ${fmtEur(req.priceHa)}/ha`, farm.id);
       }
     }
   }
@@ -551,7 +577,7 @@ export class Business {
       tractorHours: 0,
     };
     this.orders.push(o);
-    this.emit(time, 'auftrag', `Auftrag ${this.farmName(r.farmId)}: Grubbern ${fmtHa(o.areaHa)} zu ${fmtEur(price)}/ha, fertig bis ${fmtDay(o.latest)}`, r.farmId);
+    this.emit(time, 'auftrag', `Auftrag ${this.farmName(r.farmId)}: ${SERVICE_NAMES[o.service]} ${fmtHa(o.areaHa)} zu ${fmtEur(price)}/ha, fertig bis ${fmtDay(o.latest)}`, r.farmId);
     return 'Auftrag angelegt';
   }
 
@@ -974,7 +1000,11 @@ export class Business {
   service(m: Machine, time: number, home: [number, number]): string {
     const d = this.dealerKm(m.brand, home);
     const tractor = m.type === 'schlepper' || m.type === 'firmenwagen';
-    const cost = Math.round((tractor ? 400 + 0.004 * m.newPrice : 150 + 0.003 * m.newPrice) / 10) * 10;
+    // Wintercheck (MZ-05): November bis Februar 20 % günstiger, senkt das Pannenrisiko bis zum Herbst
+    const mo = gameDate(time).month;
+    const winter = mo >= 11 || mo <= 2;
+    const cost = Math.round(((tractor ? 400 + 0.004 * m.newPrice : 150 + 0.003 * m.newPrice) * (winter ? 0.8 : 1)) / 10) * 10;
+    if (winter) m.winterCheckAt = time;
     // Termin: nach Werkstattlast; Stammkunden kommen schneller dran (HM-07)
     let wait = this.workshopBusy(time) ? 2 : 0;
     if ((this.dealerSpend[d.id] ?? 0) >= 50_000) wait = Math.max(0, wait - 1);
@@ -984,7 +1014,7 @@ export class Business {
     m.serviceAtH = m.hours + serviceInterval(m);
     m.condition = Math.min(100, m.condition + 3);
     this.payWorkshop(time, cost, `Wartung ${m.brand} ${m.model}`, m);
-    this.emit(time, 'info', `${m.brand} ${m.model} zur Wartung bei ${d.name} (${fmtEur(cost)}), zurück etwa ${fmtDay(m.downUntil)} ${fmtTime(m.downUntil)}.`);
+    this.emit(time, 'info', `${m.brand} ${m.model} zur ${winter ? 'Wintercheck-' : ''}Wartung bei ${d.name} (${fmtEur(cost)}), zurück etwa ${fmtDay(m.downUntil)} ${fmtTime(m.downUntil)}.`);
     return `Wartung beauftragt, zurück etwa ${fmtDay(m.downUntil)} ${fmtTime(m.downUntil)}`;
   }
 
@@ -994,6 +1024,8 @@ export class Business {
    */
   rollBreakdown(m: Machine): boolean {
     let perHour = 0.002 * (1 + (100 - m.condition) / 25);
+    // Wintercheck im letzten Winter: 30 % weniger Pannen in der Saison
+    if (m.winterCheckAt !== undefined && this.lastTime - m.winterCheckAt < 300 * 1440) perHour *= 0.7;
     if (m.serviceAtH !== undefined && m.hours > m.serviceAtH) perHour *= 3;
     if (m.defect) perHour *= 3;
     // ohne Verschleißteile im Lager werden abgenutzte Schare und Zinken nicht getauscht

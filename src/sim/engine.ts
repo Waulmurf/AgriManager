@@ -12,7 +12,7 @@ import { fieldPattern, type FieldSet } from './fields';
 import { generateFarms, type FarmSet } from './farms';
 import { MACHINE_SKILL, MECHANIC_MIN, START_OFFERS, normalizeDrivers, skillDiesel, skillSpeed, startCompany, type CarKind, type Company, type Machine } from './economy';
 import { DEALERS } from '../data/catalog';
-import { Business, REMIND_CALL_MINUTES, VISIT_MINUTES, WEAR_GRUBBER_EUR_HA, fmtDay, fmtHa, fmtTime, type Command, type QueueCommand, type QueueItem } from './business';
+import { Business, REMIND_CALL_MINUTES, SERVICE_IMPLEMENT, SERVICE_NAMES, SERVICE_VERB, VISIT_MINUTES, WEAR_GRUBBER_EUR_HA, type Service, fmtDay, fmtHa, fmtTime, type Command, type QueueCommand, type QueueItem } from './business';
 import { appendEdgePoints, nearestNode, project, RoadClass, unproject, type RoadGraph } from './roadgraph';
 import { surchargeFactor } from './calendar';
 import { Weather } from './weather';
@@ -515,12 +515,13 @@ export class Simulation {
     return Math.sqrt(dx * dx + dy * dy) * EST_DETOUR;
   }
 
-  /** Arbeitsbreite/Flächenleistung: bester eigener Grubber, sonst der günstigste im Markt */
-  private estimateHaPerHour(): number {
+  /** Flächenleistung: bestes eigenes Gerät für die Dienstleistung, sonst das erste im Markt */
+  private estimateHaPerHour(service: Service = 'grubbern'): number {
+    const type = SERVICE_IMPLEMENT[service];
     let best = 0;
-    for (const m of this.company.machines) if (m.type === 'grubber') best = Math.max(best, m.haPerHour ?? 0);
+    for (const m of this.company.machines) if (m.type === type) best = Math.max(best, m.haPerHour ?? 0);
     if (best) return best;
-    return START_OFFERS.find((o) => o.machine.type === 'grubber')?.machine.haPerHour ?? 1.5;
+    return START_OFFERS.find((o) => o.machine.type === type)?.machine.haPerHour ?? 1.5;
   }
 
   /** Dauer eines Grubberauftrags: Rüsten, Fahrten (nächstes Feld zuerst), Feldarbeit */
@@ -548,7 +549,7 @@ export class Simulation {
       return farm ? Math.round((2 * this.nodeDist(this.homeNode, farm.homeNode)) / EST_CAR_M_MIN + VISIT_MINUTES) : VISIT_MINUTES;
     }
     const o = this.business.orders.find((x) => x.id === cmd.orderId);
-    return o ? this.estimateJobMinutes(o.fields.filter((f) => !o.doneFields.includes(f))).minutes : 0;
+    return o ? this.estimateJobMinutes(o.fields.filter((f) => !o.doneFields.includes(f)), this.estimateHaPerHour(o.service)).minutes : 0;
   }
 
   /** Ende, wenn ab jetzt `need` Minuten Chef-Arbeitszeit anfallen (10 h je Tag, Start 06:00) */
@@ -599,7 +600,7 @@ export class Simulation {
       if (q.cmd.kind === 'startJob') {
         const o = this.business.orders.find((x) => x.id === (q.cmd as { orderId: number }).orderId);
         if (o) {
-          const e = this.estimateJobMinutes(o.fields.filter((f) => !o.doneFields.includes(f)), this.driverHaPerHour(q.driverId));
+          const e = this.estimateJobMinutes(o.fields.filter((f) => !o.doneFields.includes(f)), this.driverHaPerHour(q.driverId, o.service));
           out[o.id] = { ...e, finishAt: this.finishAfter(backlog[q.driverId], q.driverId) };
         }
       }
@@ -610,21 +611,21 @@ export class Simulation {
     for (const o of this.business.orders) {
       if (o.status === 'fertig' || out[o.id]) continue;
       const left = o.fields.filter((f) => !o.doneFields.includes(f));
-      const e = this.estimateJobMinutes(left, this.driverHaPerHour(best));
+      const e = this.estimateJobMinutes(left, this.driverHaPerHour(best, o.service));
       const d = running[o.id];
       out[o.id] = { ...e, finishAt: d !== undefined ? this.finishAfter(runBacklog[d], d) : this.finishAfter((backlog[best] ?? 0) + e.minutes, best) };
     }
     for (const r of this.business.requests) {
       if (r.status !== 'offen') continue;
-      const e = this.estimateJobMinutes(r.fields, this.driverHaPerHour(best));
+      const e = this.estimateJobMinutes(r.fields, this.driverHaPerHour(best, r.service));
       out[r.id] = { ...e, finishAt: this.finishAfter((backlog[best] ?? 0) + e.minutes, best) };
     }
     return out;
   }
 
-  private driverHaPerHour(driverId: number): number {
+  private driverHaPerHour(driverId: number, service: Service = 'grubbern'): number {
     const d = this.company.drivers.find((x) => x.id === driverId);
-    return this.estimateHaPerHour() * skillSpeed(d?.skills.boden ?? 3);
+    return this.estimateHaPerHour(service) * skillSpeed(d?.skills.boden ?? 3);
   }
 
   /** Frühester tatsächlicher Start ab `t`: nach 20:00 erst am nächsten Morgen */
@@ -655,7 +656,7 @@ export class Simulation {
         if (o && end > o.latest) warnings.push(`Termin ${fmtDay(o.latest)} wird überschritten`);
         const ab = this.business.absence(t.driverId, this.time);
         if (ab) warnings.push(`${this.driverName(t.driverId)} ist ${ab === 'krank' ? 'krank' : 'im Urlaub'} – Fahrer wechseln`);
-        bars.push({ key: `r${v.id}`, driverId: t.driverId, kind: 'running', vehicle: v.id, orderId: t.orderId, farmId: o?.farmId, label: o ? `Grubbern ${b.farmName(o.farmId)}` : 'Auftrag', start: o?.startedAt ?? this.time, end, tractorId: v.machineId, implementId: t.implementId, latest: o?.latest, warnings });
+        bars.push({ key: `r${v.id}`, driverId: t.driverId, kind: 'running', vehicle: v.id, orderId: t.orderId, farmId: o?.farmId, label: o ? `${SERVICE_NAMES[o.service]} ${b.farmName(o.farmId)}` : 'Auftrag', start: o?.startedAt ?? this.time, end, tractorId: v.machineId, implementId: t.implementId, latest: o?.latest, warnings });
         cursor[t.driverId] = Math.max(cursor[t.driverId] ?? this.time, end);
       } else {
         const end = this.time + 30;
@@ -955,7 +956,8 @@ export class Simulation {
     const tractor = this.company.machines.find((m) => m.id === cmd.tractorId && m.type === 'schlepper');
     const impl = this.company.machines.find((m) => m.id === cmd.implementId);
     if (!tractor || !impl) return 'Maschine fehlt';
-    if (impl.type !== 'grubber') return 'Für Grubbern wird ein Grubber gebraucht';
+    const needType = SERVICE_IMPLEMENT[o.service];
+    if (impl.type !== needType) return `Für ${SERVICE_NAMES[o.service]} wird ${needType === 'grubber' ? 'ein Grubber' : 'eine Kurzscheibenegge'} gebraucht`;
     if ((impl.powerNeed ?? 0) > (tractor.power ?? 0)) return 'Schlepper zu schwach für das Gerät';
     if (!this.vehicles.some((v) => v.owner === 'player' && v.machineId === tractor.id)) return 'Schlepper nicht verfügbar';
     if (!this.fields) return 'Keine Felddaten';
@@ -968,7 +970,7 @@ export class Simulation {
     const b = this.business;
     if (cmd.kind === 'visit') return `Besuch ${b.farmName(cmd.farmId)}`;
     const o = b.orders.find((x) => x.id === cmd.orderId);
-    return o ? `Grubbern ${b.farmName(o.farmId)} (${fmtHa(o.areaHa)})` : 'Auftrag';
+    return o ? `${SERVICE_NAMES[o.service]} ${b.farmName(o.farmId)} (${fmtHa(o.areaHa)})` : 'Auftrag';
   }
 
   /**
@@ -1054,7 +1056,7 @@ export class Simulation {
             prep: 'baut am Hof das Gerät an (Rüstzeit)',
             to: `fährt zum Feld (${who}, ${n})`,
             setup: `richtet das Gerät am Feld ein (${n})`,
-            work: `grubbert für ${who} (${n})`,
+            work: `${o ? SERVICE_VERB[o.service] : 'arbeitet'} für ${who} (${n})`,
             back: 'fährt zurück zum Hof',
             unhitch: 'baut am Hof das Gerät ab',
           }[t.phase];

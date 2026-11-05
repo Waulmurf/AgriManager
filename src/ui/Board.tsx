@@ -8,7 +8,7 @@ import { useState, type DragEvent } from 'react';
 import type { GameController, GameStatus } from '../game/controller';
 import type { PlanBar } from '../sim/engine';
 import { roleName, type Machine } from '../sim/economy';
-import { fmtDay, fmtTime, type Order, type Request } from '../sim/business';
+import { SERVICE_IMPLEMENT, SERVICE_NAMES, fmtDay, fmtTime, type Order, type Request, type Service } from '../sim/business';
 import { formatGameTime } from '../game/clock';
 import { SwapDriver } from './Panels';
 
@@ -20,9 +20,9 @@ const machineName = (m: Machine) => [m.brand, m.model].filter(Boolean).join(' ')
 const eur = (v: number) => v.toLocaleString('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
 
 /** Schlepper/Gerät-Kombination mit der höchsten Flächenleistung, die zusammenpasst */
-export function bestCombo(machines: Machine[]): { tractorId: number; implementId: number } | null {
+export function bestCombo(machines: Machine[], service: Service = 'grubbern'): { tractorId: number; implementId: number } | null {
   let best: { tractorId: number; implementId: number; ha: number } | null = null;
-  for (const g of machines.filter((m) => m.type === 'grubber')) {
+  for (const g of machines.filter((m) => m.type === SERVICE_IMPLEMENT[service])) {
     for (const t of machines.filter((m) => m.type === 'schlepper')) {
       if ((g.powerNeed ?? 0) > (t.power ?? 0)) continue;
       // möglichst nicht den stärksten Schlepper für ein kleines Gerät verbrauchen
@@ -74,8 +74,9 @@ export function PlanningBoard({ status, game, onClose }: { status: GameStatus; g
     const dayStart = viewStart + day * 1440;
     const notBefore = dayStart <= b.time ? undefined : dayStart;
     if (data.kind === 'order') {
-      const combo = bestCombo(c.machines);
-      if (!combo) { show('Kein passendes Gespann (Schlepper + Grubber) im Fuhrpark'); return; }
+      const o = b.orders.find((x) => x.id === data.orderId);
+      const combo = bestCombo(c.machines, o?.service);
+      if (!combo) { show(`Kein passendes Gespann für ${o ? SERVICE_NAMES[o.service] : 'den Auftrag'} im Fuhrpark`); return; }
       void send({ kind: 'plan', orderId: data.orderId, driverId, ...combo, notBefore });
     } else {
       void send({ kind: 'queueEdit', queueId: data.queueId, driverId, notBefore: notBefore ?? null });
@@ -87,7 +88,8 @@ export function PlanningBoard({ status, game, onClose }: { status: GameStatus; g
   };
 
   const tractors = c.machines.filter((m) => m.type === 'schlepper');
-  const implementsList = c.machines.filter((m) => m.type === 'grubber');
+  const selOrder = selected?.orderId !== undefined ? b.orders.find((o) => o.id === selected.orderId) : undefined;
+  const implementsList = c.machines.filter((m) => m.type === SERVICE_IMPLEMENT[selOrder?.service ?? 'grubbern']);
   const dayLabels = Array.from({ length: DAYS }, (_, d) => {
     const t = formatGameTime(viewStart + d * 1440);
     return t.date.slice(0, 2) + ' ' + t.date.slice(4, 10);
@@ -167,7 +169,7 @@ export function PlanningBoard({ status, game, onClose }: { status: GameStatus; g
                 return (
                   <li key={o.id} draggable onDragStart={drag({ kind: 'order', orderId: o.id })} className={e && e.finishAt > o.latest ? 'warn' : ''} data-testid="board-order">
                     <strong>{game?.farmById(o.farmId)?.name ?? `Betrieb ${o.farmId}`}</strong>
-                    <small>Grubbern {o.areaHa.toLocaleString('de-DE', { maximumFractionDigits: 1 })} ha · bis {fmtDay(o.latest)}{e ? ` · ca. ${(e.minutes / 60).toLocaleString('de-DE', { maximumFractionDigits: 1 })} h` : ''}</small>
+                    <small>{SERVICE_NAMES[o.service]} {o.areaHa.toLocaleString('de-DE', { maximumFractionDigits: 1 })} ha · bis {fmtDay(o.latest)}{e ? ` · ca. ${(e.minutes / 60).toLocaleString('de-DE', { maximumFractionDigits: 1 })} h` : ''}</small>
                   </li>
                 );
               })}
@@ -185,7 +187,7 @@ export function PlanningBoard({ status, game, onClose }: { status: GameStatus; g
                 return (
                   <li key={r.id} className={ok ? '' : 'warn'}>
                     <strong>{game?.farmById(r.farmId)?.name ?? `Betrieb ${r.farmId}`}</strong>
-                    <small>Grubbern {r.areaHa.toLocaleString('de-DE', { maximumFractionDigits: 1 })} ha · {r.priceHa} €/ha · bis {fmtDay(r.latest)}{e ? ` · fertig etwa ${fmtDay(e.finishAt)} ${ok ? '✓' : '⚠'}` : ''}</small>
+                    <small>{SERVICE_NAMES[r.service]} {r.areaHa.toLocaleString('de-DE', { maximumFractionDigits: 1 })} ha · {r.priceHa} €/ha · bis {fmtDay(r.latest)}{e ? ` · fertig etwa ${fmtDay(e.finishAt)} ${ok ? '✓' : '⚠'}` : ''}</small>
                     <span className="card-actions">
                       <button onClick={() => send({ kind: 'respond', requestId: r.id, action: 'accept' })}>Annehmen</button>
                       <button onClick={() => send({ kind: 'respond', requestId: r.id, action: 'reject' })}>Ablehnen</button>

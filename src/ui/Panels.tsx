@@ -5,7 +5,7 @@ import { useState } from 'react';
 import type { GameController, GameStatus } from '../game/controller';
 import type { JobEstimate } from '../sim/engine';
 import { MECHANIC_MIN, SKILLS, roleName, employerHourCost, employerMonthCost, machineValue, marketWage, takeOverFee, type Employee, type Machine } from '../sim/economy';
-import { SERVICE_NAMES, fmtDay, fmtTime, partsText, CHECK_COST, type Invoice, type Request, type Order } from '../sim/business';
+import { SERVICE_IMPLEMENT, SERVICE_NAMES, fmtDay, fmtTime, partsText, CHECK_COST, type Invoice, type Request, type Order } from '../sim/business';
 import { CATALOG, DEALERS } from '../data/catalog';
 import { leaseRate } from '../sim/finance';
 import { formatGameTime } from '../game/clock';
@@ -151,7 +151,7 @@ function RequestItem({ r, game, time, estimate }: { r: Request; game: GameContro
 function OrderItem({ o, game, status }: { o: Order; game: GameController | null; status: GameStatus }) {
   const c = status.company!;
   const tractors = c.machines.filter((m) => m.type === 'schlepper');
-  const implementsOk = c.machines.filter((m) => m.type === 'grubber');
+  const implementsOk = c.machines.filter((m) => m.type === SERVICE_IMPLEMENT[o.service]);
   const [tractor, setTractor] = useState(tractors[0]?.id ?? 0);
   const [impl, setImpl] = useState(0);
   const [driver, setDriver] = useState(1);
@@ -192,7 +192,7 @@ function OrderItem({ o, game, status }: { o: Order; game: GameController | null;
               {implementsOk.map((m) => <option key={m.id} value={m.id}>{machineName(m)} ({m.width} m)</option>)}
             </select>
           ) : (
-            <small className="warn">Kein Grubber – im Markt kaufen</small>
+            <small className="warn">Kein Gerät ({TYPE_NAMES[SERVICE_IMPLEMENT[o.service]]}) – im Markt kaufen</small>
           )}
           <select value={driver} onChange={(e) => setDriver(Number(e.target.value))} aria-label="Fahrer" data-testid="driver">
             {drivers.map((d) => <option key={d.id} value={d.id}>{d.isPlayer ? 'Chef (du)' : d.name} · Traktor {d.skills.boden}</option>)}
@@ -587,7 +587,7 @@ export function FleetTab({ status, game }: { status: GameStatus; game: GameContr
         <button onClick={() => send({ kind: 'buyParts', amount: 500 })}>+500 € nachkaufen</button>
         <button onClick={() => send({ kind: 'buyParts', amount: 2000 })} data-testid="buy-parts">+2.000 €</button>
       </div>
-      <p className="hint">Schare, Zinken, Filter, Riemen, Schläuche: Grubbern verbraucht etwa 3 € je ha. Bei Pannen hat der Werkstattwagen Verschleißteile meist an Bord, sonst lädt er sie am Hof. Ist das Lager leer, müssen sie bestellt werden, und Geräte fallen doppelt so oft aus.</p>
+      <p className="hint">Schare, Zinken, Scheiben, Filter, Riemen, Schläuche: Bodenbearbeitung verbraucht etwa 3 € je ha. Bei Pannen hat der Werkstattwagen Verschleißteile meist an Bord, sonst lädt er sie am Hof. Ist das Lager leer, müssen sie bestellt werden, und Geräte fallen doppelt so oft aus.</p>
       <h2>Fuhrpark ({c.machines.length})</h2>
       <ul className="cards" data-testid="fleet">
         {c.machines.map((m) => {

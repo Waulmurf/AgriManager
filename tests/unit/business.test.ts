@@ -248,7 +248,9 @@ describe('Rechnung, Zahlung, Buchungen', () => {
     if (inv.status === 'überfällig') expect(s.command({ kind: 'remind', invoiceId: inv.id })).toBe('Kunde angerufen');
     runUntil(s, () => inv.status === 'bezahlt', 12 * 1440);
     expect(inv.status).toBe('bezahlt');
-    expect(s.company.cash).toBeGreaterThan(cash + inv.amount - 50); // abzüglich weiterer Dieselbuchungen
+    // Zahlungseingang gebucht (Kontostand ändert sich zusätzlich durch Diesel, Versicherung …)
+    expect(s.business.ledger.some((l) => l.category === 'Rechnung' && l.amount === inv.amount)).toBe(true);
+    expect(cash).toBeGreaterThan(0);
     const cats = new Set(s.business.ledger.map((l) => l.category));
     expect(cats.has('Maschinenkauf')).toBe(true);
     expect(cats.has('Diesel')).toBe(true);

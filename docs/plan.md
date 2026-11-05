@@ -533,3 +533,24 @@ Schritte:
 - **Anzeige:** Wetter und „Feldarbeit möglich/ruht“ in der oberen Leiste, Vorhersage im Kopf des
   Planungsboards (gesperrte Tage blau hinterlegt).
 
+### Schritt 3: Jahreslauf (Annahmen)
+
+- **Zweite Dienstleistung Stoppelbearbeitung** mit der Kurzscheibenegge: Startpreis 38 €/ha
+  (Grubbern 55 €/ha, Annahme), Diesel 6 l/ha, Flächenleistung nach Gerät (LWK 3 m: 2 ha/h).
+  Grubberaufträge brauchen einen Grubber, Stoppelaufträge eine Kurzscheibenegge.
+- **Saisonkalender** (AK-04, `seasonServices`):
+
+  | Zeitraum | Dienstleistung | Kulturen | Gewicht |
+  | --- | --- | --- | --- |
+  | 1.3.–15.5. | Grubbern vor der Saat | Mais, Rüben, Kartoffeln | April 1,2, sonst 1 |
+  | 15.7.–31.7. | Stoppelbearbeitung nach Raps | Raps | 0,8 |
+  | 1.8.–15.9. | Stoppelbearbeitung nach Getreide und Raps | Getreide, Raps | August 1,3 |
+  | 1.9.–31.10. | Grubbern (Grundbodenbearbeitung) | Getreide, Raps, Ackerfutter | bis 15.10. 0,9, dann 0,6 |
+  | Juni, November–Februar | keine Bodenbearbeitung | – | – |
+
+- **Winter:** Am 1. November kommt der Hinweis auf den Wintercheck. Wartung beim Händler kostet
+  von November bis Februar 20 % weniger. Ein Wintercheck senkt das Pannenrisiko in den folgenden
+  300 Tagen um 30 % (MZ-05).
+- **Noch offen:** Fruchtwechsel der Kundenfelder je Jahr (heute behält jedes Feld seine Kultur),
+  weitere Dienstleistungen (Saat, Gülle, Ernte) mit den Maschinen aus Phase 4, Schritt 4.
+
