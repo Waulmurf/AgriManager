@@ -127,6 +127,12 @@ export const CATALOG: CatalogModel[] = [
   // Überladewagen: fährt nebenher und lädt am Feldrand auf Lkw oder Anhänger über
   { key: 'fliegl-ulw2000', type: 'ueberladewagen', brand: 'Fliegl', model: 'Überladewagen ULW 2000 (16 t)', payloadT: 16, powerNeed: 160, newPrice: 62_000, deliveryWeeks: 10 },
   { key: 'fliegl-ulw3000', type: 'ueberladewagen', brand: 'Fliegl', model: 'Überladewagen ULW 3000 (22 t)', payloadT: 22, powerNeed: 200, newPrice: 85_000, deliveryWeeks: 10 },
+  // Kommunaltechnik (Annahme): Winterdienst, Auslegemäher, Astschere, Wegepflege
+  { key: 'rauch-axeo', type: 'streuer', brand: 'Rauch', model: 'AXEO 18.1 + Frontschild 3 m', width: 3, powerNeed: 100, newPrice: 22_000, deliveryWeeks: 6 },
+  { key: 'mulag-mkm700', type: 'auslegemaeher', brand: 'Mulag', model: 'MKM 700 Auslegemäher', width: 1.2, powerNeed: 110, newPrice: 48_000, deliveryWeeks: 8 },
+  { key: 'duecker-usk63', type: 'auslegemaeher', brand: 'Dücker', model: 'USK 63 Auslegemäher', width: 1.25, powerNeed: 120, newPrice: 55_000, deliveryWeeks: 8 },
+  { key: 'duecker-ufs', type: 'astschere', brand: 'Dücker', model: 'Astschere am Ausleger', width: 1.8, powerNeed: 110, newPrice: 38_000, deliveryWeeks: 8 },
+  { key: 'duecker-wp', type: 'wegehobel', brand: 'Dücker', model: 'Wegepflegegerät 3 m', width: 3, powerNeed: 140, newPrice: 32_000, deliveryWeeks: 8 },
   // Radlader zum Verteilen und Walzen am Silo (Annahme): Walzleistung ≈ Betriebsgewicht × 4 t Frischmasse je Stunde
   { key: 'jcb-437', type: 'radlader', brand: 'JCB', model: '437 HT Agri', weightT: 13, power: 200, newPrice: 150_000, deliveryWeeks: 8 },
   { key: 'liebherr-l526', type: 'radlader', brand: 'Liebherr', model: 'L 526', weightT: 12, power: 160, newPrice: 170_000, deliveryWeeks: 10 },
@@ -155,7 +161,7 @@ export const DEALERS: Dealer[] = [
   { id: 3, name: 'Agrartechnik Lüneburg', town: 'Lüneburg', lonLat: [10.4140, 53.2490], tractorBrands: ['John Deere'], implementBrands: ['Kverneland', 'Krone'] },
   { id: 4, name: 'Landmaschinen Suhlendorf', town: 'Suhlendorf', lonLat: [10.7660, 52.9370], tractorBrands: ['Claas'], implementBrands: ['Horsch', 'Kotte', 'Zunhammer'] },
   { id: 5, name: 'Landtechnik Altmark', town: 'Salzwedel', lonLat: [11.1500, 52.8500], tractorBrands: ['Case IH', 'New Holland'], implementBrands: ['Kverneland', 'Joskin', 'Krampe', 'Fliegl'] },
-  { id: 6, name: 'Agrarservice Wittingen', town: 'Wittingen', lonLat: [10.7300, 52.7270], tractorBrands: ['Deutz-Fahr'], implementBrands: ['Rabe', 'Köckerling'] },
+  { id: 6, name: 'Agrarservice Wittingen', town: 'Wittingen', lonLat: [10.7300, 52.7270], tractorBrands: ['Deutz-Fahr'], implementBrands: ['Rabe', 'Köckerling', 'Rauch', 'Mulag', 'Dücker'] },
   { id: 7, name: 'Nutzfahrzeuge Uelzen', town: 'Uelzen', lonLat: [10.5450, 52.9560], tractorBrands: ['Firmenwagen'], implementBrands: [] },
   { id: 9, name: 'Lkw-Zentrum Uelzen', town: 'Uelzen', lonLat: [10.5350, 52.9700], tractorBrands: ['MAN', 'Mercedes-Benz', 'Scania'], implementBrands: [] },
   { id: 8, name: 'Baumaschinen Lüneburg', town: 'Lüneburg', lonLat: [10.4350, 53.2380], tractorBrands: ['JCB', 'Liebherr', 'Volvo'], implementBrands: [] },

@@ -3,7 +3,7 @@ import type { JobEstimate, PlanBar, PlayerUnitInfo, SaveState, VehicleInfo } fro
 import type { Competitor } from './market';
 import type { Company } from './economy';
 import type { ContactPreference } from './farms';
-import type { Analytics, BiogasPlant, FrameContract, Lease, LeaseOffer } from './business';
+import type { Analytics, BiogasPlant, FrameContract, Lease, LeaseOffer, Tender, WinterContract } from './business';
 import type { Applicant, Command, Delivery, StaffRequest, YearResult, GameEvent, Invoice, LedgerEntry, Order, QueueItem, Request } from './business';
 import type { MarketOffer } from './economy';
 
@@ -86,6 +86,9 @@ export interface BusinessState {
   /** Rahmenverträge (Vorschlag 7) */
   frames: FrameContract[];
   frameOffers: FrameContract[];
+  /** Kommunal (Vorschläge 2, 3) und Ereignisse (14) */
+  municipal: { tenders: Tender[]; winterOffers: WinterContract[]; winterContracts: WinterContract[] };
+  incidents: { storm: boolean; hailInsured: boolean; fairDiscount: number };
   /** Übernahmeangebot eines kleinen Konkurrenten (Vorschlag 12) */
   takeoverOffer: { competitorId: number; price: number; until: number } | null;
   /** Auswertung (Vorschlag 13) */

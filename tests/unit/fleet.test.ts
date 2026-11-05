@@ -39,6 +39,7 @@ describe('Katalog und Händler', () => {
       if (m.type === 'schlepper' || m.type === 'feldhaecksler') expect(m.power).toBeGreaterThan(90);
       else if (m.type === 'maehdrescher' || m.type === 'ruebenroder') { expect(m.power).toBeGreaterThan(250); expect(m.payloadT).toBeGreaterThan(5); expect(m.haPerHour).toBeGreaterThan(1); }
       else if (m.type === 'kipper' || m.type === 'ueberladewagen') expect(m.payloadT).toBeGreaterThan(10);
+      else if (m.type === 'streuer' || m.type === 'auslegemaeher' || m.type === 'astschere' || m.type === 'wegehobel') expect(m.powerNeed).toBeGreaterThan(50);
       else if (m.type === 'lkw') { expect(m.power).toBeGreaterThan(400); expect(m.payloadT).toBeGreaterThan(20); }
       else if (m.type === 'radlader') expect(m.weightT).toBeGreaterThan(8);
       else if (m.type === 'haeckselwagen') expect(m.payloadT).toBeGreaterThan(8);

@@ -1024,3 +1024,32 @@ Nils wählt aus, was umgesetzt wird. Empfehlung für den nächsten Block: 4, 1, 
     1,50–3,00 €/h mehr. Gleichziehen oder gehen lassen (7 Tage Frist).
   - Übernahme: Ein kleiner Anbieter sucht selten einen Nachfolger (150.000–300.000 €). Die Kunden
     im Umkreis von 20 km kommen dazu, außerdem ein gebrauchter Schlepper und ein Grubber.
+
+## Umsetzung Paket 4: Winterdienst, Kommunale Arbeiten, Ereignisse (5. Nov. 2026)
+
+- **Gemeinden (`src/sim/municipal.ts`):** Uelzen, Bad Bevensen, Ebstorf, Bienenbüttel, Suderburg,
+  Rosche, Bodenteich, Wrestedt, Lüchow und Wittingen.
+  - Gemeinden sind Kunden mit eigener Id (−100 − Index).
+  - Rechnungen und Zahlung laufen wie bei Betrieben.
+- **2 Winterdienst:** Im Oktober bieten Gemeinden Verträge bis Ende März an: 1.200 € Bereitschaft
+  im Monat und 95 € je Einsatzstunde. Nötig: Streuer mit Schneeschild.
+  - Glätte: höchstens 1 °C mit Niederschlag, oder Frost nach Regen am Vortag.
+  - Dann muss je Vertrag binnen 2 Stunden eine Tour starten. Sonst kostet es 300 € Strafe und
+    Ruf; nach drei verpassten Einsätzen kündigt die Gemeinde.
+- **3 Kommunale Arbeiten:** laufende Ausschreibungen in der Saison:
+  - Böschungsmähen (Mai–Sept., 15–40 km, um 60 €/km)
+  - Heckenschnitt (Okt.–Febr., 5–15 km, um 150 €/km)
+  - Wegebau (Apr.–Okt., 3–8 km, um 400 €/km)
+  - Ein verdecktes Gegengebot liegt bei 90–115 % des üblichen Preises; das günstigste Angebot
+    gewinnt. Fertig binnen 30 Tagen.
+- **Tour (Aufgabe `tour`):** Rundkurs um den Ort über 8 Straßenpunkte etwa 2 km von der Mitte, mit
+  Arbeitstempo (Winterdienst 25, Mähen 4, Hecke 2, Wegebau 3 km/h), bis die Strecke geschafft ist.
+- **Geräte:** Rauch AXEO + Frontschild, Mulag MKM 700, Dücker USK 63, Dücker Astschere, Dücker
+  Wegepflegegerät (Händler Agrarservice Wittingen).
+- **14 Ereignisse:**
+  - Unwetter mit Sturm (April–Sept., selten): Feldarbeit ruht den Tag, eine Maschine Zustand −15.
+  - Hagel (Juni/Juli): eigene stehende Kultur −20 %, außer mit Hagelversicherung (25 €/ha, am
+    1. April).
+  - Verkehrskontrollen: bei überfälliger Wartung oder schlechtem Zustand 250 € Bußgeld.
+  - Messen: Agritechnica (November, ungerade Jahre) 8 %, DLG-Feldtage (Juni, gerade Jahre) 4 %
+    Rabatt auf Neumaschinen.

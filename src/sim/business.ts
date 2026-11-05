@@ -20,6 +20,7 @@ import {
   SUBSTRATE_NAME, SUBSTRATE_PRICE, FLEX_COST_KW, FLEX_CT, FLEX_EUR_KW_YEAR, HEAT_COST, HEAT_CT, HEAT_SHARE, SILO_HIRED_EUR_H, SILO_HIRED_TPH, dailyTarget, farmSlurryPerDay, gaerBlocked, gaerOf, ration, type BiogasSize, type Feed, type Substrate,
 } from './biogas';
 import { DESTINATIONS } from '../data/destinations';
+import { MUNICIPALITIES, MUNI_BASE, TOUR, WINTER_EUR_H, WINTER_PENALTY, WINTER_STANDBY_MONTH, inWindow, type TourService } from './municipal';
 import { GAER_N_KG_M3, ORGANIC_N_LIMIT, SEASON_FACTOR, STORABLE, STORE_EUR_T_MONTH, landPrice } from './marketing';
 import { COMPETITOR_RANGE_KM, PRICE_WAR_KM, generateCompetitors, kmBetween, type Competitor } from './market';
 import {
@@ -79,13 +80,14 @@ export const REPAIR_TRACTOR_EUR_H = 8;
 export const WEAR_GRUBBER_EUR_HA = 3;
 
 export type Service = 'grubbern' | 'stoppel' | 'guelle' | 'haeckseln' | 'drusch' | 'roden' | 'transport'
-  | 'saat' | 'einzelkorn' | 'pflanzenschutz' | 'pressen' | 'kartoffelroden';
-export const SERVICE_NAMES: Record<Service, string> = { grubbern: 'Grubbern', stoppel: 'Stoppelbearbeitung', guelle: 'Gülle ausbringen', haeckseln: 'Maishäckseln', drusch: 'Mähdrusch', roden: 'Rübenroden', transport: 'Lkw-Transport', saat: 'Drillsaat', einzelkorn: 'Einzelkornsaat', pflanzenschutz: 'Pflanzenschutz', pressen: 'Stroh pressen', kartoffelroden: 'Kartoffelroden' };
+  | 'saat' | 'einzelkorn' | 'pflanzenschutz' | 'pressen' | 'kartoffelroden'
+  | 'winterdienst' | 'maehen' | 'hecke' | 'wegebau';
+export const SERVICE_NAMES: Record<Service, string> = { grubbern: 'Grubbern', stoppel: 'Stoppelbearbeitung', guelle: 'Gülle ausbringen', haeckseln: 'Maishäckseln', drusch: 'Mähdrusch', roden: 'Rübenroden', transport: 'Lkw-Transport', saat: 'Drillsaat', einzelkorn: 'Einzelkornsaat', pflanzenschutz: 'Pflanzenschutz', pressen: 'Stroh pressen', kartoffelroden: 'Kartoffelroden', winterdienst: 'Winterdienst', maehen: 'Böschungsmähen', hecke: 'Heckenschnitt', wegebau: 'Wegebau' };
 /** Gerät je Dienstleistung und Tätigkeitswort für die Anzeige */
-export const SERVICE_IMPLEMENT: Record<Service, MachineType> = { grubbern: 'grubber', stoppel: 'kurzscheibenegge', guelle: 'guellefass', haeckseln: 'feldhaecksler', drusch: 'maehdrescher', roden: 'ruebenroder', transport: 'lkw', saat: 'drille', einzelkorn: 'einzelkorn', pflanzenschutz: 'spritze', pressen: 'presse', kartoffelroden: 'kartoffelroder' };
-export const SERVICE_VERB: Record<Service, string> = { grubbern: 'grubbert', stoppel: 'bearbeitet Stoppeln', guelle: 'bringt Gülle aus', haeckseln: 'häckselt', drusch: 'drischt', roden: 'rodet Rüben', transport: 'fährt Lkw', saat: 'drillt', einzelkorn: 'legt Mais/Rüben', pflanzenschutz: 'spritzt', pressen: 'presst Stroh', kartoffelroden: 'rodet Kartoffeln' };
+export const SERVICE_IMPLEMENT: Record<Service, MachineType> = { grubbern: 'grubber', stoppel: 'kurzscheibenegge', guelle: 'guellefass', haeckseln: 'feldhaecksler', drusch: 'maehdrescher', roden: 'ruebenroder', transport: 'lkw', saat: 'drille', einzelkorn: 'einzelkorn', pflanzenschutz: 'spritze', pressen: 'presse', kartoffelroden: 'kartoffelroder', winterdienst: 'streuer', maehen: 'auslegemaeher', hecke: 'astschere', wegebau: 'wegehobel' };
+export const SERVICE_VERB: Record<Service, string> = { grubbern: 'grubbert', stoppel: 'bearbeitet Stoppeln', guelle: 'bringt Gülle aus', haeckseln: 'häckselt', drusch: 'drischt', roden: 'rodet Rüben', transport: 'fährt Lkw', saat: 'drillt', einzelkorn: 'legt Mais/Rüben', pflanzenschutz: 'spritzt', pressen: 'presst Stroh', kartoffelroden: 'rodet Kartoffeln', winterdienst: 'räumt und streut', maehen: 'mäht Böschungen', hecke: 'schneidet Hecken', wegebau: 'pflegt Wege' };
 /** Tätigkeit des Fahrers je Dienstleistung (Skill) */
-export const SERVICE_SKILL: Record<Service, Skill> = { grubbern: 'boden', stoppel: 'boden', guelle: 'guelle', haeckseln: 'haecksler', drusch: 'drescher', roden: 'roder', transport: 'transport', saat: 'saat', einzelkorn: 'saat', pflanzenschutz: 'pflanzenschutz', pressen: 'boden', kartoffelroden: 'kartoffel' };
+export const SERVICE_SKILL: Record<Service, Skill> = { grubbern: 'boden', stoppel: 'boden', guelle: 'guelle', haeckseln: 'haecksler', drusch: 'drescher', roden: 'roder', transport: 'transport', saat: 'saat', einzelkorn: 'saat', pflanzenschutz: 'pflanzenschutz', pressen: 'boden', kartoffelroden: 'kartoffel', winterdienst: 'boden', maehen: 'boden', hecke: 'boden', wegebau: 'boden' };
 /** Erntedienste: selbstfahrende Hauptmaschine (Fahrzeug und Gerät zugleich), Abfahrer-Wagen (falls nötig) */
 export const HARVEST_SERVICES: Service[] = ['haeckseln', 'drusch', 'roden', 'kartoffelroden'];
 /** Wagen für die Abfuhr (erster = Standard); Überladewagen laden am Feldrand über */
@@ -126,7 +128,7 @@ export const HIRED_ROLLER_EUR_H = 110;
  * Grubbern. Gülle wird je m³ abgerechnet: 4 €/m³ (Spanne für Lohnausbringung 2,50–8 €/m³ je nach
  * Entfernung und System laut LK Niederösterreich); priceHa = €/m³ × Gabe.
  */
-export const SERVICE_BASE_PRICE: Record<Service, number> = { grubbern: 55, stoppel: 38, guelle: 4, haeckseln: 230, drusch: 150, roden: 280, transport: 0, saat: 65, einzelkorn: 55, pflanzenschutz: 22, pressen: 60, kartoffelroden: 330 };
+export const SERVICE_BASE_PRICE: Record<Service, number> = { grubbern: 55, stoppel: 38, guelle: 4, haeckseln: 230, drusch: 150, roden: 280, transport: 0, saat: 65, einzelkorn: 55, pflanzenschutz: 22, pressen: 60, kartoffelroden: 330, winterdienst: 0, maehen: 60, hecke: 150, wegebau: 400 };
 /**
  * Lkw-Transport (Annahme): Fracht 1,80 €/t Grundpreis + 0,12 €/t je Straßen-km (Straße ≈ Luftlinie × 1,3);
  * Diesel 32 l/100 km; Maut 0,35 €/km auf Bundesstraßen und Autobahn (Strecken ab 65 km/h); Laden an der
@@ -263,6 +265,8 @@ export interface Order {
   /** Gülle/Gärrest von einem fremden Hof bzw. einer BGA; flüssiger Transport */
   sourceFarmId?: number;
   liquid?: boolean;
+  /** Tour (Kommunal, Winterdienst): Ortsmitte; areaHa = km */
+  tourNode?: number;
   earliest: number;
   latest: number;
   status: OrderStatus;
@@ -316,6 +320,25 @@ export interface FrameContract {
   factor: number;
   years: number;
   /** Angebot: Antwort bis; Vertrag: läuft bis */
+  until: number;
+  strikes: number;
+}
+
+/** Ausschreibung einer Gemeinde (Vorschlag 3): Strecke in km, verdecktes Gebot der Konkurrenz */
+export interface Tender {
+  id: number;
+  muniId: number;
+  service: TourService;
+  km: number;
+  until: number;
+  competitorEurKm: number;
+  playerEurKm?: number;
+}
+
+/** Winterdienst-Vertrag bzw. -Angebot einer Gemeinde (Vorschlag 2) */
+export interface WinterContract {
+  id: number;
+  muniId: number;
   until: number;
   strikes: number;
 }
@@ -493,6 +516,9 @@ export type Command =
   | { kind: 'askLand'; farmId: number }
   | { kind: 'setCrop'; leaseId: number; crop: OwnCrop }
   | { kind: 'buyLand'; offerId: number }
+  | { kind: 'tenderBid'; tenderId: number; eurKm: number }
+  | { kind: 'winterAccept'; offerId: number }
+  | { kind: 'hailInsurance'; on: boolean }
   | { kind: 'dispatcher'; action: 'hire' | 'fire' | 'set'; autoAccept?: boolean; autoStart?: boolean; autoRemind?: boolean }
   | { kind: 'course'; employeeId: number; course: CourseKey; skill?: Skill }
   | { kind: 'hireApprentice' }
@@ -572,6 +598,16 @@ export class Business {
   readonly cropStock: Record<OwnCrop, number> = { weizen: 0, raps: 0, mais: 0, rueben: 0, kartoffeln: 0 };
   readonly forwards: { id: number; crop: OwnCrop; t: number; priceT: number; deliverBy: number }[] = [];
   storeHarvest = true;
+  /** Kommunal (Vorschläge 2, 3): Ausschreibungen, Winterdienst-Angebote und -Verträge */
+  readonly tenders: Tender[] = [];
+  readonly winterOffers: WinterContract[] = [];
+  readonly winterContracts: WinterContract[] = [];
+  /** Ereignisse (Vorschlag 14): Sturmtag, Hagelversicherung */
+  stormDay = -1;
+  hailInsured = false;
+  private eventRng: Rng;
+  /** Temperatur eines Tages (setzt der Rechenkern) */
+  tempOfDay: ((day: number) => number) | null = null;
   /** Übernahmeangebot eines kleinen Konkurrenten (Vorschlag 12) */
   takeoverOffer: { competitorId: number; price: number; until: number } | null = null;
   /** Rahmenverträge (Vorschlag 7): Angebote und laufende Verträge */
@@ -628,6 +664,7 @@ export class Business {
     this.marketRng = new Rng(seed ^ 0x3a7c0e);
     this.competitors = generateCompetitors(() => this.marketRng.next());
     this.priceRng = new Rng(seed ^ 0x9c1e5);
+    this.eventRng = new Rng(seed ^ 0xe4e47);
   }
 
   /** Zustand für den Spielstand (ohne Betriebe/Felder, die aus dem Seed entstehen) */
@@ -657,6 +694,8 @@ export class Business {
       biogas: this.biogas,
       frameOffers: this.frameOffers,
       takeoverOffer: this.takeoverOffer,
+      municipal: { tenders: this.tenders, winterOffers: this.winterOffers, winterContracts: this.winterContracts },
+      events: { rng: this.eventRng.getState(), stormDay: this.stormDay, hail: this.hailInsured },
       frames: this.frames,
       marketing: { rng: this.priceRng.getState(), price: this.cropPrice, stock: this.cropStock, forwards: this.forwards, store: this.storeHarvest },
       market: { rng: this.marketRng.getState(), competitors: this.competitors, reputation: this.reputation, won: this.won, lost: this.lost },
@@ -697,6 +736,10 @@ export class Business {
     this.biogas = s.biogas ? structuredClone(s.biogas) : null;
     put(this.frameOffers, s.frameOffers ?? []);
     this.takeoverOffer = s.takeoverOffer ?? null;
+    put(this.tenders, s.municipal?.tenders ?? []);
+    put(this.winterOffers, s.municipal?.winterOffers ?? []);
+    put(this.winterContracts, s.municipal?.winterContracts ?? []);
+    if (s.events) { this.eventRng.setState(s.events.rng); this.stormDay = s.events.stormDay; this.hailInsured = s.events.hail; }
     put(this.frames, s.frames ?? []);
     if (s.marketing) {
       this.priceRng.setState(s.marketing.rng);
@@ -1690,6 +1733,7 @@ export class Business {
   }
 
   farmName(id: number): string {
+    if (id <= MUNI_BASE) return MUNICIPALITIES[MUNI_BASE - id]?.name ?? 'Gemeinde';
     if (id < 0) return 'Eigene Fläche';
     return this.farms?.farms[id]?.name ?? `Betrieb ${id}`;
   }
@@ -2006,6 +2050,182 @@ export class Business {
     return 'übernommen';
   }
 
+  // ---------- Kommunal und Winterdienst (Vorschläge 2, 3) ----------
+
+  private muniNode(muniId: number): number {
+    const m = MUNICIPALITIES[muniId];
+    return this.lonLatNode ? this.lonLatNode(m.lonLat) : 0;
+  }
+
+  tenderBid(tenderId: number, eurKm: number): string {
+    const t = this.tenders.find((x) => x.id === tenderId);
+    if (!t) return 'Ausschreibung nicht mehr offen';
+    if (!(eurKm > 0 && eurKm < 5000)) return 'Preis je km eingeben';
+    t.playerEurKm = Math.round(eurKm * 100) / 100;
+    this.version++;
+    return `Angebot abgegeben: ${fmtEur(t.playerEurKm)}/km – Vergabe am ${fmtDay(t.until)}`;
+  }
+
+  winterAccept(offerId: number, time: number): string {
+    const o = this.winterOffers.find((x) => x.id === offerId);
+    if (!o) return 'Angebot nicht mehr aktuell';
+    if (!this.company.machines.some((m) => m.type === 'streuer')) return 'Erst einen Streuer mit Schneeschild kaufen';
+    this.winterOffers.splice(this.winterOffers.indexOf(o), 1);
+    this.winterContracts.push({ ...o, strikes: 0 });
+    this.version++;
+    this.emit(time, 'info', `Winterdienst-Vertrag mit ${MUNICIPALITIES[o.muniId].name} bis ${fmtDay(o.until)}: ${fmtEur(WINTER_STANDBY_MONTH)} Bereitschaft im Monat, ${fmtEur(WINTER_EUR_H)} je Einsatzstunde. Bei Glätte binnen 2 Stunden ausrücken.`);
+    return 'Vertrag abgeschlossen';
+  }
+
+  /** Tour fertig: Rechnung (Winterdienst nach Stunden, sonst vereinbarte km × Preis) */
+  tourDone(o: Order, km: number, minutes: number, time: number) {
+    if (o.status === 'fertig') return;
+    o.status = 'fertig';
+    o.finishedAt = time;
+    if (o.service === 'winterdienst') {
+      o.areaHa = Math.max(1, Math.round(km * 10) / 10);
+      o.priceHa = Math.round(((minutes / 60) * WINTER_EUR_H / o.areaHa) * 100) / 100;
+    }
+    this.emit(time, 'auftrag', `${SERVICE_NAMES[o.service]} für ${this.farmName(o.farmId)} erledigt (${Math.round(km)} km, ${Math.round(minutes / 60 * 10) / 10} h).`);
+    this.changeReputation(time <= o.latest ? 1 : -2);
+    this.issueInvoice(o, time);
+  }
+
+  /** Täglich: Ausschreibungen, Vergabe, Winterdienst-Angebote, Bereitschaft, Glätte-Einsätze */
+  private municipalDaily(time: number) {
+    const r = this.eventRng;
+    const d = gameDate(time);
+    const md = d.month * 100 + d.day;
+    // neue Ausschreibungen in der Saison
+    for (const s of ['maehen', 'hecke', 'wegebau'] as TourService[]) {
+      const def = TOUR[s];
+      if (!inWindow(md, def.from, def.to) || r.next() >= 0.03) continue;
+      const km = s === 'maehen' ? 15 + r.int(26) : s === 'hecke' ? 5 + r.int(11) : 3 + r.int(6);
+      const t: Tender = { id: this.nextId++, muniId: r.int(MUNICIPALITIES.length), service: s, km, until: time + 10 * 1440, competitorEurKm: Math.round(def.eurKm * (0.9 + r.next() * 0.25) * 100) / 100 };
+      this.tenders.push(t);
+      this.emit(time, 'info', `Ausschreibung ${MUNICIPALITIES[t.muniId].name}: ${def.name} ${km} km, Angebote bis ${fmtDay(t.until)} (Reiter Kommunal).`);
+    }
+    // Vergabe
+    for (let i = this.tenders.length - 1; i >= 0; i--) {
+      const t = this.tenders[i];
+      if (t.until > time) continue;
+      this.tenders.splice(i, 1);
+      if (t.playerEurKm === undefined) continue;
+      const m = MUNICIPALITIES[t.muniId];
+      if (t.playerEurKm <= t.competitorEurKm) {
+        this.orders.push({
+          id: this.nextId++, requestId: 0, farmId: MUNI_BASE - t.muniId, service: t.service, fields: [], doneFields: [], areaHa: t.km, priceHa: t.playerEurKm,
+          earliest: time, latest: time + 30 * 1440, status: 'offen', dieselL: 0, dieselCost: 0, tractorHours: 0, tourNode: this.muniNode(t.muniId),
+        });
+        this.won++;
+        this.emit(time, 'auftrag', `Zuschlag: ${TOUR[t.service].name} für ${m.name}, ${t.km} km zu ${fmtEur(t.playerEurKm)}/km (fertig bis ${fmtDay(time + 30 * 1440)}).`);
+      } else {
+        this.lost++;
+        this.emit(time, 'warnung', `Ausschreibung ${m.name} (${TOUR[t.service].name}) verloren: Ein anderer bot ${fmtEur(t.competitorEurKm)}/km.`);
+      }
+      this.version++;
+    }
+    // Winterdienst-Angebote im Oktober
+    if (d.month === 10 && r.next() < 0.15) {
+      const free = MUNICIPALITIES.filter((m) => !this.winterContracts.some((c) => c.muniId === m.id) && !this.winterOffers.some((c) => c.muniId === m.id));
+      if (free.length) {
+        const m = free[r.int(free.length)];
+        let end = time;
+        while (!(gameDate(end).month === 3 && gameDate(end).day === 31)) end += 1440;
+        this.winterOffers.push({ id: this.nextId++, muniId: m.id, until: end + 1440, strikes: 0 });
+        this.emit(time, 'info', `${m.name} sucht einen Winterdienst (Nov.–März): Bereitschaft ${fmtEur(WINTER_STANDBY_MONTH)}/Monat plus ${fmtEur(WINTER_EUR_H)}/h (Reiter Kommunal).`);
+      }
+    }
+    for (let i = this.winterOffers.length - 1; i >= 0; i--) if (gameDate(time).month === 11 && gameDate(time).day === 1) this.winterOffers.splice(i, 1);
+    for (let i = this.winterContracts.length - 1; i >= 0; i--) if (this.winterContracts[i].until <= time) this.winterContracts.splice(i, 1);
+    // Bereitschaft am Monatsersten (Nov.–März)
+    if (d.day === 1 && (d.month >= 11 || d.month <= 3)) {
+      for (const c of this.winterContracts) this.book(time, `Winterdienst Bereitschaft ${MUNICIPALITIES[c.muniId].name}`, WINTER_STANDBY_MONTH, 'Rechnung');
+    }
+    // verpasste Einsätze (nicht binnen 2 h gestartet): Strafe, nach drei Mal Kündigung
+    for (const o of this.orders) {
+      if (o.service !== 'winterdienst' || o.status !== 'offen' || time <= o.latest) continue;
+      o.status = 'fertig';
+      o.priceHa = 0;
+      const c = this.winterContracts.find((x) => MUNI_BASE - x.muniId === o.farmId);
+      this.book(time, `Winterdienst nicht ausgerückt: ${this.farmName(o.farmId)}`, -WINTER_PENALTY, 'Sonstiges');
+      this.changeReputation(-3);
+      if (c && ++c.strikes >= 3) {
+        this.winterContracts.splice(this.winterContracts.indexOf(c), 1);
+        this.emit(time, 'warnung', `${this.farmName(o.farmId)} kündigt den Winterdienst nach drei verpassten Einsätzen.`);
+      } else this.emit(time, 'warnung', `Winterdienst ${this.farmName(o.farmId)} nicht ausgerückt – Vertragsstrafe ${fmtEur(WINTER_PENALTY)}.`);
+    }
+    // Glätte heute? (Schnee/Eisregen bei ≤ 1 °C, überfrierende Nässe nach Regen bei Frost)
+    if (this.winterContracts.length && this.tempOfDay && this.rainOfDay) {
+      const day = Math.floor(time / 1440);
+      const temp = this.tempOfDay(day), rain = this.rainOfDay(day), before = day > 0 ? this.rainOfDay(day - 1) : 0;
+      if (temp <= 1 && (rain >= 0.5 || (before >= 0.5 && temp < 0))) {
+        for (const c of this.winterContracts) {
+          this.orders.push({
+            id: this.nextId++, requestId: 0, farmId: MUNI_BASE - c.muniId, service: 'winterdienst', fields: [], doneFields: [], areaHa: 25, priceHa: 0,
+            earliest: time, latest: time + 120, status: 'offen', dieselL: 0, dieselCost: 0, tractorHours: 0, tourNode: this.muniNode(c.muniId),
+          });
+        }
+        this.emit(time, 'warnung', `Glätte (${temp.toLocaleString('de-DE')} °C${rain >= 0.5 ? ', Niederschlag' : ', überfrierende Nässe'}): Winterdienst für ${this.winterContracts.length} ${this.winterContracts.length === 1 ? 'Gemeinde' : 'Gemeinden'} – binnen 2 Stunden ausrücken!`);
+      }
+    }
+  }
+
+  // ---------- Ereignisse (Vorschlag 14) ----------
+
+  /** Messerabatt: Agritechnica (November, ungerade Jahre) 8 %, DLG-Feldtage (Juni, gerade Jahre) 4 % */
+  fairDiscount(time: number): number {
+    const d = gameDate(time);
+    if (d.year % 2 === 1 && d.month === 11 && d.day >= 5 && d.day <= 20) return 0.08;
+    if (d.year % 2 === 0 && d.month === 6 && d.day >= 10 && d.day <= 20) return 0.04;
+    return 0;
+  }
+
+  private eventsDaily(time: number) {
+    const r = this.eventRng;
+    const d = gameDate(time);
+    const day = Math.floor(time / 1440);
+    if (d.year % 2 === 1 && d.month === 11 && d.day === 5) this.emit(time, 'info', 'Agritechnica in Hannover: bis 20. November 8 % Messerabatt auf neue Maschinen.');
+    if (d.year % 2 === 0 && d.month === 6 && d.day === 10) this.emit(time, 'info', 'DLG-Feldtage: bis 20. Juni 4 % Rabatt auf neue Maschinen.');
+    // Hagelversicherung: Prämie am 1. April (25 €/ha)
+    if (this.hailInsured && d.month === 4 && d.day === 1) {
+      const ha = this.leases.reduce((a, l) => a + l.areaHa, 0);
+      if (ha > 0) this.book(time, `Hagelversicherung (${fmtHa(ha)})`, -Math.round(ha * 25), 'Versicherung');
+    }
+    // Sturm (April–September): Feldarbeit ruht heute, eine Maschine bekommt etwas ab
+    if (d.month >= 4 && d.month <= 9 && r.next() < 0.006) {
+      this.stormDay = day;
+      const ms = this.company.machines.filter((m) => m.type !== 'firmenwagen');
+      const m = ms.length ? ms[r.int(ms.length)] : undefined;
+      if (m) m.condition = Math.max(10, m.condition - 15);
+      this.emit(time, 'warnung', `Unwetter mit Sturm: Feldarbeit ruht heute.${m ? ` ${[m.brand, m.model].join(' ')} wurde beschädigt (Zustand −15).` : ''}`);
+      this.version++;
+    }
+    // Hagel (Juni–Juli) auf eigenen Flächen mit stehender Kultur
+    if ((d.month === 6 || d.month === 7) && r.next() < 0.01) {
+      const hit = this.leases.filter((l) => l.crop && l.steps.some((s) => s.status !== 'erledigt' && s.status !== 'entfällt'));
+      if (hit.length) {
+        const l = hit[r.int(hit.length)];
+        if (this.hailInsured) this.emit(time, 'info', `Hagelschauer über ${fmtHa(l.areaHa)} eigener Fläche – die Versicherung übernimmt den Schaden.`);
+        else { l.yieldFactor *= 0.8; this.emit(time, 'warnung', `Hagel auf ${fmtHa(l.areaHa)} eigener Fläche: Ertrag −20 % (keine Hagelversicherung).`); }
+        this.version++;
+      }
+    }
+    // Kontrolle (Polizei/BAG) bei einem Gespann unterwegs: überfällige Wartung oder schlechter Zustand kostet
+    if (r.next() < 0.004) {
+      const m = this.company.machines.filter((x) => x.type === 'schlepper' || x.type === 'lkw');
+      const x = m.length ? m[r.int(m.length)] : undefined;
+      if (x) {
+        const bad = (x.serviceAtH !== undefined && x.hours >= x.serviceAtH) || x.condition < 40;
+        if (bad) {
+          this.book(time, `Bußgeld Verkehrskontrolle (${[x.brand, x.model].join(' ')})`, -250, 'Sonstiges');
+          this.changeReputation(-1);
+          this.emit(time, 'warnung', `Kontrolle: ${[x.brand, x.model].join(' ')} beanstandet (Wartung überfällig oder schlechter Zustand) – Bußgeld 250 €.`);
+        } else this.emit(time, 'info', `Kontrolle: ${[x.brand, x.model].join(' ')} ohne Beanstandung.`);
+      }
+    }
+  }
+
   /** laufender Rahmenvertrag eines Betriebs */
   frameOf(farmId: number): FrameContract | undefined {
     return this.frames.find((f) => f.farmId === farmId);
@@ -2153,6 +2373,8 @@ export class Business {
     this.framesDaily(time);
     this.trainingDaily(time);
     this.rivalsDaily(time);
+    this.municipalDaily(time);
+    this.eventsDaily(time);
     if (this.company.dispatcher && gameDate(time).day === 1) this.book(time, 'Disponent (Büro)', -DISPATCHER_MONTH, 'Personal');
     this.biogasDaily(time);
     // Auftrag steht wegen Panne: Kunde wartet und wird unzufriedener (MZ-07)
@@ -2476,9 +2698,9 @@ export class Business {
     return Math.min(0.12, 0.05 + Math.floor((this.dealerSpend[dealerId] ?? 0) / 50_000) * 0.01);
   }
 
-  /** Neupreis beim Händler nach Rabatt */
+  /** Neupreis beim Händler nach Rabatt (plus Messerabatt, Vorschlag 14) */
   newPrice(dealerId: number, model: CatalogModel): number {
-    return Math.round((model.newPrice * (1 - this.dealerDiscount(dealerId))) / 100) * 100;
+    return Math.round((model.newPrice * (1 - Math.min(0.2, this.dealerDiscount(dealerId) + this.fairDiscount(this.lastTime)))) / 100) * 100;
   }
 
   /** Neumaschine bestellen (HM-06): Anzahlung entfällt, bezahlt wird bei Lieferung */

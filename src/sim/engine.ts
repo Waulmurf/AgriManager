@@ -14,6 +14,7 @@ import { MACHINE_SKILL, MECHANIC_MIN, SELF_PROPELLED, START_OFFERS, normalizeDri
 import { DEALERS } from '../data/catalog';
 import { SITE_OFFERS } from '../data/sites';
 import { DESTINATIONS } from '../data/destinations';
+import { TOUR, isTour } from './municipal';
 import { Business, HARVEST_TOWED, HAULER_TYPES, POTATO_YIELD_T_HA, DIESEL_TRUCK_L_KM, DRIVE_BREAK_AFTER_MIN, DRIVE_BREAK_MIN, TOLL_EUR_KM, TRUCK_LOAD_MIN, BEET_YIELD_T_HA, GRAIN_YIELD_T_HA, HAULER_TYPE, RAPE_YIELD_T_HA, isHarvest, HIRED_ROLLER_EUR_H, REMIND_CALL_MINUTES, SERVICE_IMPLEMENT, SILAGE_YIELD_T_HA, SERVICE_NAMES, SERVICE_SKILL, SERVICE_VERB, type Order, VISIT_MINUTES, WEAR_GRUBBER_EUR_HA, type Service, fmtDay, fmtHa, fmtTime, type Command, type QueueCommand, type QueueItem } from './business';
 import { appendEdgePoints, nearestNode, project, RoadClass, unproject, type RoadGraph } from './roadgraph';
 import { surchargeFactor } from './calendar';
@@ -224,6 +225,11 @@ type PlayerTask =
       phase: 'toLoad' | 'load' | 'toUnload' | 'unload' | 'break' | 'back' | 'night';
     }
   | {
+      /** Tour (Winterdienst, Böschungsmähen, Heckenschnitt, Wegebau): Rundkurs um den Ort mit Arbeitstempo */
+      kind: 'tour'; driverId: number; orderId: number; implementId: number; points: number[]; idx: number;
+      phase: 'to' | 'work' | 'back'; kmh: number; km: number; workMin: number; target: number;
+    }
+  | {
       /** Radlader fährt das Silo der Biogasanlage fest */
       kind: 'compact'; driverId: number; phase: 'to' | 'work' | 'back'; node: number; minutes: number;
     }
@@ -360,6 +366,7 @@ export class Simulation {
     this.weather = new Weather(opts.seed);
     this.business.nodeLonLat = (node) => unproject(this.graph, this.graph.x[node], this.graph.y[node]);
     this.business.rainOfDay = (day) => this.weather.day(day).rain;
+    this.business.tempOfDay = (day) => this.weather.day(day).temp;
     this.business.lonLatNode = (ll) => { const [x, y] = project(graph, ll[0], ll[1]); return nearestNode(graph, x, y); };
     this.ensureSites();
     // Abgestellt am Hof: Route aus einem Punkt, damit jedes Fahrzeug eine Position hat
@@ -442,7 +449,8 @@ export class Simulation {
   /** Wettersperre für einen Auftrag: Mähdrusch braucht trockenes Korn, sonst zählt der Boden */
   private weatherFor(orderId: number): string | null {
     const o = this.business.orders.find((x) => x.id === orderId);
-    if (o?.service === 'transport') return null;
+    if (o?.service === 'transport' || (o && isTour(o.service))) return null;
+    if (this.business.stormDay === Math.floor(this.time / 1440)) return 'Sturm';
     return o?.service === 'drusch' ? this.weather.threshBlocked(this.time) : this.weather.fieldBlocked(this.time);
   }
 
@@ -483,7 +491,7 @@ export class Simulation {
 
   /** Maschine gerade bei einer Aufgabe (Schlepper/Wagen mit Aufgabe oder Gerät im Auftrag) */
   private machineBusy(machineId: number): boolean {
-    return this.vehicles.some((v) => v.owner === 'player' && !!v.task && (v.machineId === machineId || ((v.task.kind === 'job' || v.task.kind === 'feeder' || v.task.kind === 'haul' || v.task.kind === 'truck') && v.task.implementId === machineId)));
+    return this.vehicles.some((v) => v.owner === 'player' && !!v.task && (v.machineId === machineId || ((v.task.kind === 'job' || v.task.kind === 'feeder' || v.task.kind === 'haul' || v.task.kind === 'truck' || v.task.kind === 'tour') && v.task.implementId === machineId)));
   }
 
   busyMachineIds(): number[] {
@@ -632,6 +640,7 @@ export class Simulation {
       if (v.task.kind === 'transfer') return `${who} überführt eine Maschine`;
       if (v.task.kind === 'truck') return `${who} fährt Lkw`;
       if (v.task.kind === 'compact') return `${who} fährt das Silo fest`;
+      if (v.task.kind === 'tour') return `${who} ist auf Tour (Kommunal)`;
       if (v.task.kind === 'silo') return `${who} walzt am Silo`;
       return v.task.kind === 'visit' ? `${who} ist auf Besuch bei ${this.business.farmName(v.task.farmId)}` : `${who} fährt einen Auftrag`;
     }
@@ -903,6 +912,11 @@ export class Simulation {
         const end = this.time + 30;
         if (t.kind === 'transfer') {
           bars.push({ key: `r${v.id}`, driverId: t.driverId, kind: 'visit', label: 'Überführung', start: this.time, end: this.time + 60, warnings: [] });
+          continue;
+        }
+        if (t.kind === 'tour') {
+          const o = b.orders.find((x) => x.id === t.orderId);
+          bars.push({ key: `r${v.id}`, driverId: t.driverId, kind: 'running', vehicle: v.id, orderId: t.orderId, label: o ? `${SERVICE_NAMES[o.service]} ${b.farmName(o.farmId)}` : 'Tour', start: o?.startedAt ?? this.time, end: this.time + 120, tractorId: v.machineId, warnings: [] });
           continue;
         }
         if (t.kind === 'compact') {
@@ -1237,6 +1251,18 @@ export class Simulation {
     const driver = this.company.drivers.find((d) => d.id === (cmd.driverId ?? 1));
     if (!driver) return 'Fahrer gibt es nicht mehr';
     const tOrder = b.orders.find((x) => x.id === cmd.orderId);
+    if (tOrder && isTour(tOrder.service)) {
+      if (tOrder.status !== 'offen') return 'Auftrag nicht startbar';
+      const tsvc = tOrder.service;
+      const tr = this.company.machines.find((m) => m.id === cmd.tractorId && m.type === 'schlepper');
+      const im = this.company.machines.find((m) => m.id === cmd.implementId && m.type === TOUR[tsvc].implement);
+      if (!tr || !im) return `Schlepper und ${({ streuer: 'Streuer mit Schneeschild', auslegemaeher: 'Auslegemäher', astschere: 'Astschere', wegehobel: 'Wegepflegegerät' } as Record<string, string>)[TOUR[tsvc].implement]} wählen`;
+      if ((im.powerNeed ?? 0) > (tr.power ?? 0)) return 'Schlepper zu schwach für das Gerät';
+      if ((driver.skills.boden ?? 0) < 1) return `${this.driverName(driver.id)} ist nicht als Traktorfahrer qualifiziert`;
+      if (!this.vehicles.some((v) => v.owner === 'player' && v.machineId === tr.id)) return 'Schlepper nicht verfügbar';
+      if (this.queue.some((q) => q.id !== ignoreQueueId && q.cmd.kind === 'startJob' && q.cmd.orderId === tOrder.id)) return 'Auftrag ist schon eingeplant';
+      return null;
+    }
     if (tOrder?.service === 'transport') {
       if (tOrder.status !== 'offen') return 'Auftrag nicht startbar';
       if (tOrder.slurrySupply || tOrder.liquid) {
@@ -1375,6 +1401,16 @@ export class Simulation {
     const unit = this.vehicles.find((v) => v.owner === 'player' && v.machineId === tractor.id);
     if (!unit || unit.task) return 'Schlepper nicht verfügbar';
     const driverId = cmd.driverId ?? 1;
+    if (isTour(o.service)) {
+      const center = o.tourNode ?? this.homeNode;
+      unit.task = {
+        kind: 'tour', driverId, orderId: o.id, implementId: impl.id, points: this.tourPoints(center), idx: 0, phase: 'to',
+        kmh: TOUR[o.service].kmh, km: 0, workMin: 0, target: o.areaHa,
+      };
+      this.driveTo(unit, center);
+      b.orderStarted(o, tractor.id, impl.id, t, this.driverName(driverId));
+      return `Auftrag gestartet (${this.driverName(driverId)})`;
+    }
     if (o.service === 'transport') {
       const rueben = (o.tPerHa ?? 0) >= 50 && !o.slurrySupply;
       const dest = DESTINATIONS.find((d) => d.name === o.destName);
@@ -1486,6 +1522,10 @@ export class Simulation {
             toLoad: 'fährt zur Ladestelle', load: 'wird beladen', toUnload: `bringt ${Math.round(t.load)} ${o?.slurrySupply || o?.liquid ? 'm³' : 't'} nach ${o?.destName ?? 'Ziel'}`,
             unload: 'lädt ab (Waage, Probe)', break: 'Lenkzeitpause', back: 'fährt zurück zum Hof', night: 'Feierabend, morgen weiter',
           } as Record<string, string>)[t.phase] + (o ? ` · ${Math.round(o.doneT ?? 0)} von ${Math.round(o.areaHa * (o.tPerHa ?? 0))} t` : '');
+        }
+        if (t?.kind === 'tour') {
+          const o = b.orders.find((x) => x.id === t.orderId);
+          status = t.phase === 'to' ? `fährt nach ${o ? b.farmName(o.farmId) : 'Ort'}` : t.phase === 'work' ? `${o ? SERVICE_VERB[o.service] : 'arbeitet'} (${Math.round(t.km)} von ${Math.round(t.target)} km)` : 'fährt zurück';
         }
         if (t?.kind === 'compact') status = t.phase === 'work' ? 'fährt das Silo fest' : t.phase === 'to' ? 'fährt zur Biogasanlage' : 'fährt zurück';
         if (t?.kind === 'transfer') status = `wird überführt nach ${(this.company.sites ?? []).find((x) => x.id === t.siteId)?.name ?? ''}`;
@@ -1599,6 +1639,9 @@ export class Simulation {
       case 'setCrop':
         return b.setCrop(cmd.leaseId, cmd.crop, t);
       case 'buyLand': return b.buyLand(cmd.offerId, t);
+      case 'tenderBid': return b.tenderBid(cmd.tenderId, cmd.eurKm);
+      case 'winterAccept': return b.winterAccept(cmd.offerId, t);
+      case 'hailInsurance': b.hailInsured = cmd.on; b.version++; return cmd.on ? 'Hagelversicherung abgeschlossen (25 €/ha im Jahr)' : 'Hagelversicherung gekündigt';
       case 'dispatcher': return b.dispatcherCmd(cmd, t);
       case 'course': return b.startCourse(cmd.employeeId, cmd.course, cmd.skill, t);
       case 'hireApprentice': { const r = b.hireApprentice(t); this.syncPlayerVehicles(); return r; }
@@ -2143,6 +2186,7 @@ export class Simulation {
       b.version++;
       return;
     }
+    if (t.kind === 'tour') { this.tourArrive(v, t); return; }
     if (t.kind === 'compact') {
       if (t.phase === 'to') { t.phase = 'work'; v.state = VehicleState.Waiting; v.waitMin = t.minutes; }
       else { v.task = undefined; v.state = VehicleState.Waiting; }
@@ -2467,6 +2511,70 @@ export class Simulation {
     }
     if (c.attached.load >= c.attached.cap) this.detachWagon(v, c);
     if (budget > 0 || v.dist >= r.total) this.playerArrive(v);
+  }
+
+  /** Rundkurs um eine Ortsmitte: in 8 Richtungen je ein Straßenknoten etwa 2 km entfernt */
+  private tourPoints(center: number): number[] {
+    const g = this.graph;
+    const cx = g.x[center], cy = g.y[center];
+    const best: { n: number; d: number }[] = Array.from({ length: 8 }, () => ({ n: -1, d: Infinity }));
+    for (let n = 0; n < g.x.length; n++) {
+      const dx = g.x[n] - cx, dy = g.y[n] - cy;
+      const r = Math.sqrt(dx * dx + dy * dy);
+      if (r < 600 || r > 3500) continue;
+      // Sektor über Vorzeichen und Verhältnis (ohne Winkelfunktionen)
+      const sx = dx >= 0 ? 0 : 1, sy = dy >= 0 ? 0 : 1, steep = Math.abs(dy) > Math.abs(dx) ? 1 : 0;
+      const k = sx * 4 + sy * 2 + steep;
+      const score = Math.abs(r - 2000);
+      if (score < best[k].d) best[k] = { n, d: score };
+    }
+    // Reihenfolge rund um den Ort
+    const order = [0, 1, 5, 4, 6, 7, 3, 2];
+    const pts = order.map((k) => best[k].n).filter((n) => n >= 0);
+    return pts.length ? pts : [center];
+  }
+
+  /** Fahrt mit begrenztem Arbeitstempo (Tour) */
+  private driveCapped(v: Vehicle, target: number, kmh: number): boolean {
+    const path = this.router.route(v.node, target, v.prof);
+    if (!path || !path.length) return false;
+    const r = this.buildRoadRoute(v.node, path, v.prof);
+    const cap = kmh / 3.6;
+    let dur = 0;
+    for (let i = 0; i < r.speed.length; i++) {
+      if (r.speed[i] > cap) r.speed[i] = cap;
+      dur += (r.cum[i + 1] - r.cum[i]) / r.speed[i];
+    }
+    r.duration = dur;
+    this.startRoute(v, r);
+    v.node = target;
+    return true;
+  }
+
+  /** Tour: nächster Abschnitt oder fertig */
+  private tourArrive(v: Vehicle, t: Extract<PlayerTask, { kind: 'tour' }>) {
+    const b = this.business;
+    const o = b.orders.find((x) => x.id === t.orderId);
+    if (t.phase === 'back') { v.task = undefined; v.state = VehicleState.Waiting; b.version++; return; }
+    if (t.phase === 'work') {
+      const r = v.route;
+      if (r) { t.km += r.total / 1000; t.workMin += r.duration / 60; }
+    }
+    t.phase = 'work';
+    if (t.km >= t.target || !o) {
+      if (o) b.tourDone(o, t.km, t.workMin, this.time);
+      t.phase = 'back';
+      this.driveTo(v, this.homeOf(v));
+      return;
+    }
+    // nächster Punkt; wenn nicht erreichbar, weiter zum übernächsten
+    for (let k = 0; k < t.points.length; k++) {
+      t.idx = (t.idx + 1) % t.points.length;
+      if (t.points[t.idx] !== v.node && this.driveCapped(v, t.points[t.idx], t.kmh)) { b.version++; return; }
+    }
+    if (o) b.tourDone(o, Math.max(t.km, 1), t.workMin, this.time);
+    t.phase = 'back';
+    this.driveTo(v, this.homeOf(v));
   }
 
   /** Noch nicht geladene Menge eines Transportauftrags (t) */

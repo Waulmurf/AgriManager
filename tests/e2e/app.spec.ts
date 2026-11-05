@@ -261,3 +261,17 @@ test('Biogas: Reiter zeigt Baugrößen und Bedingungen', async ({ page }) => {
   await page.getByTestId('build-biogas').click();
   await expect(page.locator('.feedback')).toContainText('10 ha');
 });
+
+test('Kommunal, Wettbewerb, Personal: neue Bereiche werden angezeigt', async ({ page }) => {
+  await page.goto('./?neu');
+  await waitForGame(page);
+  await page.getByTestId('speed-0').click();
+  await page.getByTestId('tab-kommunal').click();
+  await expect(page.getByRole('heading', { name: 'Winterdienst' })).toBeVisible();
+  await page.getByTestId('tab-wettbewerb').click();
+  await expect(page.getByRole('heading', { name: 'Rahmenverträge' })).toBeVisible();
+  await page.getByTestId('tab-personal').click();
+  await expect(page.getByRole('heading', { name: 'Büro: Disponent' })).toBeVisible();
+  await page.getByTestId('tab-ackerbau').click();
+  await expect(page.getByRole('heading', { name: 'Preise und Lager' })).toBeVisible();
+});

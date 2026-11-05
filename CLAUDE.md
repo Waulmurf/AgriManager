@@ -118,6 +118,9 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
 - Paket 3 fertig: Disponent (`Company.dispatcher`, `Simulation.dispatchTick`, `isRoutine`), Ausbildung (`COURSES`, `Employee.course`,
   Abwesenheit `schulung`, `apprenticeUntil`), Konkurrenz mit Fuhrpark (`competitorBooked`, `Competitor.busy`, Abwerben `Employee.poach`,
   Übernahme `takeoverOffer`/`buyCompetitor`).
+- Paket 4 fertig: Kommunal `src/sim/municipal.ts` (Gemeinden, `Tender`, `WinterContract`, `municipalDaily`, `tourDone`), Task `tour`
+  (`tourPoints`, `driveCapped`), Ereignisse `eventsDaily` (Sturm `stormDay`, Hagel `hailInsured`, Kontrollen, Messerabatt `fairDiscount`),
+  Reiter Kommunal. Damit ist der Auftrag vom 5. Nov. komplett; Ideen 20–45 warten auf Auswahl.
 
 ## CI (GitHub Actions)
 

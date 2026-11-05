@@ -20,7 +20,8 @@ export function marketValue(newPrice: number, ageYears: number, hours: number): 
 export type MachineType =
   | 'schlepper' | 'firmenwagen' | 'grubber' | 'kurzscheibenegge' | 'guellefass' | 'zubringer'
   | 'feldhaecksler' | 'haeckselwagen' | 'radlader' | 'maehdrescher' | 'kipper' | 'ruebenroder' | 'lkw'
-  | 'drille' | 'einzelkorn' | 'spritze' | 'presse' | 'kartoffelroder' | 'ueberladewagen';
+  | 'drille' | 'einzelkorn' | 'spritze' | 'presse' | 'kartoffelroder' | 'ueberladewagen'
+  | 'streuer' | 'auslegemaeher' | 'astschere' | 'wegehobel';
 /** Selbstfahrende Maschinen erscheinen wie Schlepper als Fahrzeug auf der Karte */
 export const SELF_PROPELLED: MachineType[] = ['schlepper', 'feldhaecksler', 'radlader', 'maehdrescher', 'ruebenroder', 'lkw'];
 
