@@ -97,7 +97,7 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
 - Biogasanlage fertig: `src/sim/biogas.ts` (Größen, Ration mit Maisdeckel, Gärrest), Bau/Ausschreibung/Substrat/
   Gülleverträge/Gärrest/`biogasDaily` in `business.ts`, `Order.sourceNode` (Silo/Lager der Anlage), Reiter Biogas.
 - Weitere Schichten (Standorte, Pacht, Ackerbau, Biogas) damit komplett. Vorschläge für die nächsten Schichten
-  (Nr. 1–18) stehen am Ende von docs/plan.md und warten auf Nils' Auswahl.
+  (Nr. 1–19) stehen am Ende von docs/plan.md und warten auf Nils' Auswahl.
 
 ## CI (GitHub Actions)
 

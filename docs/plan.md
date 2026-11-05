@@ -811,3 +811,19 @@ Nils wählt aus, was umgesetzt wird. Empfehlung für den nächsten Block: 4, 1, 
 17. **Leistung bei großem Betrieb:** Simulation mit 50+ eigenen Fahrzeugen messen und optimieren.
 18. **macOS-Build prüfen:** gezielter Lauf mit `[mac]` und Selbsttest (zehnfache CI-Minuten,
     nur auf Wunsch).
+
+### F. Dokumentation
+
+19. **Spielerhandbuch:** Anleitung für Spieler auf Deutsch, laufend gepflegt mit jeder neuen
+    Schicht.
+    - Inhalt: Einstieg (erster Besuch, erste Anfrage, erster Auftrag), jeder Reiter der
+      Oberfläche, Arbeitsketten (Gülle, Häckseln …), Personal und Skills, Fuhrpark und
+      Werkstatt, Finanzen, Wetter und Jahreslauf, Markt, Standorte, Pacht und Ackerbau,
+      Biogas.
+    - Dazu: Tastenkürzel, Begriffe von A bis Z (z. B. Gabe, Maisdeckel, Sperrfrist,
+      Rüstzeit), Tipps für die ersten Spieljahre.
+    - Zahlen und Annahmen kommen aus dem Code bzw. aus docs/plan.md, damit das Handbuch
+      nicht veraltet.
+    - Form: Quelle als Markdown in `docs/handbuch/` mit Bildschirmfotos aus Playwright.
+      Im Spiel als Reiter „Hilfe“ und zusätzlich als PDF für Windows und macOS.
+    - Kontexthilfe: Ein „?“ an Reitern und Fenstern springt zum passenden Kapitel.
