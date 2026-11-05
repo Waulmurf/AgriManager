@@ -14,7 +14,7 @@ import { MACHINE_SKILL, MECHANIC_MIN, SELF_PROPELLED, START_OFFERS, normalizeDri
 import { DEALERS } from '../data/catalog';
 import { SITE_OFFERS } from '../data/sites';
 import { DESTINATIONS } from '../data/destinations';
-import { Business, DIESEL_TRUCK_L_KM, DRIVE_BREAK_AFTER_MIN, DRIVE_BREAK_MIN, TOLL_EUR_KM, TRUCK_LOAD_MIN, BEET_YIELD_T_HA, GRAIN_YIELD_T_HA, HAULER_TYPE, RAPE_YIELD_T_HA, isHarvest, HIRED_ROLLER_EUR_H, REMIND_CALL_MINUTES, SERVICE_IMPLEMENT, SILAGE_YIELD_T_HA, SERVICE_NAMES, SERVICE_SKILL, SERVICE_VERB, type Order, VISIT_MINUTES, WEAR_GRUBBER_EUR_HA, type Service, fmtDay, fmtHa, fmtTime, type Command, type QueueCommand, type QueueItem } from './business';
+import { Business, HARVEST_TOWED, HAULER_TYPES, POTATO_YIELD_T_HA, DIESEL_TRUCK_L_KM, DRIVE_BREAK_AFTER_MIN, DRIVE_BREAK_MIN, TOLL_EUR_KM, TRUCK_LOAD_MIN, BEET_YIELD_T_HA, GRAIN_YIELD_T_HA, HAULER_TYPE, RAPE_YIELD_T_HA, isHarvest, HIRED_ROLLER_EUR_H, REMIND_CALL_MINUTES, SERVICE_IMPLEMENT, SILAGE_YIELD_T_HA, SERVICE_NAMES, SERVICE_SKILL, SERVICE_VERB, type Order, VISIT_MINUTES, WEAR_GRUBBER_EUR_HA, type Service, fmtDay, fmtHa, fmtTime, type Command, type QueueCommand, type QueueItem } from './business';
 import { appendEdgePoints, nearestNode, project, RoadClass, unproject, type RoadGraph } from './roadgraph';
 import { surchargeFactor } from './calendar';
 import { Weather } from './weather';
@@ -1201,7 +1201,7 @@ export class Simulation {
     const tOrder = b.orders.find((x) => x.id === cmd.orderId);
     if (tOrder?.service === 'transport') {
       if (tOrder.status !== 'offen') return 'Auftrag nicht startbar';
-      if (tOrder.slurrySupply) {
+      if (tOrder.slurrySupply || tOrder.liquid) {
         // Gülle holen: Schlepper mit Zubringer- oder Güllefass
         const tr = this.company.machines.find((m) => m.id === cmd.tractorId && m.type === 'schlepper');
         const fass = this.company.machines.find((m) => m.id === cmd.implementId && (m.type === 'zubringer' || m.type === 'guellefass'));
@@ -1231,14 +1231,17 @@ export class Simulation {
     if ((driver.skills[sk] ?? 0) < 1) return `${this.driverName(driver.id)} ist für ${SERVICE_NAMES[o.service]} nicht qualifiziert`;
     const chopping = isHarvest(o.service);
     const harvType = SERVICE_IMPLEMENT[o.service];
-    const tractor = this.company.machines.find((m) => m.id === cmd.tractorId && m.type === (chopping ? harvType : 'schlepper'));
+    const towed = HARVEST_TOWED.includes(o.service);
+    const tractor = this.company.machines.find((m) => m.id === cmd.tractorId && m.type === (chopping && !towed ? harvType : 'schlepper'));
     const impl = this.company.machines.find((m) => m.id === cmd.implementId);
-    const harvName = ({ feldhaecksler: 'Feldhäcksler', maehdrescher: 'Mähdrescher', ruebenroder: 'Rübenroder' } as Record<string, string>)[harvType] ?? harvType;
+    const harvName = ({ feldhaecksler: 'Feldhäcksler', maehdrescher: 'Mähdrescher', ruebenroder: 'Rübenroder', kartoffelroder: 'Kartoffelroder' } as Record<string, string>)[harvType] ?? harvType;
     if (!tractor || !impl) return chopping ? `${harvName} wählen` : 'Maschine fehlt';
     if (chopping) {
       const sk = MACHINE_SKILL[harvType]!;
       if ((driver.skills[sk.skill] ?? 0) < sk.min) return `${this.driverName(driver.id)} braucht ${harvName} ab Stufe ${sk.min}`;
       const wagonType = HAULER_TYPE[o.service];
+      const wagonTypes = HAULER_TYPES[o.service] ?? [];
+      if (towed && (impl.powerNeed ?? 0) > (tractor.power ?? 0)) return 'Schlepper zu schwach für den Roder';
       if (!wagonType && (cmd.haulers ?? []).length) return 'Der Rübenroder legt eine Feldrandmiete an – Abfahrer sind nicht nötig';
       if (cmd.roller && o.service !== 'haeckseln') return 'Radlader am Silo gibt es nur beim Häckseln';
       if (o.chain === 'komplett' && !(cmd.haulers ?? []).length) return `${o.service === 'drusch' ? 'Drusch mit Abfuhr' : 'Komplettkette'}: mindestens ein Abfahrer (Fahrer, Schlepper, ${o.service === 'drusch' ? 'Kipper' : 'Häckselwagen'})`;
@@ -1247,7 +1250,7 @@ export class Simulation {
       for (const h of cmd.haulers ?? []) {
         const d = this.company.drivers.find((x) => x.id === h.driverId);
         const t = this.company.machines.find((x) => x.id === h.tractorId && x.type === 'schlepper');
-        const w = this.company.machines.find((x) => x.id === h.implementId && x.type === wagonType);
+        const w = this.company.machines.find((x) => x.id === h.implementId && wagonTypes.includes(x.type));
         if (!d || !t || !w) return `Abfahrer: Fahrer, Schlepper und ${wagonType === 'kipper' ? 'Kipper' : 'Häckselwagen'} wählen`;
         if (used.has(d.id) || machines.has(t.id) || machines.has(w.id)) return 'Jeder Abfahrer braucht eigenen Fahrer, Schlepper und Wagen';
         if ((d.skills.boden ?? 0) < 1) return `${this.driverName(d.id)} ist nicht als Traktorfahrer qualifiziert`;
@@ -1338,7 +1341,7 @@ export class Simulation {
       const rueben = (o.tPerHa ?? 0) >= 50 && !o.slurrySupply;
       const dest = DESTINATIONS.find((d) => d.name === o.destName);
       // Gülle holen: Fass ansaugen/abpumpen je etwa 6 min (Annahme)
-      const slurry = !!o.slurrySupply;
+      const slurry = !!o.slurrySupply || !!o.liquid;
       unit.task = {
         kind: 'truck', driverId, orderId: o.id, from: o.pickupNode ?? this.homeNode, to: o.destNode ?? this.homeNode,
         cap: slurry ? impl.tankM3 ?? 15 : tractor.payloadT ?? 25, load: 0,
@@ -1366,7 +1369,7 @@ export class Simulation {
       const silo = o.sourceNode ?? farm?.homeNode ?? this.homeNode;
       const svc = o.service;
       const raps = this.farms ? this.farms.fieldCrop[queue[0]] === Crop.Raps : false;
-      const yieldT = svc === 'drusch' ? (raps ? RAPE_YIELD_T_HA : GRAIN_YIELD_T_HA) : svc === 'roden' ? BEET_YIELD_T_HA : SILAGE_YIELD_T_HA;
+      const yieldT = svc === 'drusch' ? (raps ? RAPE_YIELD_T_HA : GRAIN_YIELD_T_HA) : svc === 'roden' ? BEET_YIELD_T_HA : svc === 'kartoffelroden' ? POTATO_YIELD_T_HA : SILAGE_YIELD_T_HA;
       const access = this.fields!.access[queue[0]];
       // Wagen des Kunden (nur Häcksler): 3 Gespanne à 12 t, Umlauf = Hin- und Rückfahrt + Abkippen
       const cycle = Math.round((2 * this.nodeDist(silo, access)) / EST_TRACTOR_M_MIN + 8);
@@ -1374,11 +1377,11 @@ export class Simulation {
       unit.task.chop = {
         yieldT, silo, attached: null,
         // Wagen des Kunden (nur Häcksler / nur Drusch: Anhänger am Feldrand); Rübenroder: Feldrandmiete
-        virtual: o.chain === 'haecksler' ? (svc === 'drusch' ? [0, 0] : [0, 0, 0]) : [], virtualCap: svc === 'drusch' ? 14 : 12, virtualCycle: cycle,
+        virtual: o.chain === 'haecksler' ? (svc === 'drusch' || svc === 'kartoffelroden' ? [0, 0] : [0, 0, 0]) : [], virtualCap: svc === 'drusch' ? 14 : 12, virtualCycle: cycle,
         siloBacklog: 0,
         // Annahme am Silo: Kunde walzt (nur Häcksler) 120 t/h, eigener Radlader Betriebsgewicht × 4, Fremdwalze 100 t/h;
         // Korn am Hof des Kunden: Gosse 150 t/h
-        siloTph: svc === 'drusch' ? 150 : o.chain === 'haecksler' ? 120 : roller ? (roller.weightT ?? 12) * 4 : 100,
+        siloTph: svc === 'drusch' || svc === 'kartoffelroden' ? 150 : o.chain === 'haecksler' ? 120 : roller ? (roller.weightT ?? 12) * 4 : 100,
         hiredRoller: svc === 'haeckseln' && o.chain === 'komplett' && !roller, rollerMinutes: 0, fieldHa: 0,
         // Korntank bzw. Rübenbunker (t)
         bunker: svc === 'haeckseln' ? undefined : { cap: impl.payloadT ?? (svc === 'roden' ? 30 : 9), load: 0 },
@@ -1388,7 +1391,9 @@ export class Simulation {
       for (const h of cmd.haulers ?? []) {
         const hu = this.vehicles.find((v) => v.owner === 'player' && v.machineId === h.tractorId)!;
         const w = this.company.machines.find((m) => m.id === h.implementId)!;
-        hu.task = { kind: 'haul', driverId: h.driverId, implementId: w.id, orderId: o.id, harvester: unit.id, cap: w.payloadT ?? 12, load: 0, silo, phase: 'prep' };
+        // Überladewagen: lädt am Feldrand über (auf Lkw/Anhänger des Kunden), also kurzer Umlauf
+        const dropAt = w.type === 'ueberladewagen' ? access : silo;
+        hu.task = { kind: 'haul', driverId: h.driverId, implementId: w.id, orderId: o.id, harvester: unit.id, cap: w.payloadT ?? 12, load: 0, silo: dropAt, phase: 'prep' };
         hu.state = VehicleState.Waiting;
         hu.waitMin = RUEST_HOF_MIN;
       }
@@ -1440,7 +1445,7 @@ export class Simulation {
         if (t?.kind === 'truck') {
           const o = b.orders.find((x) => x.id === t.orderId);
           status = ({
-            toLoad: 'fährt zur Ladestelle', load: 'wird beladen', toUnload: `bringt ${Math.round(t.load)} ${o?.slurrySupply ? 'm³' : 't'} nach ${o?.destName ?? 'Ziel'}`,
+            toLoad: 'fährt zur Ladestelle', load: 'wird beladen', toUnload: `bringt ${Math.round(t.load)} ${o?.slurrySupply || o?.liquid ? 'm³' : 't'} nach ${o?.destName ?? 'Ziel'}`,
             unload: 'lädt ab (Waage, Probe)', break: 'Lenkzeitpause', back: 'fährt zurück zum Hof', night: 'Feierabend, morgen weiter',
           } as Record<string, string>)[t.phase] + (o ? ` · ${Math.round(o.doneT ?? 0)} von ${Math.round(o.areaHa * (o.tPerHa ?? 0))} t` : '');
         }
@@ -2479,6 +2484,9 @@ export class Simulation {
     const hours = area / t.haPerHour;
     const hm = this.company.machines.find((x) => x.id === v.machineId);
     if (hm) { hm.hours = Math.round((hm.hours + hours) * 10) / 10; b.wear(hm, hours); }
+    // gezogene Erntemaschine (Kartoffelroder): Gerät zählt extra
+    const im = t.implementId !== v.machineId ? this.company.machines.find((x) => x.id === t.implementId) : undefined;
+    if (im) { im.hours = Math.round((im.hours + hours) * 10) / 10; b.wear(im, hours); }
     if (o) o.tractorHours = Math.round((o.tractorHours + hours) * 100) / 100;
     b.addExperience(t.driverId, o ? SERVICE_SKILL[o.service] : 'haecksler', Math.round((area / t.haPerHour) * 60), this.time);
     // angehängten Wagen abgeben (zum Silo, wenn etwas drin ist)

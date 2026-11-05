@@ -45,9 +45,9 @@ const NAMES = [
 ];
 
 const SERVICES: Record<Competitor['size'], Service[]> = {
-  gross: ['grubbern', 'stoppel', 'guelle', 'haeckseln', 'drusch', 'roden'],
-  mittel: ['grubbern', 'stoppel', 'guelle', 'drusch'],
-  klein: ['grubbern', 'stoppel'],
+  gross: ['grubbern', 'stoppel', 'guelle', 'haeckseln', 'drusch', 'roden', 'saat', 'einzelkorn', 'pflanzenschutz', 'pressen', 'kartoffelroden'],
+  mittel: ['grubbern', 'stoppel', 'guelle', 'drusch', 'saat', 'einzelkorn', 'pflanzenschutz', 'pressen'],
+  klein: ['grubbern', 'stoppel', 'pressen'],
 };
 
 /** Konkurrenten deterministisch aus dem Zufallsstrom (Funktion für Werte 0…1) */

@@ -937,3 +937,39 @@ Nils wählt aus, was umgesetzt wird. Empfehlung für den nächsten Block: 4, 1, 
 - **Weitere Ideen 20–45** (Mietpool, Präzisionstechnik, Überbreite, Bodenschonung,
   Kundencharaktere, Ökobetriebe, PV, Firmenwert u. a.) stehen in der Unterhaltung vom 5. Nov. und
   warten auf Auswahl.
+
+## Gülle und Gärrest fremder Höfe und Biogasanlagen (5. Nov. 2026)
+
+- **Fremde Biogasanlagen:** Jeder zehnte größere Betrieb (ab 120 ha) betreibt eine Anlage
+  (`hasBga`, deterministisch).
+  - Solche Betriebe fragen Gärrestausbringung an, auch ohne Vieh. Das Fass holt den Gärrest an
+    ihrer Anlage.
+  - Sie fragen auch **nur Transport** an: Gärrest von der Anlage zum Feldrandcontainer, Schlepper
+    mit Zubringer- oder Güllefass, 1,00 €/m³ + 0,15 €/m³ je km, Saison Februar–Mai und
+    August–September.
+- **Gülle von fremden Höfen:** Etwa jeder dritte viehlose Betrieb nimmt Gülle oder Gärrest vom
+  nächsten Viehbetrieb bzw. der nächsten BGA im Umkreis von 15 km auf (Gülle-/Gärrestbörse).
+  Das Fass holt dort ab (`Request.sourceFarmId`, `Order.sourceNode`).
+
+## Umsetzung 4b: weitere Ackerdienste (5. Nov. 2026)
+
+- **Neue Dienste mit Saisonzeiten:**
+  - Drillsaat (Raps 15.8.–10.9., Getreide 20.9.–31.10., 65 €/ha)
+  - Einzelkornsaat Mais/Rüben (20.3.–10.5., 55 €/ha)
+  - Pflanzenschutz (20.3.–30.6. und 15.9.–31.10., 22 €/ha ohne Mittel, Sachkunde nötig)
+  - Stroh pressen (25.7.–15.9., 60 €/ha)
+  - Kartoffelroden (1.9.–15.10.; nur Roden 330 €/ha, mit Abfuhr 420 €/ha, 45 t/ha)
+- **Maschinen:**
+  - Drillen: Amazone KE/Centaya 3 m, Horsch Pronto 6 DC
+  - Einzelkorn: Kverneland Optima V 8-reihig, Horsch Maestro 12 SW
+  - Spritzen: Amazone UX 5201 (24 m), Kverneland iXtrack T4 (30 m)
+  - Pressen: Krone BiG Pack 1290 HDP II, Claas Quadrant 5300 FC
+  - Kartoffelroder gezogen mit Bunker: Grimme SE 260 (6 t), EVO 290 (8 t)
+  - Überladewagen: Fliegl ULW 2000/3000
+- **Kartoffelroder:** wird vom Schlepper gezogen (`HARVEST_TOWED`) und arbeitet als Erntekette mit
+  Bunker, Anhängern des Kunden oder eigenen Kippern.
+- **Überladewagen:** Abfahrer für Drusch und Kartoffeln. Er lädt am Feldrand über, statt zum Hof zu
+  fahren (kurzer Umlauf).
+- **Eigener Ackerbau:** Mit eigener Drille, Einzelkornsämaschine, Spritze bzw. eigenem
+  Kartoffelroder werden die Arbeitsgänge zu Eigenaufträgen. Gebucht werden dann nur die
+  Betriebsmittel (`CropStep.materialHa`).

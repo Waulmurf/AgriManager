@@ -51,6 +51,14 @@ export interface Farm {
   landAskedAt?: number;
 }
 
+/**
+ * Betreibt der Betrieb eine Biogasanlage? Deterministisch aus Id und Größe (Annahme: gut jeder
+ * zehnte größere Betrieb, im Kreis Uelzen gibt es rund 70 Anlagen).
+ */
+export function hasBga(f: Pick<Farm, 'id' | 'areaHa'>): boolean {
+  return f.areaHa >= 120 && f.id % 9 === 4;
+}
+
 export interface FarmSet {
   farms: Farm[];
   /** je Feld: Betrieb (Index) oder -1 */

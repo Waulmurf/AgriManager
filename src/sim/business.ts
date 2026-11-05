@@ -6,7 +6,7 @@
  * Preise und Wahrscheinlichkeiten sind Annahmen (siehe docs/plan.md), beim Testen nachjustierbar.
  */
 import { Rng } from './rng';
-import { Crop, SURNAMES, type FarmSet } from './farms';
+import { Crop, SURNAMES, hasBga, type FarmSet } from './farms';
 import type { FieldSet } from './fields';
 import {
   EMPLOYER_SV, MIN_WAGE, MONTH_HOURS, ROLES, SKILLS, VACATION_DAYS, marketWage, agencyRate, takeOverFee, AGENCY_MIN_HOURS, XP_MINUTES_PER_LEVEL, baseSkills, gameDate, marketValue,
@@ -77,19 +77,25 @@ export const TRIAL_MAX_HA = 10;
 export const REPAIR_TRACTOR_EUR_H = 8;
 export const WEAR_GRUBBER_EUR_HA = 3;
 
-export type Service = 'grubbern' | 'stoppel' | 'guelle' | 'haeckseln' | 'drusch' | 'roden' | 'transport';
-export const SERVICE_NAMES: Record<Service, string> = { grubbern: 'Grubbern', stoppel: 'Stoppelbearbeitung', guelle: 'Gülle ausbringen', haeckseln: 'Maishäckseln', drusch: 'Mähdrusch', roden: 'Rübenroden', transport: 'Lkw-Transport' };
+export type Service = 'grubbern' | 'stoppel' | 'guelle' | 'haeckseln' | 'drusch' | 'roden' | 'transport'
+  | 'saat' | 'einzelkorn' | 'pflanzenschutz' | 'pressen' | 'kartoffelroden';
+export const SERVICE_NAMES: Record<Service, string> = { grubbern: 'Grubbern', stoppel: 'Stoppelbearbeitung', guelle: 'Gülle ausbringen', haeckseln: 'Maishäckseln', drusch: 'Mähdrusch', roden: 'Rübenroden', transport: 'Lkw-Transport', saat: 'Drillsaat', einzelkorn: 'Einzelkornsaat', pflanzenschutz: 'Pflanzenschutz', pressen: 'Stroh pressen', kartoffelroden: 'Kartoffelroden' };
 /** Gerät je Dienstleistung und Tätigkeitswort für die Anzeige */
-export const SERVICE_IMPLEMENT: Record<Service, MachineType> = { grubbern: 'grubber', stoppel: 'kurzscheibenegge', guelle: 'guellefass', haeckseln: 'feldhaecksler', drusch: 'maehdrescher', roden: 'ruebenroder', transport: 'lkw' };
-export const SERVICE_VERB: Record<Service, string> = { grubbern: 'grubbert', stoppel: 'bearbeitet Stoppeln', guelle: 'bringt Gülle aus', haeckseln: 'häckselt', drusch: 'drischt', roden: 'rodet Rüben', transport: 'fährt Lkw' };
+export const SERVICE_IMPLEMENT: Record<Service, MachineType> = { grubbern: 'grubber', stoppel: 'kurzscheibenegge', guelle: 'guellefass', haeckseln: 'feldhaecksler', drusch: 'maehdrescher', roden: 'ruebenroder', transport: 'lkw', saat: 'drille', einzelkorn: 'einzelkorn', pflanzenschutz: 'spritze', pressen: 'presse', kartoffelroden: 'kartoffelroder' };
+export const SERVICE_VERB: Record<Service, string> = { grubbern: 'grubbert', stoppel: 'bearbeitet Stoppeln', guelle: 'bringt Gülle aus', haeckseln: 'häckselt', drusch: 'drischt', roden: 'rodet Rüben', transport: 'fährt Lkw', saat: 'drillt', einzelkorn: 'legt Mais/Rüben', pflanzenschutz: 'spritzt', pressen: 'presst Stroh', kartoffelroden: 'rodet Kartoffeln' };
 /** Tätigkeit des Fahrers je Dienstleistung (Skill) */
-export const SERVICE_SKILL: Record<Service, Skill> = { grubbern: 'boden', stoppel: 'boden', guelle: 'guelle', haeckseln: 'haecksler', drusch: 'drescher', roden: 'roder', transport: 'transport' };
+export const SERVICE_SKILL: Record<Service, Skill> = { grubbern: 'boden', stoppel: 'boden', guelle: 'guelle', haeckseln: 'haecksler', drusch: 'drescher', roden: 'roder', transport: 'transport', saat: 'saat', einzelkorn: 'saat', pflanzenschutz: 'pflanzenschutz', pressen: 'boden', kartoffelroden: 'kartoffel' };
 /** Erntedienste: selbstfahrende Hauptmaschine (Fahrzeug und Gerät zugleich), Abfahrer-Wagen (falls nötig) */
-export const HARVEST_SERVICES: Service[] = ['haeckseln', 'drusch', 'roden'];
-export const HAULER_TYPE: Partial<Record<Service, MachineType>> = { haeckseln: 'haeckselwagen', drusch: 'kipper' };
+export const HARVEST_SERVICES: Service[] = ['haeckseln', 'drusch', 'roden', 'kartoffelroden'];
+/** Wagen für die Abfuhr (erster = Standard); Überladewagen laden am Feldrand über */
+export const HAULER_TYPES: Partial<Record<Service, MachineType[]>> = { haeckseln: ['haeckselwagen'], drusch: ['kipper', 'ueberladewagen'], kartoffelroden: ['kipper', 'ueberladewagen'] };
+export const HAULER_TYPE: Partial<Record<Service, MachineType>> = { haeckseln: 'haeckselwagen', drusch: 'kipper', kartoffelroden: 'kipper' };
+/** gezogene Erntemaschinen (Schlepper + Gerät statt Selbstfahrer) */
+export const HARVEST_TOWED: Service[] = ['kartoffelroden'];
 export function isHarvest(s: Service): boolean {
-  return s === 'haeckseln' || s === 'drusch' || s === 'roden';
+  return s === 'haeckseln' || s === 'drusch' || s === 'roden' || s === 'kartoffelroden';
 }
+export const POTATO_YIELD_T_HA = 45;
 /** Erträge für die Erntelogistik (t/ha, Annahme Niedersachsen): Weizen/Getreide, Raps, Zuckerrüben */
 export const GRAIN_YIELD_T_HA = 7.5;
 export const RAPE_YIELD_T_HA = 3.8;
@@ -97,8 +103,8 @@ export const BEET_YIELD_T_HA = 80;
 /** Name der Kettenart je Dienst („haecksler“ = nur Hauptmaschine) */
 export function chainName(s: Service, chain?: 'haecksler' | 'komplett'): string {
   if (!chain) return '';
-  if (chain === 'komplett') return s === 'drusch' ? 'mit Abfuhr' : 'Komplettkette';
-  return s === 'drusch' ? 'nur Drusch' : 'nur Häcksler';
+  if (chain === 'komplett') return s === 'drusch' || s === 'kartoffelroden' ? 'mit Abfuhr' : 'Komplettkette';
+  return s === 'drusch' ? 'nur Drusch' : s === 'kartoffelroden' ? 'nur Roden' : 'nur Häcksler';
 }
 /** Silomais: Ertrag Frischmasse (t/ha, Annahme Niedersachsen 40–45) */
 export const SILAGE_YIELD_T_HA = 42;
@@ -110,6 +116,8 @@ export const SILAGE_YIELD_T_HA = 42;
 export const CHOP_PRICE_HA: Record<'haecksler' | 'komplett', number> = { haecksler: 230, komplett: 430 };
 /** Mähdrusch je ha (Annahme LWK-Größenordnung): nur Drusch bzw. mit Abfuhr zum Hof des Kunden */
 export const THRESH_PRICE_HA: Record<'haecksler' | 'komplett', number> = { haecksler: 150, komplett: 195 };
+/** Kartoffelroden je ha (Annahme): nur Roden bzw. mit Abfuhr zum Lager des Kunden */
+export const POTATO_PRICE_HA: Record<'haecksler' | 'komplett', number> = { haecksler: 330, komplett: 420 };
 /** Fremdwalze, wenn bei der Komplettkette kein eigener Radlader am Silo ist (€/h) */
 export const HIRED_ROLLER_EUR_H = 110;
 /**
@@ -117,7 +125,7 @@ export const HIRED_ROLLER_EUR_H = 110;
  * Grubbern. Gülle wird je m³ abgerechnet: 4 €/m³ (Spanne für Lohnausbringung 2,50–8 €/m³ je nach
  * Entfernung und System laut LK Niederösterreich); priceHa = €/m³ × Gabe.
  */
-export const SERVICE_BASE_PRICE: Record<Service, number> = { grubbern: 55, stoppel: 38, guelle: 4, haeckseln: 230, drusch: 150, roden: 280, transport: 0 };
+export const SERVICE_BASE_PRICE: Record<Service, number> = { grubbern: 55, stoppel: 38, guelle: 4, haeckseln: 230, drusch: 150, roden: 280, transport: 0, saat: 65, einzelkorn: 55, pflanzenschutz: 22, pressen: 60, kartoffelroden: 330 };
 /**
  * Lkw-Transport (Annahme): Fracht 1,80 €/t Grundpreis + 0,12 €/t je Straßen-km (Straße ≈ Luftlinie × 1,3);
  * Diesel 32 l/100 km; Maut 0,35 €/km auf Bundesstraßen und Autobahn (Strecken ab 65 km/h); Laden an der
@@ -138,10 +146,10 @@ export const DRIVE_BREAK_MIN = 45;
  * Grundbodenbearbeitung nach Getreide und Raps (1.9.–31.10.); Stoppelbearbeitung direkt nach der
  * Ernte von Raps (ab Mitte Juli) und Getreide (bis Mitte September). Winter: keine Bodenbearbeitung.
  */
-export function seasonServices(time: number): { service: Service; crops: Crop[]; weight: number }[] {
+export function seasonServices(time: number): { service: Service; crops: Crop[]; weight: number; liquid?: boolean }[] {
   const d = gameDate(time);
   const md = d.month * 100 + d.day;
-  const out: { service: Service; crops: Crop[]; weight: number }[] = [];
+  const out: { service: Service; crops: Crop[]; weight: number; liquid?: boolean }[] = [];
   if (md >= 301 && md <= 515) out.push({ service: 'grubbern', crops: [Crop.Mais, Crop.Zuckerrueben, Crop.Kartoffeln], weight: md >= 401 && md <= 430 ? 1.2 : 1 });
   // (Gülle siehe unten)
   if (md >= 715 && md <= 915) out.push({ service: 'stoppel', crops: md < 801 ? [Crop.Raps] : [Crop.Getreide, Crop.Raps], weight: md >= 801 && md <= 831 ? 1.3 : 0.8 });
@@ -159,9 +167,21 @@ export function seasonServices(time: number): { service: Service; crops: Crop[];
   if (md >= 720 && md <= 830) out.push({ service: 'drusch', crops: [Crop.Getreide], weight: md >= 801 && md <= 820 ? 1.5 : 1 });
   // Rübenroden: Kampagne Nordzucker Uelzen ab Mitte September, Roden bis Ende November
   if (md >= 915 && md <= 1130) out.push({ service: 'roden', crops: [Crop.Zuckerrueben], weight: md >= 1001 && md <= 1115 ? 1.3 : 0.8 });
+  // Saat: Raps Mitte August bis Anfang September, Getreide Ende September bis Oktober; Mais/Rüben Einzelkorn im Frühjahr
+  if (md >= 815 && md <= 910) out.push({ service: 'saat', crops: [Crop.Raps], weight: 1 });
+  if (md >= 920 && md <= 1031) out.push({ service: 'saat', crops: [Crop.Getreide], weight: 1.1 });
+  if (md >= 320 && md <= 510) out.push({ service: 'einzelkorn', crops: [Crop.Zuckerrueben, Crop.Mais], weight: 0.9 });
+  // Pflanzenschutz (nur mit Sachkunde): Frühjahr bis Juni, Herbst in Getreide und Raps
+  if (md >= 320 && md <= 630) out.push({ service: 'pflanzenschutz', crops: [Crop.Getreide, Crop.Raps, Crop.Zuckerrueben, Crop.Kartoffeln, Crop.Mais], weight: 0.7 });
+  if (md >= 915 && md <= 1031) out.push({ service: 'pflanzenschutz', crops: [Crop.Getreide, Crop.Raps], weight: 0.4 });
+  // Stroh pressen nach dem Getreidedrusch; Kartoffelroden September bis Mitte Oktober
+  if (md >= 725 && md <= 915) out.push({ service: 'pressen', crops: [Crop.Getreide], weight: 0.6 });
+  if (md >= 901 && md <= 1015) out.push({ service: 'kartoffelroden', crops: [Crop.Kartoffeln], weight: 1.2 });
   // Lkw-Transport: Rübenabfuhr in der Kampagne (bis Mitte Januar), Korn vom Hoflager zum Landhandel
   if (md >= 920 || md <= 115) out.push({ service: 'transport', crops: [Crop.Zuckerrueben], weight: 1 });
   if (md >= 725 && md <= 915) out.push({ service: 'transport', crops: [Crop.Getreide, Crop.Raps], weight: 0.6 });
+  // Gärrest-/Gülletransport für Biogasanlagen zum Feldrand (nur Transport, Ausbringung macht ein anderer)
+  if ((md >= 201 && md <= 515) || (md >= 801 && md <= 920)) out.push({ service: 'transport', crops: [Crop.Getreide, Crop.Raps, Crop.Mais, Crop.Zuckerrueben], weight: 0.8, liquid: true });
   return out;
 }
 
@@ -190,6 +210,10 @@ export interface Request {
   destName?: string;
   /** Gärrest aus der eigenen Biogasanlage statt Gülle des Kunden */
   gaerrest?: boolean;
+  /** Gülle/Gärrest wird bei diesem fremden Hof bzw. dieser BGA abgeholt */
+  sourceFarmId?: number;
+  /** Transport von Gülle/Gärrest (m³, Schlepper mit Fass) */
+  liquid?: boolean;
   /** bestes Konkurrenzangebot (€/ha) und Anbieter (MK-02) */
   competitorPriceHa?: number;
   competitorId?: number;
@@ -235,6 +259,9 @@ export interface Order {
   slurrySupply?: boolean;
   /** mehrere Maschinen auf einem Feld: erledigter Anteil je Feld (0…1) */
   shareDone?: Record<number, number>;
+  /** Gülle/Gärrest von einem fremden Hof bzw. einer BGA; flüssiger Transport */
+  sourceFarmId?: number;
+  liquid?: boolean;
   earliest: number;
   latest: number;
   status: OrderStatus;
@@ -879,15 +906,18 @@ export class Business {
         const sd = def.steps.find((x) => x.key === st.key)!;
         if (st.status === 'geplant' && time >= st.from) {
           // Ernte mit eigenem Drescher/Roder, sonst Fremdleistung (Häckseln immer mit eigener Kette)
-          const own = sd.service && (sd.service === 'haeckseln' || !isHarvest(sd.service) || this.company.machines.some((m) => m.type === SERVICE_IMPLEMENT[sd.service!]));
+          // Stoppel, Grubbern und Häckseln fährt man immer selbst; Saat, Pflanzenschutz und Ernte nur mit eigener Maschine
+          const always = sd.service === 'stoppel' || sd.service === 'grubbern' || sd.service === 'haeckseln';
+          const own = sd.service && (always || this.company.machines.some((m) => m.type === SERVICE_IMPLEMENT[sd.service!]));
           if (sd.service && own) {
             const o: Order = {
               id: this.nextId++, requestId: 0, farmId: -1, service: sd.service, fields: l.fields.slice(), doneFields: [],
               areaHa: l.areaHa, priceHa: 0, earliest: st.from, latest: st.to, status: 'offen', dieselL: 0, dieselCost: 0, tractorHours: 0,
               // eigenes Korn holt der Landhandel am Feldrand ab (wie „nur Drusch“)
-              ownLeaseId: l.id, chain: sd.service === 'haeckseln' ? 'komplett' : sd.service === 'drusch' ? 'haecksler' : undefined, doneT: isHarvest(sd.service) ? 0 : undefined,
+              ownLeaseId: l.id, chain: sd.service === 'haeckseln' ? 'komplett' : sd.service === 'drusch' || sd.service === 'kartoffelroden' ? 'haecksler' : undefined, doneT: isHarvest(sd.service) ? 0 : undefined,
               sourceNode: sd.service === 'haeckseln' ? this.biogasNode() : undefined,
             };
+            if (sd.materialHa) this.book(time, `${sd.name.split(' (')[0]}: Betriebsmittel ${fmtHa(l.areaHa)} ${def.name}`, -Math.round(sd.materialHa * l.areaHa), 'Ackerbau');
             this.orders.push(o);
             st.orderId = o.id;
             st.status = 'auftrag';
@@ -1319,7 +1349,7 @@ export class Business {
   /** Marktpreis je ha für eine Dienstleistung (ohne Konkurrenzaufschlag) */
   private marketPriceHa(service: Service, gabe?: number, chain?: 'haecksler' | 'komplett'): number {
     if (gabe) return SERVICE_BASE_PRICE.guelle * gabe;
-    if (chain) return service === 'drusch' ? THRESH_PRICE_HA[chain] : CHOP_PRICE_HA[chain];
+    if (chain) return service === 'drusch' ? THRESH_PRICE_HA[chain] : service === 'kartoffelroden' ? POTATO_PRICE_HA[chain] : CHOP_PRICE_HA[chain];
     return SERVICE_BASE_PRICE[service];
   }
 
@@ -1448,7 +1478,11 @@ export class Business {
     const trial = this.isTrial(farmId, time);
     // Gülle gibt es nur auf Betrieben mit Vieh; viehlose Betriebe fragen Gärrest aus der eigenen Anlage an
     const gaerOk = this.biogas?.status === 'betrieb' && this.biogas.gaer >= 300;
-    const offered = season.filter((x) => x.service !== 'guelle' || farm.livestock || gaerOk);
+    const bga = hasBga(farm);
+    // viehlose Betriebe: Gärrest aus der eigenen Anlage oder Gülle/Gärrest von einem fremden Hof bzw. einer fremden BGA
+    // (Annahme: etwa jeder dritte viehlose Betrieb nimmt organischen Dünger auf)
+    const supplier = !farm.livestock && !bga && !gaerOk && farm.id % 3 === 0 ? this.slurrySupplier(farmId) : null;
+    const offered = season.filter((x) => (x.service !== 'guelle' || farm.livestock || bga || gaerOk || supplier !== null) && (!x.liquid || bga));
     if (!offered.length) return null;
     season.length = 0;
     season.push(...offered);
@@ -1482,11 +1516,12 @@ export class Business {
     // Häckseln: Viehbetriebe mit eigener Technik geben oft nur den Häcksler in Auftrag
     // Drusch: die meisten Betriebe fahren das Korn selbst ab
     const chain = sv.service === 'haeckseln' ? (this.rng.next() < 0.3 + 0.5 * farm.mechanization ? 'haecksler' : 'komplett')
-      : sv.service === 'drusch' ? (this.rng.next() < 0.55 + 0.35 * farm.mechanization ? 'haecksler' : 'komplett') : undefined;
+      : sv.service === 'drusch' || sv.service === 'kartoffelroden' ? (this.rng.next() < 0.55 + 0.35 * farm.mechanization ? 'haecksler' : 'komplett') : undefined;
     // Gärrest (viehloser Betrieb): kommt aus der eigenen Anlage, Kunde zahlt nur die Ausbringung (günstiger als Gülle)
-    const gaerReq = sv.service === 'guelle' && !farm.livestock;
+    const gaerReq = sv.service === 'guelle' && !farm.livestock && !bga && gaerOk;
+    const fromFarm = sv.service === 'guelle' && !farm.livestock && !bga && !gaerOk ? supplier : null;
     // Transport: Ladestelle (Miete am Feld bzw. Hoflager), nächstes passendes Ziel, Fracht je t
-    const tr = sv.service === 'transport' ? this.transportTerms(farm.id, picked[0]) : null;
+    const tr = sv.service === 'transport' ? (sv.liquid ? this.liquidTerms(farm.id, picked) : this.transportTerms(farm.id, picked[0])) : null;
     const priceHa = tr
       ? tr.priceHa
       : gaerReq && gabe
@@ -1494,7 +1529,7 @@ export class Business {
       : gabe
       ? Math.round(SERVICE_BASE_PRICE.guelle * (0.9 + this.rng.next() * 0.25) * 10) / 10 * gabe
       : chain
-        ? Math.round(((sv.service === 'drusch' ? THRESH_PRICE_HA : CHOP_PRICE_HA)[chain] * (0.92 + this.rng.next() * 0.16)) / 5) * 5
+        ? Math.round(((sv.service === 'drusch' ? THRESH_PRICE_HA : sv.service === 'kartoffelroden' ? POTATO_PRICE_HA : CHOP_PRICE_HA)[chain] * (0.92 + this.rng.next() * 0.16)) / 5) * 5
         : Math.round(SERVICE_BASE_PRICE[sv.service] * (0.92 + this.rng.next() * 0.16) * 2) / 2;
     // Kunde kennt das Angebot der Konkurrenz und bietet höchstens etwas darüber (Stammkunden mehr)
     const comp = gaerReq ? null : this.competitorOffer(farmId, sv.service, time, gabe, chain);
@@ -1514,6 +1549,8 @@ export class Business {
       gabe,
       chain,
       gaerrest: gaerReq || undefined,
+      sourceFarmId: fromFarm ?? undefined,
+      liquid: sv.liquid || undefined,
       tPerHa: tr?.tPerHa,
       pickupNode: tr?.pickupNode,
       destNode: tr?.destNode,
@@ -1525,6 +1562,33 @@ export class Business {
     };
     this.requests.push(req);
     return req;
+  }
+
+  /** nächster Hof mit Vieh oder Biogasanlage im Umkreis von 15 km (Gülle-/Gärrestbörse), sonst null */
+  private slurrySupplier(farmId: number): number | null {
+    const fs = this.farms;
+    const pos = this.farmLonLat(farmId);
+    if (!fs || !pos) return null;
+    let best: number | null = null, bestKm = 15;
+    for (const f of fs.farms) {
+      if (f.id === farmId || !(f.livestock || hasBga(f))) continue;
+      const p = this.nodeLonLat ? this.nodeLonLat(f.homeNode) : null;
+      if (!p) continue;
+      const k = kmBetween(p, pos);
+      if (k < bestKm) { bestKm = k; best = f.id; }
+    }
+    return best;
+  }
+
+  /** Gärrest-Transport einer BGA zum Feldrand: m³ = Fläche × 20 m³/ha, Fracht je m³ nach Entfernung */
+  private liquidTerms(farmId: number, fields: number[]) {
+    const fs = this.farms!, f = this.fields!;
+    const farm = fs.farms[farmId];
+    const a = this.nodeLonLat ? this.nodeLonLat(farm.homeNode) : null;
+    const b = this.nodeLonLat ? this.nodeLonLat(f.access[fields[0]]) : null;
+    const roadKm = a && b ? kmBetween(a, b) * 1.3 : 5;
+    const perM3 = Math.round((1.0 + 0.15 * roadKm) * (0.92 + this.rng.next() * 0.16) * 100) / 100;
+    return { tPerHa: GAER_GABE, pickupNode: farm.homeNode, destNode: f.access[fields[0]], destName: 'Feldrand (Feldrandcontainer)', roadKm, priceHa: Math.round(perM3 * GAER_GABE * 100) / 100 };
   }
 
   /** Transportbedingungen: Ware nach Kultur, Ladestelle, nächstes Ziel, Fracht je t (als €/ha × t/ha) */
@@ -1683,7 +1747,9 @@ export class Business {
       destNode: r.destNode,
       destName: r.destName,
       gaerrest: r.gaerrest,
-      sourceNode: r.gaerrest ? this.biogasNode() : undefined,
+      sourceFarmId: r.sourceFarmId,
+      liquid: r.liquid,
+      sourceNode: r.gaerrest ? this.biogasNode() : r.sourceFarmId !== undefined ? this.farms?.farms[r.sourceFarmId]?.homeNode : undefined,
       earliest: r.earliest,
       latest: r.latest,
       status: 'offen',
@@ -2418,7 +2484,7 @@ export class Business {
       text: o.chain
         ? `${SERVICE_NAMES[o.service]} (${chainName(o.service, o.chain)}) ${fmtHa(o.areaHa)} à ${fmtEur(o.priceHa)}/ha, ${Math.round(o.doneT ?? 0)} t`
         : o.tPerHa
-        ? `${SERVICE_NAMES[o.service]} nach ${o.destName ?? 'Ziel'}: ${Math.round(o.areaHa * o.tPerHa).toLocaleString('de-DE')} t à ${fmtEur(o.priceHa / o.tPerHa)}/t`
+        ? `${SERVICE_NAMES[o.service]} nach ${o.destName ?? 'Ziel'}: ${Math.round(o.areaHa * o.tPerHa).toLocaleString('de-DE')} ${o.liquid ? 'm³ Gärrest' : 't'} à ${fmtEur(o.priceHa / o.tPerHa)}/${o.liquid ? 'm³' : 't'}`
         : o.gabe
         ? `${SERVICE_NAMES[o.service]} ${fmtM3(o.areaHa * o.gabe)} à ${fmtEur(o.priceHa / o.gabe)}/m³ (${fmtHa(o.areaHa)})`
         : `${SERVICE_NAMES[o.service]} ${fmtHa(o.areaHa)} à ${fmtEur(o.priceHa)}/ha`,

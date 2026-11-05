@@ -110,6 +110,23 @@ export const CATALOG: CatalogModel[] = [
   { key: 'man-tgx', type: 'lkw', brand: 'MAN', model: 'TGX 18.510 + Kippsattel', power: 510, payloadT: 25, newPrice: 185_000, deliveryWeeks: 12 },
   { key: 'mb-actros', type: 'lkw', brand: 'Mercedes-Benz', model: 'Actros 1848 + Kippsattel', power: 480, payloadT: 25, newPrice: 178_000, deliveryWeeks: 12 },
   { key: 'scania-r500', type: 'lkw', brand: 'Scania', model: 'R 500 + Kippsattel', power: 500, payloadT: 26, newPrice: 192_000, deliveryWeeks: 14 },
+  // Saat (Annahme, Neupreise Größenordnung Händlerlisten): Kreiselegge + Drille bzw. Einzelkornsämaschine
+  { key: 'amazone-centaya3000', type: 'drille', brand: 'Amazone', model: 'KE 3002 + Centaya 3000 (3 m)', width: 3, powerNeed: 120, haPerHour: 1.6, workKmh: 8, dieselLHa: 12, newPrice: 52_000, deliveryWeeks: 8 },
+  { key: 'horsch-pronto6dc', type: 'drille', brand: 'Horsch', model: 'Pronto 6 DC (6 m)', width: 6, powerNeed: 200, haPerHour: 3.2, workKmh: 12, dieselLHa: 10, newPrice: 125_000, deliveryWeeks: 10 },
+  { key: 'kverneland-optima8', type: 'einzelkorn', brand: 'Kverneland', model: 'Optima V 8-reihig (6 m)', width: 6, powerNeed: 110, haPerHour: 3, workKmh: 9, dieselLHa: 5, newPrice: 58_000, deliveryWeeks: 8 },
+  { key: 'horsch-maestro12', type: 'einzelkorn', brand: 'Horsch', model: 'Maestro 12 SW (9 m)', width: 9, powerNeed: 180, haPerHour: 4.5, workKmh: 10, dieselLHa: 5, newPrice: 95_000, deliveryWeeks: 10 },
+  // Pflanzenschutz: Anhängespritzen (Sachkunde nötig)
+  { key: 'amazone-ux5201', type: 'spritze', brand: 'Amazone', model: 'UX 5201 Super (24 m)', width: 24, powerNeed: 120, haPerHour: 9, workKmh: 10, dieselLHa: 1.5, newPrice: 85_000, deliveryWeeks: 8 },
+  { key: 'kverneland-ixtrack', type: 'spritze', brand: 'Kverneland', model: 'iXtrack T4 (30 m)', width: 30, powerNeed: 150, haPerHour: 11, workKmh: 10, dieselLHa: 1.5, newPrice: 120_000, deliveryWeeks: 10 },
+  // Quaderballenpressen (Stroh nach dem Drusch)
+  { key: 'krone-bigpack1290', type: 'presse', brand: 'Krone', model: 'BiG Pack 1290 HDP II', width: 2.4, powerNeed: 180, haPerHour: 2.5, workKmh: 10, dieselLHa: 8, newPrice: 160_000, deliveryWeeks: 12 },
+  { key: 'claas-quadrant5300', type: 'presse', brand: 'Claas', model: 'Quadrant 5300 FC', width: 2.4, powerNeed: 200, haPerHour: 2.8, workKmh: 11, dieselLHa: 8, newPrice: 175_000, deliveryWeeks: 12 },
+  // Kartoffelroder gezogen mit Bunker (Grimme, docs/ablaeufe.md)
+  { key: 'grimme-se260', type: 'kartoffelroder', brand: 'Grimme', model: 'SE 260 (2-reihig, Bunker 6 t)', width: 1.5, powerNeed: 150, haPerHour: 0.45, workKmh: 5, dieselLHa: 35, payloadT: 6, newPrice: 180_000, deliveryWeeks: 16 },
+  { key: 'grimme-evo290', type: 'kartoffelroder', brand: 'Grimme', model: 'EVO 290 (3-reihig, Bunker 8 t)', width: 2.25, powerNeed: 180, haPerHour: 0.65, workKmh: 5, dieselLHa: 35, payloadT: 8, newPrice: 240_000, deliveryWeeks: 16 },
+  // Überladewagen: fährt nebenher und lädt am Feldrand auf Lkw oder Anhänger über
+  { key: 'fliegl-ulw2000', type: 'ueberladewagen', brand: 'Fliegl', model: 'Überladewagen ULW 2000 (16 t)', payloadT: 16, powerNeed: 160, newPrice: 62_000, deliveryWeeks: 10 },
+  { key: 'fliegl-ulw3000', type: 'ueberladewagen', brand: 'Fliegl', model: 'Überladewagen ULW 3000 (22 t)', payloadT: 22, powerNeed: 200, newPrice: 85_000, deliveryWeeks: 10 },
   // Radlader zum Verteilen und Walzen am Silo (Annahme): Walzleistung ≈ Betriebsgewicht × 4 t Frischmasse je Stunde
   { key: 'jcb-437', type: 'radlader', brand: 'JCB', model: '437 HT Agri', weightT: 13, power: 200, newPrice: 150_000, deliveryWeeks: 8 },
   { key: 'liebherr-l526', type: 'radlader', brand: 'Liebherr', model: 'L 526', weightT: 12, power: 160, newPrice: 170_000, deliveryWeeks: 10 },

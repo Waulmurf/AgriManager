@@ -19,7 +19,8 @@ export function marketValue(newPrice: number, ageYears: number, hours: number): 
 
 export type MachineType =
   | 'schlepper' | 'firmenwagen' | 'grubber' | 'kurzscheibenegge' | 'guellefass' | 'zubringer'
-  | 'feldhaecksler' | 'haeckselwagen' | 'radlader' | 'maehdrescher' | 'kipper' | 'ruebenroder' | 'lkw';
+  | 'feldhaecksler' | 'haeckselwagen' | 'radlader' | 'maehdrescher' | 'kipper' | 'ruebenroder' | 'lkw'
+  | 'drille' | 'einzelkorn' | 'spritze' | 'presse' | 'kartoffelroder' | 'ueberladewagen';
 /** Selbstfahrende Maschinen erscheinen wie Schlepper als Fahrzeug auf der Karte */
 export const SELF_PROPELLED: MachineType[] = ['schlepper', 'feldhaecksler', 'radlader', 'maehdrescher', 'ruebenroder', 'lkw'];
 
@@ -249,6 +250,8 @@ export const MACHINE_SKILL: Partial<Record<MachineType, { skill: Skill; min: num
   maehdrescher: { skill: 'drescher', min: 2 },
   ruebenroder: { skill: 'roder', min: 2 },
   lkw: { skill: 'transport', min: 1 },
+  spritze: { skill: 'pflanzenschutz', min: 1 },
+  kartoffelroder: { skill: 'kartoffel', min: 1 },
   radlader: { skill: 'radlader', min: 1 },
 };
 /** Eigene Reparatur mit dem Werkstattwagen: ab Stufe 2 */

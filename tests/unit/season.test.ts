@@ -31,13 +31,15 @@ const at = (month: number, day: number) => (MONTH_START[month] + day - 1) * 1440
 
 describe('Jahreslauf', () => {
   it('Saisonkalender: Frühjahr Grubbern, Sommer Stoppel, Herbst Grubbern, Winter nur Rübenabfuhr', () => {
-    expect(seasonServices(at(4, 10)).map((x) => x.service)).toEqual(['grubbern', 'guelle', 'guelle']);
-    expect(seasonServices(at(6, 15))).toEqual([]);
-    expect(seasonServices(at(7, 20)).map((x) => x.service)).toEqual(['stoppel', 'drusch', 'drusch']);
-    expect(seasonServices(at(8, 20)).map((x) => x.service)).toEqual(['stoppel', 'guelle', 'drusch', 'transport']);
-    expect(seasonServices(at(9, 10)).map((x) => x.service).sort()).toEqual(['grubbern', 'guelle', 'haeckseln', 'stoppel', 'transport']);
-    expect(seasonServices(at(9, 25)).map((x) => x.service).sort()).toEqual(['grubbern', 'haeckseln', 'roden', 'transport']);
-    expect(seasonServices(at(11, 20)).map((x) => x.service)).toEqual(['roden', 'transport']);
+    const at2 = (m: number, d: number) => seasonServices(at(m, d)).map((x) => x.service).sort();
+    expect(at2(4, 10)).toEqual(['einzelkorn', 'grubbern', 'guelle', 'guelle', 'pflanzenschutz', 'transport']);
+    expect(seasonServices(at(6, 15)).map((x) => x.service)).toEqual(['pflanzenschutz']);
+    expect(seasonServices(at(7, 5))).toEqual([]);
+    expect(at2(7, 20)).toEqual(['drusch', 'drusch', 'stoppel']);
+    expect(at2(8, 20)).toEqual(['drusch', 'guelle', 'pressen', 'saat', 'stoppel', 'transport', 'transport']);
+    expect(at2(9, 10)).toEqual(['grubbern', 'guelle', 'haeckseln', 'kartoffelroden', 'pressen', 'saat', 'stoppel', 'transport', 'transport']);
+    expect(at2(9, 25)).toEqual(['grubbern', 'haeckseln', 'kartoffelroden', 'pflanzenschutz', 'roden', 'saat', 'transport']);
+    expect(at2(11, 20)).toEqual(['roden', 'transport']);
     // Winter: nur noch Rübenabfuhr (Kampagne bis Mitte Januar)
     expect(seasonServices(at(12, 1)).map((x) => x.service)).toEqual(['transport']);
   });

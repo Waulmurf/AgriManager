@@ -105,8 +105,13 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
 - Vorschlag 13 fertig: Reiter Auswertung (`src/ui/Analytics.tsx`, `Business.analytics()`, Sparten `Branch`).
 - Vorschlag 5 fertig: Gärrest-Anfragen viehloser Kunden (`Request.gaerrest`, Reservierung beim Annehmen), Gülleverträge
   mit Selbstabholung (`fetchSlurry`, `Order.slurrySupply`, Truck-Task mit Schlepper und Fass).
-- Empfohlener Block (4, 1, 13, 5) damit fertig. Weitere Vorschläge warten auf Nils' Auswahl (docs/plan.md). Vorschläge für die nächsten Schichten
-  (Nr. 1–19) stehen am Ende von docs/plan.md und warten auf Nils' Auswahl.
+- Empfohlener Block (4, 1, 13, 5) damit fertig.
+- Nils hat am 5. Nov. beauftragt (ohne Nachfragen): mehrere Maschinen je Feld, Gülle/Gärrest fremder Höfe und BGAs
+  (auch nur Transport), 4b, 6, 7, 8, 9, 10, 11, 12, 2, 3, 14. Pakete: (1) Feld teilen + fremde Gülle + 4b (fertig),
+  (2) 6–9, (3) 10–12, (4) 2, 3, 14. Weitere Ideen 20–45 warten auf Auswahl.
+- Feld teilen: `Simulation.joinPlan`, `Order.shareDone`, `Business.fieldPartDone`. Fremde BGAs `hasBga` (farms.ts),
+  `Request.sourceFarmId`/`liquid`. 4b: Dienste saat/einzelkorn/pflanzenschutz/pressen/kartoffelroden, `HARVEST_TOWED`,
+  `HAULER_TYPES` (Überladewagen lädt am Feldrand über), `CropStep.materialHa`.
 
 ## CI (GitHub Actions)
 

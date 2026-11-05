@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { parseRoadGraph, RoadClass } from '../../src/sim/roadgraph';
 import { parseFields } from '../../src/sim/fields';
 import { Simulation } from '../../src/sim/engine';
-import { Crop } from '../../src/sim/farms';
+import { Crop, hasBga } from '../../src/sim/farms';
 import { buildRoadGraphBuffer } from './helpers/grid';
 import { buildFieldsBuffer } from './helpers/fields';
 import type { Machine } from '../../src/sim/economy';
@@ -42,7 +42,7 @@ function addMachine(s: Simulation, m: Partial<Machine> & Pick<Machine, 'type' | 
 }
 
 /** Ernteauftrag (Drusch oder Roden) mit einem Feld */
-function harvestOrder(service: 'drusch' | 'roden', crop: number, month: number, day: number, chain?: 'haecksler' | 'komplett', seed = 5) {
+function harvestOrder(service: 'drusch' | 'roden' | 'kartoffelroden' | 'pflanzenschutz' | 'saat', crop: number, month: number, day: number, chain?: 'haecksler' | 'komplett', seed = 5) {
   const s = world(seed);
   for (let i = 0; i < s.farms!.fieldCrop.length; i += 2) s.farms!.fieldCrop[i] = crop;
   s.run(at(month, day) - s.time);
@@ -60,6 +60,7 @@ function harvestOrder(service: 'drusch' | 'roden', crop: number, month: number, 
   const chef = s.company.drivers[0];
   chef.skills.drescher = 3;
   chef.skills.roder = 3;
+  chef.skills.kartoffel = 2;
   return { s, o, chef };
 }
 
@@ -196,6 +197,95 @@ describe('Lkw-Transport', () => {
     expect(a.months.reduce((x, m) => x + m.revenue.transport, 0)).toBeGreaterThan(0);
     expect(a.customers.some((c) => c.farmId === o.farmId && c.orders === 1)).toBe(true);
     expect(a.drivers.find((d) => d.id === 1)!.minutes).toBeGreaterThan(0);
+  });
+});
+
+describe('Gülle und Gärrest fremder Höfe und Biogasanlagen', () => {
+  it('viehloser Betrieb bestellt Gülle von einem fremden Hof: das Fass holt sie dort', () => {
+    const s = world(5);
+    for (let i = 0; i < s.farms!.fieldCrop.length; i++) s.farms!.fieldCrop[i] = i % 2 ? Crop.Getreide : Crop.Mais;
+    s.run(at(3, 20) - s.time);
+    for (const f of s.farms!.farms) { f.known = true; f.satisfaction = 70; f.rivalUntil = 0; }
+    let req;
+    for (let d = 0; d < 40 && !req; d++) { s.run(1440); req = s.business.requests.find((r) => r.status === 'offen' && r.sourceFarmId !== undefined); }
+    expect(req).toBeDefined();
+    const src = s.farms!.farms[req!.sourceFarmId!];
+    expect(src.livestock || hasBga(src)).toBe(true);
+    expect(s.farms!.farms[req!.farmId].livestock).toBe(false);
+    s.command({ kind: 'respond', requestId: req!.id, action: 'accept' });
+    const o = s.business.orders.find((x) => x.requestId === req!.id)!;
+    expect(o.sourceNode).toBe(src.homeNode);
+  });
+
+  it('nur Transport: Gärrest einer fremden BGA zum Feldrand, Schlepper mit Fass, Rechnung je m³', () => {
+    const s = world(5);
+    s.run(at(4, 1) - s.time);
+    for (const f of s.farms!.farms) if (f.id % 9 === 4) f.areaHa = 200; // Testwelt: kleine Betriebe
+    const bgaFarms = s.farms!.farms.filter((f) => hasBga(f));
+    expect(bgaFarms.length).toBeGreaterThan(0);
+    for (const f of s.farms!.farms) { f.known = bgaFarms.includes(f); f.satisfaction = 70; f.rivalUntil = 0; }
+    let req;
+    // Anfrage-Erzeugung direkt anstoßen (Chance 1), bis ein Gärrest-Transport dabei ist
+    const biz = s.business as unknown as { maybeRequest(f: number, t: number, c: number, ch: string): { status: string; liquid?: boolean } | null };
+    for (let k = 0; k < 200 && !req; k++) {
+      const f = bgaFarms[k % bgaFarms.length];
+      for (const r of s.business.requests) if (r.status === 'offen' && !r.liquid) r.status = 'abgelehnt';
+      biz.maybeRequest(f.id, s.time, 1, 'anruf');
+      req = s.business.requests.find((r) => r.status === 'offen' && r.liquid);
+    }
+    expect(req).toBeDefined();
+    req!.fields = req!.fields.slice(0, 1);
+    req!.areaHa = Math.min(1, s.fields!.areaHa[req!.fields[0]]);
+    s.command({ kind: 'respond', requestId: req!.id, action: 'accept' });
+    const o = s.business.orders.find((x) => x.requestId === req!.id)!;
+    const fass = addMachine(s, { type: 'zubringer', brand: 'Kotte', model: 'VTR 24', tankM3: 24, powerNeed: 100 });
+    const tractor = s.company.machines.find((m) => m.type === 'schlepper')!;
+    runUntil(s, () => s.time % 1440 > 10 && s.time % 1440 < 60, 2 * 1440);
+    expect(s.command({ kind: 'startJob', orderId: o.id, tractorId: tractor.id, implementId: fass.id })).toMatch(/gestartet/);
+    runUntil(s, () => o.status === 'fertig', 6 * 1440);
+    expect(o.status).toBe('fertig');
+    expect(o.doneT).toBeCloseTo(o.areaHa * 20, 0);
+    expect(s.business.invoices.some((i) => i.orderId === o.id && i.text.includes('m³ Gärrest'))).toBe(true);
+  });
+});
+
+describe('Weitere Ackerdienste (4b)', () => {
+  it('Kartoffelroden mit gezogenem Bunkerroder: Schlepper zieht, Kunde stellt Anhänger', () => {
+    const { s, o } = harvestOrder('kartoffelroden', Crop.Kartoffeln, 9, 5, 'haecksler');
+    const roder = addMachine(s, { type: 'kartoffelroder', brand: 'Grimme', model: 'SE 260', width: 1.5, powerNeed: 150, haPerHour: 0.45, workKmh: 5, dieselLHa: 35, payloadT: 6 });
+    const tr = addMachine(s, { type: 'schlepper', brand: 'Fendt', model: '724', power: 240 });
+    runUntil(s, () => !s.weather.fieldBlocked(s.time) && s.time % 1440 > 10 && s.time % 1440 < 200, 15 * 1440);
+    expect(s.command({ kind: 'startJob', orderId: o.id, tractorId: roder.id, implementId: roder.id })).toMatch(/Schlepper|wählen/);
+    expect(s.command({ kind: 'startJob', orderId: o.id, tractorId: tr.id, implementId: roder.id })).toMatch(/gestartet/);
+    runUntil(s, () => o.status === 'fertig', 12 * 1440);
+    expect(o.status).toBe('fertig');
+    expect(o.doneT!).toBeGreaterThan(o.areaHa * 45 * 0.8);
+    expect(roder.hours).toBeGreaterThan(0);
+  });
+
+  it('Drusch mit Abfuhr per Überladewagen: lädt am Feldrand über', () => {
+    const { s, o } = harvestOrder('drusch', Crop.Getreide, 8, 1, 'komplett');
+    const m = addMachine(s, { type: 'maehdrescher', model: 'Lexion 6800', power: 435, width: 9.3, haPerHour: 3, workKmh: 6, dieselLHa: 18, payloadT: 9 });
+    const ulw = addMachine(s, { type: 'ueberladewagen', brand: 'Fliegl', model: 'ULW 3000', payloadT: 22, powerNeed: 150 });
+    const tr = addMachine(s, { type: 'schlepper', brand: 'Fendt', model: '724', power: 240 });
+    s.company.drivers.push({ ...structuredClone(s.company.drivers[0]), id: 9, name: 'Abfahrer', isPlayer: false, kind: 'fest' as const, absences: [] });
+    runUntil(s, () => !s.weather.threshBlocked(s.time) && s.time % 1440 > 200 && s.time % 1440 < 300, 10 * 1440);
+    expect(s.command({ kind: 'startJob', orderId: o.id, tractorId: m.id, implementId: m.id, haulers: [{ driverId: 9, tractorId: tr.id, implementId: ulw.id }] })).toMatch(/gestartet/);
+    runUntil(s, () => o.status === 'fertig' && !s.playerUnits().some((u) => u.status.includes('Abfahrer') || u.status.includes('Silo')), 6 * 1440);
+    expect(o.status).toBe('fertig');
+    expect(o.doneT!).toBeGreaterThan(o.areaHa * 7.5 * 0.5);
+  });
+
+  it('Pflanzenschutz braucht Sachkunde und eine Spritze', () => {
+    const { s, o, chef } = harvestOrder('pflanzenschutz', Crop.Getreide, 4, 5);
+    const sp = addMachine(s, { type: 'spritze', brand: 'Amazone', model: 'UX 5201', width: 24, powerNeed: 120, haPerHour: 9, workKmh: 10, dieselLHa: 1.5 });
+    chef.skills.pflanzenschutz = 0;
+    expect(s.command({ kind: 'startJob', orderId: o.id, tractorId: 1, implementId: sp.id })).toMatch(/qualifiziert/);
+    chef.skills.pflanzenschutz = 1;
+    runUntil(s, () => !s.weather.fieldBlocked(s.time) && s.time % 1440 > 10 && s.time % 1440 < 200, 15 * 1440);
+    expect(s.command({ kind: 'startJob', orderId: o.id, tractorId: 1, implementId: sp.id })).toMatch(/gestartet/);
+    runUntil(s, () => o.status === 'fertig', 6 * 1440);
+    expect(o.status).toBe('fertig');
   });
 });
 

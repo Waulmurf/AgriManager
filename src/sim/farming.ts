@@ -19,6 +19,8 @@ export interface CropStep {
   to: number;
   /** Kosten je ha bei Fremdleistung inkl. Betriebsmittel (Saatgut, Dünger, Pflanzenschutz); Ernte: ohne eigene Maschine */
   costHa: number;
+  /** mit eigener Maschine nur die Betriebsmittel (Saatgut, Dünger, Mittel) je ha */
+  materialHa?: number;
   /** ohne diesen Schritt sinkt der Ertrag (verpasst: −10 %) */
   required: boolean;
   /** Ernte: Ertrag wird gebucht */
@@ -46,8 +48,8 @@ export const CROPS: CropDef[] = [
     steps: [
       STOPPEL,
       { key: 'grubbern', name: 'Grubbern', service: 'grubbern', from: 901, to: 1005, costHa: 0, required: true },
-      { key: 'saat', name: 'Saat (Fremdleistung inkl. Saatgut)', from: 925, to: 1025, costHa: 45 + 95, required: true },
-      { key: 'pflege', name: 'Düngung und Pflanzenschutz (Fremdleistung inkl. Mittel)', from: 301, to: 531, costHa: 30 + 380, required: true },
+      { key: 'saat', name: 'Saat (eigene Drille oder Fremdleistung, inkl. Saatgut)', service: 'saat', from: 925, to: 1025, costHa: 45 + 95, materialHa: 95, required: true },
+      { key: 'pflege', name: 'Düngung und Pflanzenschutz (eigene Spritze oder Fremdleistung, inkl. Mittel)', service: 'pflanzenschutz', from: 301, to: 531, costHa: 30 + 380, materialHa: 380, required: true },
       { key: 'drusch', name: 'Mähdrusch (eigener Drescher, sonst Fremdleistung)', service: 'drusch', from: 720, to: 820, costHa: 155, required: true, harvest: true },
     ],
   },
@@ -55,8 +57,8 @@ export const CROPS: CropDef[] = [
     key: 'raps', name: 'Winterraps', mapCrop: Crop.Raps, yieldT: 3.8, priceT: 450, drought: 0.5,
     steps: [
       { key: 'stoppel', name: 'Stoppelbearbeitung', service: 'stoppel', from: 720, to: 815, costHa: 0, required: false },
-      { key: 'saat', name: 'Saat (Fremdleistung inkl. Saatgut)', from: 815, to: 910, costHa: 50 + 85, required: true },
-      { key: 'pflege', name: 'Düngung und Pflanzenschutz (Fremdleistung inkl. Mittel)', from: 301, to: 430, costHa: 30 + 450, required: true },
+      { key: 'saat', name: 'Saat (eigene Drille oder Fremdleistung, inkl. Saatgut)', service: 'saat', from: 815, to: 910, costHa: 50 + 85, materialHa: 85, required: true },
+      { key: 'pflege', name: 'Düngung und Pflanzenschutz (eigene Spritze oder Fremdleistung, inkl. Mittel)', service: 'pflanzenschutz', from: 301, to: 430, costHa: 30 + 450, materialHa: 450, required: true },
       { key: 'drusch', name: 'Mähdrusch (eigener Drescher, sonst Fremdleistung)', service: 'drusch', from: 710, to: 805, costHa: 155, required: true, harvest: true },
     ],
   },
@@ -65,8 +67,8 @@ export const CROPS: CropDef[] = [
     steps: [
       STOPPEL,
       { key: 'grubbern', name: 'Grubbern', service: 'grubbern', from: 315, to: 430, costHa: 0, required: true },
-      { key: 'saat', name: 'Maislegen (Fremdleistung inkl. Saatgut)', from: 415, to: 510, costHa: 60 + 220, required: true },
-      { key: 'pflege', name: 'Düngung und Pflanzenschutz (Fremdleistung inkl. Mittel)', from: 501, to: 615, costHa: 30 + 320, required: true },
+      { key: 'saat', name: 'Maislegen (eigene Einzelkornsämaschine oder Fremdleistung, inkl. Saatgut)', service: 'einzelkorn', from: 415, to: 510, costHa: 60 + 220, materialHa: 220, required: true },
+      { key: 'pflege', name: 'Düngung und Pflanzenschutz (eigene Spritze oder Fremdleistung, inkl. Mittel)', service: 'pflanzenschutz', from: 501, to: 615, costHa: 30 + 320, materialHa: 320, required: true },
       { key: 'haeckseln', name: 'Häckseln (eigene Kette, Silo am Hof)', service: 'haeckseln', from: 915, to: 1020, costHa: 0, required: true, harvest: true },
     ],
   },
@@ -75,8 +77,8 @@ export const CROPS: CropDef[] = [
     steps: [
       STOPPEL,
       { key: 'grubbern', name: 'Grubbern', service: 'grubbern', from: 301, to: 410, costHa: 0, required: true },
-      { key: 'saat', name: 'Rübensaat (Fremdleistung inkl. Saatgut)', from: 320, to: 420, costHa: 60 + 270, required: true },
-      { key: 'pflege', name: 'Düngung und Pflanzenschutz (Fremdleistung inkl. Mittel)', from: 501, to: 731, costHa: 40 + 450, required: true },
+      { key: 'saat', name: 'Rübensaat (eigene Einzelkornsämaschine oder Fremdleistung, inkl. Saatgut)', service: 'einzelkorn', from: 320, to: 420, costHa: 60 + 270, materialHa: 270, required: true },
+      { key: 'pflege', name: 'Düngung und Pflanzenschutz (eigene Spritze oder Fremdleistung, inkl. Mittel)', service: 'pflanzenschutz', from: 501, to: 731, costHa: 40 + 450, materialHa: 450, required: true },
       { key: 'roden', name: 'Roden (eigener Roder, sonst Fremdleistung)', service: 'roden', from: 1001, to: 1130, costHa: 260, required: true, harvest: true },
     ],
   },
@@ -86,8 +88,8 @@ export const CROPS: CropDef[] = [
       STOPPEL,
       { key: 'grubbern', name: 'Grubbern', service: 'grubbern', from: 315, to: 415, costHa: 0, required: true },
       { key: 'legen', name: 'Kartoffeln legen (Fremdleistung inkl. Pflanzgut)', from: 410, to: 505, costHa: 150 + 1_200, required: true },
-      { key: 'pflege', name: 'Düngung, Pflanzenschutz, Dämme (Fremdleistung inkl. Mittel)', from: 515, to: 815, costHa: 80 + 800, required: true },
-      { key: 'roden', name: 'Roden (Fremdleistung)', from: 901, to: 1015, costHa: 420, required: true, harvest: true },
+      { key: 'pflege', name: 'Düngung, Pflanzenschutz, Dämme (eigene Spritze oder Fremdleistung, inkl. Mittel)', service: 'pflanzenschutz', from: 515, to: 815, costHa: 80 + 800, materialHa: 800, required: true },
+      { key: 'roden', name: 'Roden (eigener Kartoffelroder, sonst Fremdleistung)', service: 'kartoffelroden', from: 901, to: 1015, costHa: 420, required: true, harvest: true },
     ],
   },
 ];

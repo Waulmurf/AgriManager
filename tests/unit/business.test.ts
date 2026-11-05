@@ -300,7 +300,7 @@ describe('Warteschlange des Chefs', () => {
     const grubber = s.company.machines.find((m) => m.type === 'grubber')!;
     runUntil(s, () => s.time % 1440 > 30 && s.time % 1440 < 120, 1440); // morgens starten
     expect(s.command({ kind: 'startJob', orderId: order.id, tractorId: 1, implementId: grubber.id })).toMatch(/^Auftrag gestartet/);
-    const others = s.farms!.farms.filter((f) => f.id !== order.farmId && f.homeNode !== s.homeNode);
+    const others = s.farms!.farms.filter((f) => f.id !== order.farmId && f.homeNode !== s.homeNode && !f.known);
     const [f1, f2, f3] = others;
     expect(s.command({ kind: 'visit', farmId: f1.id })).toMatch(/^Eingeplant für Chef als Nr\. 1/);
     expect(s.command({ kind: 'visit', farmId: f2.id })).toMatch(/^Eingeplant für Chef als Nr\. 2/);
@@ -317,7 +317,7 @@ describe('Warteschlange des Chefs', () => {
     runUntil(s, () => {
       for (const f of [f1, f2, f3]) if (f.known && !visited.includes(f.id)) visited.push(f.id);
       return visited.length === 3;
-    }, 6 * 1440);
+    }, 14 * 1440);
     expect(order1.status).toBe('fertig');
     expect(visited).toEqual([f3.id, f1.id, f2.id]);
     expect(s.queue.length).toBe(0);

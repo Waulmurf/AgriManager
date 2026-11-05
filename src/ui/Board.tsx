@@ -81,7 +81,7 @@ export function PlanningBoard({ status, game, onClose }: { status: GameStatus; g
         void send({ kind: 'plan', orderId: data.orderId, driverId, tractorId: lkw.id, implementId: lkw.id, notBefore });
         return;
       }
-      if (o && isHarvest(o.service)) {
+      if (o && isHarvest(o.service) && o.service !== 'kartoffelroden') {
         if (o.chain === 'komplett') { show('Kette mit Abfahrern (mehrere Fahrer) bitte im Reiter Aufträge einteilen'); return; }
         const hv = c.machines.find((m) => m.type === SERVICE_IMPLEMENT[o.service]);
         if (!hv) { show(`Keine passende Erntemaschine (${SERVICE_NAMES[o.service]}) im Fuhrpark`); return; }
