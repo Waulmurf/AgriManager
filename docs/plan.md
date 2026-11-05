@@ -797,7 +797,7 @@ Nils wählt aus, was umgesetzt wird. Empfehlung für den nächsten Block: 4, 1, 
 
 ### D. Spielgefühl und Oberfläche
 
-13. **Auswertungen:** Diagramme zu Umsatz und Gewinn je Monat und Sparte (Lohnarbeit, Ackerbau,
+13. **Auswertungen** (umgesetzt, siehe unten): Diagramme zu Umsatz und Gewinn je Monat und Sparte (Lohnarbeit, Ackerbau,
     Biogas), Auslastung je Maschine und Fahrer, Kundenkarte mit Deckungsbeitrag.
 14. **Ereignisse und Zufälle:** Unwetter, Hagel auf eigenen Flächen, Kontrollen (Lenkzeit,
     Fahrzeug), Feldtage und Messen mit Rabatten.
@@ -880,3 +880,22 @@ Nils wählt aus, was umgesetzt wird. Empfehlung für den nächsten Block: 4, 1, 
 - **Später:** mehrere Lkw je Auftrag, Abfuhrplan der Zuckerfabrik mit Zeitfenstern,
   Wartezeiten an der Waage, Fahrtenschreiber und Wochenlenkzeit, Kartoffeltransporte,
   Rückfracht (z. B. Kalk oder Dünger).
+
+## Umsetzung Vorschlag 13: Auswertungen (5. Nov. 2026)
+
+- **Reiter „Auswertung“ (`src/ui/Analytics.tsx`, Daten `Business.analytics()`):** einmal je Spieltag
+  berechnet.
+- **Umsatz je Sparte und Monat (letzte 12 Monate)** als gestapelte Säulen:
+  - Lohnarbeit und Transport nach Rechnungsdatum.
+  - Ackerbau (Ernte) und Biogas (Strom) nach Buchung.
+  - Farben: Kategorien 1–4 der Referenzpalette, geprüft mit dem Palettenprüfer. Dazu Legende,
+    Tooltip und Tabellenansicht.
+- **Ergebnis je Monat:** Umsatz − direkte Kosten (Ackerbau und Pacht, Biogas, Maut) − allgemeine
+  Kosten (Diesel, Personal, Werkstatt, Gebäude, Zinsen, Leasing, Versicherung), ohne AfA.
+- **Auslastung Maschinen:** Einsatzstunden aus den Aufträgen des laufenden Jahres gegen einen
+  anteiligen Richtwert (selbstfahrend 800 h, Geräte 300 h im Jahr).
+- **Auslastung Personal:** Arbeitsminuten im Jahr (`Business.workMinutesYear`) gegen 1.900 h.
+- **Kunden nach Deckungsbeitrag:** Rechnungsbetrag − Diesel − Maschinenkosten, dazu offene
+  Rechnungen.
+- **Später:** Vergleich zum Vorjahr, Deckungsbeitrag je Maschine inkl. AfA und Zinsen, Export als
+  CSV, Ziele und Warnungen (z. B. Maschine unter 50 % ausgelastet).

@@ -143,6 +143,7 @@ function sendBusiness(force = false) {
       leases: b.leases.map((l) => ({ ...structuredClone(l), center: fieldCenter(l.fields[0]) })),
     },
     biogas: b.biogas ? structuredClone(b.biogas) : null,
+    analytics: structuredClone(b.analytics(sim.time)),
     weather: (() => {
       const day = Math.floor(sim!.time / 1440);
       const w = sim!.weather.day(day);

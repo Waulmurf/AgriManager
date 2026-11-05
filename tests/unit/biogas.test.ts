@@ -99,6 +99,11 @@ describe('Biogasanlage', () => {
     expect(strom.length).toBeGreaterThan(0);
     expect(strom[0].amount).toBeGreaterThan(0);
     expect(b.ledger.some((l) => l.category === 'Biogas' && l.text.startsWith('Biogas: Betrieb'))).toBe(true);
+    // Auswertung: Strom als Umsatz der Sparte Biogas, Betriebskosten direkt
+    const a = b.analytics(s.time);
+    expect(a.months.reduce((x, m) => x + m.revenue.biogas, 0)).toBeGreaterThan(0);
+    expect(a.months.reduce((x, m) => x + m.direct.biogas, 0)).toBeGreaterThan(0);
+    expect(a.months.length).toBe(12);
     const y = b.yearFigures(0, s.time + 1);
     expect(y.revenue).toBeGreaterThanOrEqual(strom.reduce((a, l) => a + l.amount, 0));
   });

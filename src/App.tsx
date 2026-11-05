@@ -4,6 +4,7 @@ import { formatGameTime } from './game/clock';
 import { runSelftest } from './game/selftest';
 import { forwardLogsToHost, platformName, selftestConfig } from './platform';
 import type { Speed } from './sim/protocol';
+import { AnalyticsTab } from './ui/Analytics';
 import { BiogasTab, BusinessTab, CompetitionTab, FarmingTab, SitesTab, FinanceTab, FleetTab, MarketTab, NewsTab, OrdersTab, SavePanel, StaffTab, VehicleMenu } from './ui/Panels';
 import { AUTOSAVE } from './game/savegame';
 import { PlanningBoard } from './ui/Board';
@@ -19,6 +20,7 @@ const TABS = [
   { id: 'finanzen', label: 'Finanzen' },
   { id: 'markt', label: 'Markt' },
   { id: 'wettbewerb', label: 'Wettbewerb' },
+  { id: 'auswertung', label: 'Auswertung' },
   { id: 'nachrichten', label: 'Meldungen' },
   { id: 'technik', label: 'Technik' },
 ] as const;
@@ -181,6 +183,7 @@ export function App() {
               <section hidden={tab !== 'finanzen'}><FinanceTab status={status} game={game} /></section>
               <section hidden={tab !== 'markt'}><MarketTab status={status} game={game} /></section>
               <section hidden={tab !== 'wettbewerb'}><CompetitionTab status={status} game={game} /></section>
+              <section hidden={tab !== 'auswertung'}><AnalyticsTab status={status} game={game} /></section>
               <section hidden={tab !== 'nachrichten'}><NewsTab status={status} game={game} /></section>
             </>
           )}

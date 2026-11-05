@@ -273,6 +273,20 @@ export type LedgerCategory =
   | 'Kredit' | 'Tilgung' | 'Zinsen' | 'Leasing' | 'Versicherung' | 'Steuern' | 'Gebäude' | 'Bau'
   | 'Pacht' | 'Ackerbau' | 'Ernte' | 'Strom' | 'Biogas' | 'Maut' | 'Sonstiges';
 
+/** Sparten für die Auswertung (Vorschlag 13) */
+export type Branch = 'lohn' | 'transport' | 'ackerbau' | 'biogas';
+export const BRANCH_NAMES: Record<Branch, string> = { lohn: 'Lohnarbeit', transport: 'Transport', ackerbau: 'Ackerbau', biogas: 'Biogas' };
+
+/** Auswertung: Monate (Umsatz und direkte Kosten je Sparte, übrige Kosten), Maschinen, Fahrer, Kunden */
+export interface Analytics {
+  months: { year: number; month: number; revenue: Record<Branch, number>; direct: Record<Branch, number>; overhead: number; profit: number }[];
+  machines: { id: number; hours: number; orders: number; revenue: number }[];
+  drivers: { id: number; minutes: number }[];
+  customers: { farmId: number; orders: number; revenue: number; margin: number; open: number }[];
+  /** Anteil des Jahres, der schon vergangen ist (für Auslastung) */
+  yearShare: number;
+}
+
 /** Biogasanlage (PB-07 bis PB-10) */
 export interface BiogasPlant {
   siteId: number;
@@ -505,6 +519,10 @@ export class Business {
   private dieselTodayEur = 0;
   /** Maut des Tages (Lkw), einmal täglich gebucht */
   private tollToday = 0;
+  /** Arbeitsminuten je Mitarbeiter im laufenden Jahr (Auswertung) */
+  workYear = 0;
+  readonly workMinutesYear: Record<number, number> = {};
+  private analyticsCache: { day: number; v: number; data: Analytics } | null = null;
   readonly offers: MarketOffer[] = START_OFFERS.map((o) => ({ ...o, machine: { ...o.machine } }));
   private events: GameEvent[] = [];
   private rng: Rng;
@@ -540,6 +558,8 @@ export class Business {
       dieselTodayL: this.dieselTodayL,
       dieselTodayEur: this.dieselTodayEur,
       tollToday: this.tollToday,
+      workYear: this.workYear,
+      workMinutesYear: this.workMinutesYear,
       applicants: this.applicants,
       payrollAccrued: this.payrollAccrued,
       deliveries: this.deliveries,
@@ -572,6 +592,10 @@ export class Business {
     this.dieselTodayL = s.dieselTodayL;
     this.dieselTodayEur = s.dieselTodayEur;
     this.tollToday = s.tollToday ?? 0;
+    this.workYear = s.workYear ?? 0;
+    for (const k of Object.keys(this.workMinutesYear)) delete this.workMinutesYear[Number(k)];
+    Object.assign(this.workMinutesYear, s.workMinutesYear ?? {});
+    this.analyticsCache = null;
     put(this.applicants, s.applicants ?? []);
     put(this.deliveries, s.deliveries ?? []);
     put(this.staffRequests, s.staffRequests ?? []);
@@ -1520,6 +1544,10 @@ export class Business {
   daily(time: number, workedMinutes: Record<number, number> = {}, surcharge: Record<number, number> = {}, busyDrivers: Set<number> = new Set()) {
     this.lastTime = time;
     this.bookDiesel(time);
+    // Arbeitszeit des Vortags fürs Jahr sammeln (neues Jahr: neu zählen)
+    const wy = gameDate(time - 1).year;
+    if (this.workYear !== wy) { this.workYear = wy; for (const k of Object.keys(this.workMinutesYear)) delete this.workMinutesYear[Number(k)]; }
+    for (const [d, m] of Object.entries(workedMinutes)) this.workMinutesYear[Number(d)] = (this.workMinutesYear[Number(d)] ?? 0) + m;
     this.payroll(time, workedMinutes, surcharge);
     if (gameDate(time).month === 11 && gameDate(time).day === 1) {
       this.emit(time, 'info', 'Winter: Bodenbearbeitung ruht bis März. Zeit für den Wintercheck – Wartung beim Händler bis Ende Februar 20 % günstiger, senkt das Pannenrisiko in der Saison.');
@@ -2392,6 +2420,91 @@ export class Business {
     const perH = tractor ? this.repairPerHour(tractor) : REPAIR_TRACTOR_EUR_H;
     const machines = Math.round((o.tractorHours * perH + o.areaHa * WEAR_GRUBBER_EUR_HA + (o.externalCost ?? 0)) * 100) / 100;
     return { revenue, diesel: o.dieselCost, machines, margin: Math.round((revenue - o.dieselCost - machines) * 100) / 100 };
+  }
+
+  /**
+   * Auswertung (Vorschlag 13): letzte 12 Monate nach Sparten, Maschinen und Fahrer im laufenden
+   * Jahr, Kunden über alle Aufträge. Umsatz Lohnarbeit/Transport nach Rechnungsdatum, Ackerbau
+   * (Ernte) und Biogas (Strom) nach Buchung. Direkte Kosten: Ackerbau und Pacht, Biogas, Maut;
+   * alles andere (Diesel, Personal, Werkstatt, Zinsen …) als allgemeine Kosten. Ohne AfA.
+   * Einmal je Spieltag berechnet.
+   */
+  analytics(time: number): Analytics {
+    const day = Math.floor(time / 1440);
+    if (this.analyticsCache && this.analyticsCache.day === day && this.analyticsCache.v === this.ledger.length + this.invoices.length) return this.analyticsCache.data;
+    const now = gameDate(time);
+    const months: Analytics['months'] = [];
+    const idx = new Map<number, number>();
+    for (let k = 11; k >= 0; k--) {
+      let m = now.month - k, y = now.year;
+      while (m < 1) { m += 12; y--; }
+      idx.set(y * 100 + m, months.length);
+      const zero = (): Record<Branch, number> => ({ lohn: 0, transport: 0, ackerbau: 0, biogas: 0 });
+      months.push({ year: y, month: m, revenue: zero(), direct: zero(), overhead: 0, profit: 0 });
+    }
+    const at = (t: number) => { const d = gameDate(t); return idx.get(d.year * 100 + d.month); };
+    const orderOf = new Map(this.orders.map((o) => [o.id, o]));
+    for (const inv of this.invoices) {
+      const i = at(inv.issuedAt);
+      if (i === undefined) continue;
+      const o = orderOf.get(inv.orderId);
+      months[i].revenue[o?.service === 'transport' ? 'transport' : 'lohn'] += inv.amount;
+    }
+    const overheadCats: LedgerCategory[] = ['Diesel', 'Personal', 'Werkstatt', 'Zinsen', 'Leasing', 'Versicherung', 'Gebäude', 'Sonstiges'];
+    for (const l of this.ledger) {
+      const i = at(l.time);
+      if (i === undefined) continue;
+      const m = months[i];
+      if (l.category === 'Ernte') m.revenue.ackerbau += l.amount;
+      else if (l.category === 'Strom') m.revenue.biogas += l.amount;
+      else if (l.category === 'Ackerbau' || l.category === 'Pacht') m.direct.ackerbau -= l.amount;
+      else if (l.category === 'Biogas') m.direct.biogas -= l.amount;
+      else if (l.category === 'Maut') m.direct.transport -= l.amount;
+      else if (overheadCats.includes(l.category)) m.overhead -= l.amount;
+    }
+    for (const m of months) {
+      const r = m.revenue, c = m.direct;
+      m.profit = Math.round(r.lohn + r.transport + r.ackerbau + r.biogas - c.lohn - c.transport - c.ackerbau - c.biogas - m.overhead);
+      for (const k of Object.keys(r) as Branch[]) { r[k] = Math.round(r[k]); c[k] = Math.round(c[k]); }
+      m.overhead = Math.round(m.overhead);
+    }
+    // Maschinen im laufenden Jahr: Einsatzstunden aus den Aufträgen
+    const ys = this.yearStart(time);
+    const mach = new Map<number, { id: number; hours: number; orders: number; revenue: number }>();
+    for (const o of this.orders) {
+      if ((o.startedAt ?? -1) < ys) continue;
+      for (const id of new Set([o.tractorId, o.implementId])) {
+        if (id === undefined) continue;
+        const e = mach.get(id) ?? { id, hours: 0, orders: 0, revenue: 0 };
+        e.hours += o.tractorHours;
+        e.orders++;
+        if (o.status === 'fertig') e.revenue += o.priceHa * o.areaHa;
+        mach.set(id, e);
+      }
+    }
+    const machines = this.company.machines.map((m) => mach.get(m.id) ?? { id: m.id, hours: 0, orders: 0, revenue: 0 })
+      .map((e) => ({ ...e, hours: Math.round(e.hours * 10) / 10, revenue: Math.round(e.revenue) }));
+    const drivers = this.company.drivers.map((d) => ({ id: d.id, minutes: this.workMinutesYear[d.id] ?? 0 }));
+    // Kunden: alle fertigen Aufträge (Deckungsbeitrag nach Diesel und Maschinenkosten), offene Rechnungen
+    const cust = new Map<number, Analytics['customers'][number]>();
+    for (const o of this.orders) {
+      if (o.status !== 'fertig' || o.farmId < 0 || o.ownLeaseId !== undefined || o.biogasPriceT !== undefined) continue;
+      const r = this.orderResult(o);
+      const e = cust.get(o.farmId) ?? { farmId: o.farmId, orders: 0, revenue: 0, margin: 0, open: 0 };
+      e.orders++; e.revenue += r.revenue; e.margin += r.margin;
+      cust.set(o.farmId, e);
+    }
+    for (const inv of this.invoices) {
+      if (inv.status !== 'offen' && inv.status !== 'überfällig') continue;
+      const e = cust.get(inv.farmId);
+      if (e) e.open += inv.amount;
+    }
+    const customers = [...cust.values()].map((e) => ({ ...e, revenue: Math.round(e.revenue), margin: Math.round(e.margin), open: Math.round(e.open) }))
+      .sort((a, b) => b.margin - a.margin);
+    const yearShare = Math.max(1 / 365, Math.min(1, (time - ys) / (365 * 1440)));
+    const data = { months, machines, drivers, customers, yearShare };
+    this.analyticsCache = { day, v: this.ledger.length + this.invoices.length, data };
+    return data;
   }
 
   /** Auftrag unterbrochen (Fahrzeug zurückgerufen): bleibt offen, erledigte Felder zählen */

@@ -141,6 +141,12 @@ describe('Lkw-Transport', () => {
     expect(o.status).toBe('fertig');
     expect(o.doneT!).toBeCloseTo(total, 0);
     expect(s.business.invoices.some((i) => i.orderId === o.id && i.text.includes('Zuckerfabrik'))).toBe(true);
+    // Auswertung: Umsatz in der Sparte Transport, Lkw mit Einsatz, Kunde mit Deckungsbeitrag
+    s.run(1440);
+    const a = s.business.analytics(s.time);
+    expect(a.months.reduce((x, m) => x + m.revenue.transport, 0)).toBeGreaterThan(0);
+    expect(a.customers.some((c) => c.farmId === o.farmId && c.orders === 1)).toBe(true);
+    expect(a.drivers.find((d) => d.id === 1)!.minutes).toBeGreaterThan(0);
   });
 });
 
