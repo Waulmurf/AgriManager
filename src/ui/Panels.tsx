@@ -5,7 +5,7 @@ import { useState } from 'react';
 import type { GameController, GameStatus } from '../game/controller';
 import type { JobEstimate } from '../sim/engine';
 import { MECHANIC_MIN, SKILLS, roleName, employerHourCost, employerMonthCost, machineValue, marketWage, takeOverFee, type Employee, type Machine } from '../sim/economy';
-import { SERVICE_NAMES, fmtDay, fmtTime, CHECK_COST, type Invoice, type Request, type Order } from '../sim/business';
+import { SERVICE_NAMES, fmtDay, fmtTime, partsText, CHECK_COST, type Invoice, type Request, type Order } from '../sim/business';
 import { CATALOG, DEALERS } from '../data/catalog';
 import { formatGameTime } from '../game/clock';
 
@@ -542,7 +542,8 @@ function RepairChoice({ m, status, send }: { m: Machine; status: GameStatus; sen
   const mechanics = c.drivers.filter((d) => (d.skills.werkstatt ?? 0) >= MECHANIC_MIN);
   const [mech, setMech] = useState(mechanics[0]?.id ?? 0);
   const van = c.machines.some((x) => x.carKind === 'werkstatt');
-  const teil = r.parts === 'lager' ? 'Lagerteil (im Werkstattwagen)' : r.parts === 'haendler' ? `Teil liegt bei ${r.dealer} – muss geholt werden` : `Teil bestellt, ab ${fmtDay(r.partsReadyAt)} ${fmtTime(r.partsReadyAt)} bei ${r.dealer}`;
+  const teil = partsText(r);
+  const own = r.parts === 'wagen' || r.parts === 'hof' ? `Teil aus eigenem Lager, ${eur(r.partValue)}` : `Teile ~${eur(Math.round((r.cost * 0.45) / 10) * 10)}`;
   if (r.state !== 'wartet') return <small className="hint">{teil}</small>;
   return (
     <div className="repair-choice" data-testid="repair-choice">
@@ -554,7 +555,7 @@ function RepairChoice({ m, status, send }: { m: Machine; status: GameStatus; sen
             <select value={mech} onChange={(e) => setMech(Number(e.target.value))} aria-label="Mechaniker">
               {mechanics.map((d) => <option key={d.id} value={d.id}>{d.isPlayer ? 'Chef' : d.name} (Werkstatt {d.skills.werkstatt}){b.driverStatus[d.id] ? ' – beschäftigt' : ''}</option>)}
             </select>
-            <button onClick={() => send({ kind: 'repair', machineId: m.id, mode: 'own', mechanicId: mech })} data-testid="repair-own">Eigene Werkstatt (Teile ~{eur(Math.round((r.cost * 0.45) / 10) * 10)})</button>
+            <button onClick={() => send({ kind: 'repair', machineId: m.id, mode: 'own', mechanicId: mech })} data-testid="repair-own">Eigene Werkstatt ({own})</button>
           </span>
         ) : <small className="hint">Eigene Reparatur braucht Werkstattwagen und Mechaniker (Werkstatt ab Stufe {MECHANIC_MIN}).</small>}
       </div>
@@ -571,6 +572,16 @@ export function FleetTab({ status, game }: { status: GameStatus; game: GameContr
   const send = async (cmd: Parameters<GameController['command']>[0]) => fb.show(await game!.command(cmd));
   return (
     <>
+      <h2>Verschleißteillager</h2>
+      <dl data-testid="parts-stock">
+        <dt>Bestand</dt><dd className={(c.partsStock ?? 0) < 200 ? 'neg' : ''}>{eur(c.partsStock ?? 0)}</dd>
+        {(c.partsIncoming ?? []).flatMap((x, i) => [<dt key={`a${i}`}>Lieferung {fmtDay(x.at)}</dt>, <dd key={`b${i}`}>{eur(x.amount)}</dd>])}
+      </dl>
+      <div className="card-actions">
+        <button onClick={() => send({ kind: 'buyParts', amount: 500 })}>+500 € nachkaufen</button>
+        <button onClick={() => send({ kind: 'buyParts', amount: 2000 })} data-testid="buy-parts">+2.000 €</button>
+      </div>
+      <p className="hint">Schare, Zinken, Filter, Riemen, Schläuche: Grubbern verbraucht etwa 3 € je ha. Bei Pannen hat der Werkstattwagen Verschleißteile meist an Bord, sonst lädt er sie am Hof. Ist das Lager leer, müssen sie bestellt werden, und Geräte fallen doppelt so oft aus.</p>
       <h2>Fuhrpark ({c.machines.length})</h2>
       <ul className="cards" data-testid="fleet">
         {c.machines.map((m) => {

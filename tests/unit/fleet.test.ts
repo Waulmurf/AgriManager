@@ -231,10 +231,71 @@ describe('Firmenwagen und eigene Werkstatt', () => {
     expect(s.driverBusy(mech.id)).toBeNull();
   });
 
+  it('eigene Werkstatt mit Teil aus dem Hoflager: lädt am Hof, zahlt aus dem Lagerbestand', () => {
+    const { s, mech } = mechanicWorld(6);
+    const m = s.company.machines.find((x) => x.type === 'schlepper')!;
+    for (let i = 0; i < 300; i++) {
+      s.business.breakdown(m, s.time, s.homeLonLat, 'test');
+      if (m.repair!.parts === 'hof') break;
+    }
+    expect(m.repair!.parts).toBe('hof');
+    runUntil(s, () => s.time % 1440 > 30 && s.time % 1440 < 300 && !s.driverBusy(mech.id), 1440);
+    m.repair!.since = s.time;
+    const stock = s.company.partsStock!;
+    const cash = s.company.cash;
+    const value = m.repair!.partValue;
+    expect(s.command({ kind: 'repair', machineId: m.id, mode: 'own', mechanicId: mech.id })).toMatch(/lädt das Teil am Hof/);
+    expect(s.company.partsStock).toBeCloseTo(stock - value, 2);
+    expect(s.company.cash).toBe(cash);
+    runUntil(s, () => !m.repair, 1440);
+    expect(m.repair).toBeUndefined();
+  });
+
   it('kein Mechaniker: eigene Reparatur abgelehnt', () => {
     const s = world(5);
     const m = s.company.machines[0];
     s.business.breakdown(m, s.time, s.homeLonLat, 'test');
     expect(s.command({ kind: 'repair', machineId: m.id, mode: 'own', mechanicId: 1 })).toMatch(/kein Mechaniker/);
+  });
+});
+
+describe('Verschleißteillager', () => {
+  it('Grubbern verbraucht Verschleißteile, Nachkauf kommt am nächsten Morgen', () => {
+    const s = world(5);
+    expect(s.company.partsStock).toBe(1000);
+    expect(s.business.useWearParts(300)).toBe(true);
+    expect(s.company.partsStock).toBe(700);
+    const cash = s.company.cash;
+    expect(s.command({ kind: 'buyParts', amount: 2000 })).toMatch(/Lieferung/);
+    expect(s.company.cash).toBe(cash - 2000);
+    expect(s.company.partsStock).toBe(700);
+    s.run(1440 * 2);
+    expect(s.company.partsStock).toBe(2700);
+  });
+
+  it('Verschleißteil-Panne: an Bord oder am Hof; leeres Lager → bestellen, Geräte fallen öfter aus', () => {
+    const s = world(5);
+    const g = { ...s.company.machines[0], id: 99, type: 'grubber' as const, condition: 70, serviceAtH: 99999, hours: 0 };
+    s.company.machines.push(g);
+    const seen = new Set<string>();
+    for (let i = 0; i < 300; i++) {
+      s.business.breakdown(g, s.time, s.homeLonLat, 'test');
+      if (g.repair!.kind === 'verschleiss') seen.add(g.repair!.parts);
+    }
+    expect(seen.has('wagen')).toBe(true);
+    expect(seen.has('hof')).toBe(true);
+    expect(seen.has('bestellt')).toBe(false);
+    // Lager leer
+    s.company.partsStock = 0;
+    let full = 0;
+    for (let i = 0; i < 60 * 3000; i++) if (s.business.rollBreakdown(g)) full++;
+    for (let i = 0; i < 200; i++) {
+      s.business.breakdown(g, s.time, s.homeLonLat, 'test');
+      if (g.repair!.kind === 'verschleiss') { expect(g.repair!.parts).toBe('bestellt'); break; }
+    }
+    s.company.partsStock = 1000;
+    let ok = 0;
+    for (let i = 0; i < 60 * 3000; i++) if (s.business.rollBreakdown(g)) ok++;
+    expect(full).toBeGreaterThan(ok * 1.5);
   });
 });

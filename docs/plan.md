@@ -403,19 +403,29 @@ Schritte:
 - Bei einer Panne steht die Maschine. Der Spieler entscheidet im Reiter Fuhrpark: Händler-Service
   rufen oder eigenen Werkstattwagen mit Mechaniker schicken. Ohne Entscheidung ruft der Fahrer
   nach einer Stunde den Händler.
-- **Ersatzteil:**
-  - 60 % Lagerteil, häufig gebraucht und im Werkstattwagen dabei
-  - 25 % beim Händler vorrätig, muss geholt werden
-  - 15 % muss bestellt werden: vor 10 Uhr bestellt um 14 Uhr da, sonst am nächsten Morgen um
-    8 Uhr, also spätestens am nächsten Tag
+- **Ersatzteil** (präzisiert nach Rückmeldung von Nils):
+  - Art: Verschleißteil (Schlepper 35 %, Geräte 60 %, Wert 60–400 €, Reparatur 0,5–2 h)
+    oder sonstiges Teil (Reparatur 1–3,5 h).
+  - **Verschleißteile** hat der Betrieb im eigenen Lager am Hof (Startbestand 1.000 €). Der
+    Werkstattwagen hat sie zu 65 % an Bord, sonst lädt er sie am Hof (10 min). Ist das Lager
+    leer, muss bestellt werden.
+  - **Sonstige Teile:** 30 % im Lager am Hof, 45 % beim Händler vorrätig (abholen), 25 % muss
+    bestellt werden.
+  - Bestellt: vor 10 Uhr um 14 Uhr beim Händler, sonst am nächsten Morgen um 8 Uhr, also
+    spätestens am nächsten Tag.
+  - Verschleißteile fallen nicht unter die Gewährleistung.
+- **Verschleißteillager:** Grubbern verbraucht etwa 3 € je ha (Schare, Zinken). Nachkauf im
+  Reiter Fuhrpark, Lieferung am nächsten Morgen. Unter 200 € gibt es eine Warnung. Bei leerem
+  Lager fallen Geräte doppelt so oft aus. Eigene Reparaturen mit Teilen aus dem Lager
+  verbrauchen nur Lagerbestand (schon bezahlt).
 - **Händler:** Anfahrt (Hin- und Rückweg bei 50 km/h) und Reparatur 1–3,5 h, frühestens
   wenn das Teil da ist. In der Ernte dauert es 1,5-mal so lange. Volle Kosten, mit Gewährleistung
   kostenlos.
 - **Eigene Werkstatt:** Der Mechaniker fährt den Werkstattwagen, falls nötig zuerst zum
   Händler (Teil abholen, 15 min), dann zur Maschine.
   - Er folgt dem Gespann, falls es weitergefahren ist.
-  - Reparaturzeit 120 % (Stufe 2) bis 90 % (Stufe 5) der Profizeit. Kosten nur die Teile, etwa
-    45 % des Händlerpreises.
+  - Reparaturzeit 120 % (Stufe 2) bis 90 % (Stufe 5) der Profizeit. Kosten nur die Teile: aus
+    dem eigenen Lager der Teilewert, sonst etwa 45 % des Händlerpreises.
   - Ist das Teil bestellt, wartet der Einsatz bis zur Lieferung. Ebenso, wenn Mechaniker oder
     Werkstattwagen gerade beschäftigt sind.
   - Zurückrufen bricht ab, dann ist die Panne wieder offen.

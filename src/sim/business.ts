@@ -188,6 +188,7 @@ export type Command =
   | { kind: 'takeOver'; employeeId: number; asKind: 'fest' | 'saison' }
   | { kind: 'swapDriver'; vehicle: number; driverId: number; chauffeurId?: number }
   | { kind: 'repair'; machineId: number; mode: 'dealer' | 'own'; mechanicId?: number }
+  | { kind: 'buyParts'; amount: number }
   | { kind: 'staffAnswer'; requestId: number; accept: boolean }
   | { kind: 'setWage'; employeeId: number; wage: number }
   | { kind: 'plan'; orderId: number; driverId: number; tractorId: number; implementId: number; notBefore?: number }
@@ -426,6 +427,7 @@ export class Business {
     this.updateApplicants(time);
     this.updateMarket(time);
     this.arriveDeliveries(time);
+    this.partsDaily(time);
     // Auftrag steht wegen Panne: Kunde wartet und wird unzufriedener (MZ-07)
     for (const o of this.orders) {
       if (o.status !== 'läuft') continue;
@@ -737,6 +739,8 @@ export class Business {
     let perHour = 0.002 * (1 + (100 - m.condition) / 25);
     if (m.serviceAtH !== undefined && m.hours > m.serviceAtH) perHour *= 3;
     if (m.defect) perHour *= 3;
+    // ohne Verschleißteile im Lager werden abgenutzte Schare und Zinken nicht getauscht
+    if ((this.company.partsStock ?? 0) <= 0 && m.type !== 'schlepper' && m.type !== 'firmenwagen') perHour *= 2;
     return this.rng.next() < perHour / 60;
   }
 
@@ -747,20 +751,61 @@ export class Business {
    */
   breakdown(m: Machine, time: number, home: [number, number], where: string): void {
     const d = this.dealerKm(m.brand, home);
-    const r = this.rng.next();
-    const parts: Repair['parts'] = r < 0.6 ? 'lager' : r < 0.85 ? 'haendler' : 'bestellt';
-    // bestellte Teile: vormittags bestellt am selben Tag 14 Uhr, sonst am nächsten Morgen 8 Uhr
     const day0 = Math.floor(time / 1440) * 1440;
-    const partsReadyAt = parts !== 'bestellt' ? time : time - day0 < 4 * 60 ? day0 + 8 * 60 : day0 + 1440 + 2 * 60;
-    const workHours = Math.round((1 + this.rng.next() * 2.5) * 10) / 10;
+    const orderedAt = time - day0 < 4 * 60 ? day0 + 8 * 60 : day0 + 1440 + 2 * 60; // vor 10 Uhr: 14 Uhr, sonst morgen 8 Uhr
+    // Geräte verschleißen stärker: dort ist es öfter ein Verschleißteil
+    const tractor = m.type === 'schlepper' || m.type === 'firmenwagen';
+    const kind: Repair['kind'] = this.rng.next() < (tractor ? 0.35 : 0.6) ? 'verschleiss' : 'sonstiges';
+    const partValue = Math.round((kind === 'verschleiss' ? 60 + this.rng.int(340) : 150 + 0.002 * m.newPrice * (0.5 + this.rng.next())) / 10) * 10;
+    const stock = this.company.partsStock ?? 0;
+    let parts: Repair['parts'];
+    if (kind === 'verschleiss') parts = stock >= partValue ? (this.rng.next() < 0.65 ? 'wagen' : 'hof') : 'bestellt';
+    else { const x = this.rng.next(); parts = x < 0.3 ? 'hof' : x < 0.75 ? 'haendler' : 'bestellt'; }
+    const partsReadyAt = parts === 'bestellt' ? orderedAt : time;
+    const workHours = Math.round(((kind === 'verschleiss' ? 0.5 + this.rng.next() * 1.5 : 1 + this.rng.next() * 2.5)) * 10) / 10;
     const warranty = (m.warrantyUntil ?? 0) > time;
-    const cost = warranty ? 0 : Math.round((200 + 0.004 * m.newPrice * (0.5 + this.rng.next() * 1.5)) * (1 + (100 - m.condition) / 100) / 10) * 10;
-    m.repair = { state: 'wartet', since: time, parts, partsReadyAt, dealerId: d.id, dealer: d.name, dealerKm: d.km, workHours, cost };
+    // Verschleißteile fallen nicht unter die Gewährleistung
+    const cost = warranty && kind === 'sonstiges' ? 0 : Math.round(((kind === 'verschleiss' ? 120 + partValue * 1.3 : 200 + 0.004 * m.newPrice * (0.5 + this.rng.next() * 1.5)) * (1 + (100 - m.condition) / 100)) / 10) * 10;
+    m.repair = { state: 'wartet', since: time, kind, parts, partValue, partsReadyAt, dealerId: d.id, dealer: d.name, dealerKm: d.km, workHours, cost };
     m.downUntil = time + 365 * 1440; // bis zur Reparatur
     m.downReason = 'Panne – Reparatur offen';
     m.breakdowns = (m.breakdowns ?? 0) + 1;
-    const teil = parts === 'lager' ? 'Lagerteil' : parts === 'haendler' ? `Teil liegt bei ${d.name}` : `Teil wird bestellt, da ${fmtDay(partsReadyAt)} ${fmtTime(partsReadyAt)}`;
-    this.emit(time, 'warnung', `Panne: ${m.brand} ${m.model} ${where}. ${teil}. Händler-Service (${warranty ? 'Gewährleistung' : fmtEur(cost)}) oder eigene Werkstatt? Ohne Entscheidung ruft der Fahrer in einer Stunde den Händler.`);
+    this.emit(time, 'warnung', `Panne: ${m.brand} ${m.model} ${where}. ${partsText(m.repair)}. Händler-Service (${cost ? fmtEur(cost) : 'Gewährleistung'}) oder eigene Werkstatt? Ohne Entscheidung ruft der Fahrer in einer Stunde den Händler.`);
+  }
+
+  /** Verschleißteile nachkaufen: Lieferung am nächsten Morgen ins Lager am Hof */
+  buyParts(amount: number, time: number): string {
+    if (!(amount >= 100)) return 'Mindestens 100 €';
+    if (this.company.cash < amount) return 'Nicht genug Geld';
+    const at = (Math.floor(time / 1440) + 1) * 1440 + 2 * 60;
+    this.company.cash = Math.round((this.company.cash - amount) * 100) / 100;
+    (this.company.partsIncoming ??= []).push({ amount, at });
+    this.ledger.push({ time, text: 'Verschleißteile fürs Lager', amount: -amount, category: 'Werkstatt' });
+    this.version++;
+    return `bestellt, Lieferung ${fmtDay(at)} ${fmtTime(at)}`;
+  }
+
+  /** Verbrauch von Verschleißteilen bei der Arbeit (z. B. Grubberschare je ha); false = Lager leer */
+  useWearParts(amount: number): boolean {
+    const st = this.company.partsStock ?? 0;
+    this.company.partsStock = Math.max(0, Math.round((st - amount) * 100) / 100);
+    return st >= amount;
+  }
+
+  private lowStockWarned = false;
+
+  private partsDaily(time: number) {
+    const inc = this.company.partsIncoming ?? [];
+    for (let i = inc.length - 1; i >= 0; i--) {
+      if (inc[i].at > time + 4 * 60) continue; // kommt im Laufe des Vormittags
+      this.company.partsStock = Math.round(((this.company.partsStock ?? 0) + inc[i].amount) * 100) / 100;
+      inc.splice(i, 1);
+      this.lowStockWarned = false;
+    }
+    if ((this.company.partsStock ?? 0) < 200 && !this.lowStockWarned) {
+      this.lowStockWarned = true;
+      this.emit(time, 'warnung', `Verschleißteillager fast leer (${fmtEur(this.company.partsStock ?? 0)}). Geräte verschleißen schneller und fallen öfter aus – im Reiter Fuhrpark nachkaufen.`);
+    }
   }
 
   /** Händler-Service: Anfahrt, ggf. Warten aufs bestellte Teil, Reparatur */
@@ -791,8 +836,14 @@ export class Business {
     const r = m.repair!;
     r.state = 'eigen';
     m.downReason = 'Panne – eigene Werkstatt ist unterwegs';
-    const parts = Math.round((r.cost * 0.45) / 10) * 10;
-    if (parts) this.payWorkshop(time, parts, `Ersatzteile ${m.brand} ${m.model}`, m);
+    if (r.parts === 'wagen' || r.parts === 'hof') {
+      // Teil aus dem eigenen Lager (schon bezahlt)
+      this.company.partsStock = Math.max(0, Math.round(((this.company.partsStock ?? 0) - r.partValue) * 100) / 100);
+      m.costTotal = Math.round(((m.costTotal ?? 0) + r.partValue) * 100) / 100;
+    } else {
+      const parts = Math.round((r.cost * 0.45) / 10) * 10;
+      if (parts) this.payWorkshop(time, parts, `Ersatzteile ${m.brand} ${m.model}`, m);
+    }
     this.version++;
   }
 
@@ -1319,6 +1370,17 @@ export function fmtEur(v: number): string {
 export function fmtHa(v: number): string {
   return v.toLocaleString('de-DE', { maximumFractionDigits: 1 }) + ' ha';
 }
+/** Ersatzteillage als Text (Meldung, Oberfläche) */
+export function partsText(r: Repair): string {
+  const was = r.kind === 'verschleiss' ? 'Verschleißteil' : 'Ersatzteil';
+  switch (r.parts) {
+    case 'wagen': return `${was} hat der Werkstattwagen an Bord`;
+    case 'hof': return `${was} liegt im Lager am Hof`;
+    case 'haendler': return `${was} liegt bei ${r.dealer} – muss geholt werden`;
+    default: return `${was} wird bestellt${r.kind === 'verschleiss' ? ' (eigenes Lager leer)' : ''}, ab ${fmtDay(r.partsReadyAt)} ${fmtTime(r.partsReadyAt)} bei ${r.dealer}`;
+  }
+}
+
 export function fmtTime(minutes: number): string {
   const d = gameDate(minutes);
   return `${String(d.hour).padStart(2, '0')}:${String(d.minute).padStart(2, '0')}`;

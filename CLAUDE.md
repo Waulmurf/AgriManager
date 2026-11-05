@@ -73,7 +73,8 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
   `business.ts` (`staffDaily`), Ruhezeit und Abwesenheit in `engine.ts` (`driverBlocked`).
 - Zeitarbeit (Leiharbeiter buchen/übernehmen) und Fahrerwechsel (`swapDriver`) ergänzt.
 - Firmenwagen-Arten (Plätze), Berufe/Skills mit Stufe 0 (`ROLES`, `MACHINE_SKILL`), Pannen mit
-  Entscheidung Händler/eigene Werkstatt und Ersatzteillage (`Machine.repair`, `checkRepairs`).
+  Entscheidung Händler/eigene Werkstatt und Ersatzteillage (`Machine.repair`, `checkRepairs`),
+  Verschleißteillager am Hof (`Company.partsStock`, Werkstattwagen an Bord oder am Hof laden).
 - Phase 3 damit komplett → nächste Phase 4 (Wirtschaft: Finanzen, Kredit, Wetter, Jahreslauf).
 
 ## CI (GitHub Actions)

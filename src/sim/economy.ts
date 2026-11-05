@@ -74,7 +74,15 @@ export interface Machine {
 export interface Repair {
   state: 'wartet' | 'haendler' | 'eigen';
   since: number;
-  parts: 'lager' | 'haendler' | 'bestellt';
+  /** Verschleißteil (aus dem eigenen Lager) oder sonstiges Teil */
+  kind: 'verschleiss' | 'sonstiges';
+  /**
+   * Wo das Teil für die eigene Werkstatt liegt: an Bord des Werkstattwagens, im Lager am Hof,
+   * beim Händler (abholen) oder bestellt (spätestens am nächsten Tag beim Händler)
+   */
+  parts: 'wagen' | 'hof' | 'haendler' | 'bestellt';
+  /** Wert des Teils (bei eigenem Lager vom Lagerbestand abgezogen) */
+  partValue: number;
   partsReadyAt: number;
   dealerId: number;
   dealer: string;
@@ -345,6 +353,10 @@ export interface Company {
   machines: Machine[];
   /** Mitarbeiter; zu Beginn nur der Chef selbst (Nr. 1) */
   drivers: Employee[];
+  /** Verschleißteillager am Hof (Warenwert €): Schare, Zinken, Filter, Riemen, Schläuche … */
+  partsStock?: number;
+  /** nachgekaufte Verschleißteile, Lieferung am Morgen */
+  partsIncoming?: { amount: number; at: number }[];
 }
 
 export function machineValue(m: Machine, year = START_YEAR): number {
@@ -369,6 +381,8 @@ export function startCompany(homeNode: number): Company {
       { id: 2, type: 'firmenwagen', brand: '', model: 'Kombi', year: 2018, hours: 2800, condition: 75, newPrice: 38_000, serviceAtH: 3000, seats: 5, carKind: 'kombi' },
     ],
     drivers: [chefEmployee()],
+    partsStock: 1_000,
+    partsIncoming: [],
   };
 }
 
@@ -386,6 +400,8 @@ export function normalizeDrivers(c: Company): void {
   if (!c.drivers.length) c.drivers.push(chefEmployee());
   // neue Tätigkeiten aus späteren Versionen ergänzen (nicht qualifiziert)
   for (const d of c.drivers) for (const k of SKILLS) if (d.skills[k.key] === undefined) d.skills[k.key] = 0;
+  if (c.partsStock === undefined) c.partsStock = 1_000;
+  c.partsIncoming ??= [];
   // Firmenwagen älterer Spielstände sind Kombis mit 5 Plätzen
   for (const m of c.machines) if (m.type === 'firmenwagen' && m.seats === undefined) { m.seats = 5; m.carKind = 'kombi'; }
 }
