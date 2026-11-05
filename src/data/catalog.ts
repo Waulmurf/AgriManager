@@ -13,6 +13,8 @@ import type { MachineType } from '../sim/economy';
 export interface CatalogModel {
   key: string;
   tankM3?: number;
+  payloadT?: number;
+  weightT?: number;
   seats?: number;
   carKind?: 'kombi' | 'kleinbus' | 'werkstatt';
   type: MachineType;
@@ -83,6 +85,19 @@ export const CATALOG: CatalogModel[] = [
   // Zubringerfässer ohne Verteiler (Annahme, Preise in der Größenordnung großer Tandem-/Tridemfässer)
   { key: 'kotte-zubringer24', type: 'zubringer', brand: 'Kotte', model: 'Zubringer VTR 24.000', tankM3: 24, powerNeed: 220, newPrice: 78_000, deliveryWeeks: 10 },
   { key: 'joskin-quadra20', type: 'zubringer', brand: 'Joskin', model: 'Quadra 20000 TS (Zubringer)', tankM3: 20, powerNeed: 200, newPrice: 66_000, deliveryWeeks: 8 },
+  // Feldhäcksler mit Maisgebiss (Vorsatz passend zur Marke, docs/maschinen.md). Preisanker Krone BiG X 780
+  // Bj. 2023 398.000 €; Neupreise Annahme. Flächenleistung Silomais (Annahme): 8 Reihen 2,4 ha/h, 10–12 Reihen 3,0–3,3 ha/h
+  // (≈ 100–140 t/h bei 42 t/ha; topagrar: 90–120 t/h mit zwei festen Abfahrern).
+  { key: 'claas-jaguar940', type: 'feldhaecksler', brand: 'Claas', model: 'Jaguar 940 + Orbis 600', power: 530, width: 6, haPerHour: 2.4, workKmh: 7, dieselLHa: 30, newPrice: 480_000, deliveryWeeks: 16 },
+  { key: 'krone-bigx780', type: 'feldhaecksler', brand: 'Krone', model: 'BiG X 780 + EasyCollect 750', power: 770, width: 7.5, haPerHour: 3.0, workKmh: 7, dieselLHa: 32, newPrice: 560_000, deliveryWeeks: 16 },
+  { key: 'jd-8500i', type: 'feldhaecksler', brand: 'John Deere', model: '8500i + Kemper 390 Plus', power: 770, width: 9, haPerHour: 3.3, workKmh: 7, dieselLHa: 32, newPrice: 620_000, deliveryWeeks: 16 },
+  // Häckselwagen (Abfahrer, Annahme): Silomais etwa 300 kg/m³
+  { key: 'krampe-bigbody650', type: 'haeckselwagen', brand: 'Krampe', model: 'Big Body 650 S (36 m³)', payloadT: 11, powerNeed: 150, newPrice: 62_000, deliveryWeeks: 8 },
+  { key: 'fliegl-asw391', type: 'haeckselwagen', brand: 'Fliegl', model: 'Gigant ASW 391 (45 m³)', payloadT: 14, powerNeed: 200, newPrice: 95_000, deliveryWeeks: 10 },
+  // Radlader zum Verteilen und Walzen am Silo (Annahme): Walzleistung ≈ Betriebsgewicht × 4 t Frischmasse je Stunde
+  { key: 'jcb-437', type: 'radlader', brand: 'JCB', model: '437 HT Agri', weightT: 13, power: 200, newPrice: 150_000, deliveryWeeks: 8 },
+  { key: 'liebherr-l526', type: 'radlader', brand: 'Liebherr', model: 'L 526', weightT: 12, power: 160, newPrice: 170_000, deliveryWeeks: 10 },
+  { key: 'volvo-l90h', type: 'radlader', brand: 'Volvo', model: 'L90H', weightT: 15, power: 240, newPrice: 210_000, deliveryWeeks: 10 },
   // Firmenwagen (Annahme, Nettopreise gut ausgestatteter Nutzfahrzeuge): Kombi 5 Plätze,
   // Kleinbus 8 Plätze (Mannschaftswagen), Werkstattwagen 3 Plätze mit Werkstatteinbau
   { key: 'car-kombi', type: 'firmenwagen', brand: 'Firmenwagen', model: 'Kombi', newPrice: 38_000, seats: 5, carKind: 'kombi', deliveryWeeks: 3 },
@@ -106,9 +121,10 @@ export const DEALERS: Dealer[] = [
   { id: 2, name: 'Kartoffel- und Rübentechnik Uelzen', town: 'Uelzen', lonLat: [10.5530, 52.9790], tractorBrands: [], implementBrands: ['Grimme'] },
   { id: 3, name: 'Agrartechnik Lüneburg', town: 'Lüneburg', lonLat: [10.4140, 53.2490], tractorBrands: ['John Deere'], implementBrands: ['Kverneland', 'Krone'] },
   { id: 4, name: 'Landmaschinen Suhlendorf', town: 'Suhlendorf', lonLat: [10.7660, 52.9370], tractorBrands: ['Claas'], implementBrands: ['Horsch', 'Kotte', 'Zunhammer'] },
-  { id: 5, name: 'Landtechnik Altmark', town: 'Salzwedel', lonLat: [11.1500, 52.8500], tractorBrands: ['Case IH', 'New Holland'], implementBrands: ['Kverneland', 'Joskin'] },
+  { id: 5, name: 'Landtechnik Altmark', town: 'Salzwedel', lonLat: [11.1500, 52.8500], tractorBrands: ['Case IH', 'New Holland'], implementBrands: ['Kverneland', 'Joskin', 'Krampe', 'Fliegl'] },
   { id: 6, name: 'Agrarservice Wittingen', town: 'Wittingen', lonLat: [10.7300, 52.7270], tractorBrands: ['Deutz-Fahr'], implementBrands: ['Rabe', 'Köckerling'] },
   { id: 7, name: 'Nutzfahrzeuge Uelzen', town: 'Uelzen', lonLat: [10.5450, 52.9560], tractorBrands: ['Firmenwagen'], implementBrands: [] },
+  { id: 8, name: 'Baumaschinen Lüneburg', town: 'Lüneburg', lonLat: [10.4350, 53.2380], tractorBrands: ['JCB', 'Liebherr', 'Volvo'], implementBrands: [] },
 ];
 
 /** Händler, die eine Marke führen (für Werkstatt und Neukauf) */

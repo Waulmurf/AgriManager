@@ -124,7 +124,7 @@ function RequestItem({ r, game, time, estimate }: { r: Request; game: GameContro
         <small>{r.channel === 'besuch' ? 'beim Besuch' : r.channel === 'anruf' ? 'Anruf' : 'Nachricht'}</small>
       </div>
       <div>
-        {SERVICE_NAMES[r.service]}: {r.fields.length} {r.fields.length === 1 ? 'Feld' : 'Felder'}, {ha(r.areaHa)} · bis {fmtDay(r.latest)}
+        {SERVICE_NAMES[r.service]}{r.chain ? ` (${r.chain === 'komplett' ? 'Komplettkette: Häcksler, Abfahrer, Walzen' : 'nur Häcksler'})` : ''}: {r.fields.length} {r.fields.length === 1 ? 'Feld' : 'Felder'}, {ha(r.areaHa)} · bis {fmtDay(r.latest)}
       </div>
       <div>
         Angebot Kunde: <strong>{r.gabe ? `${(r.priceHa / r.gabe).toLocaleString('de-DE', { maximumFractionDigits: 2 })} €/m³` : `${r.priceHa.toLocaleString('de-DE')} €/ha`}</strong> = {eur(r.priceHa * r.areaHa)}
@@ -148,6 +148,85 @@ function RequestItem({ r, game, time, estimate }: { r: Request; game: GameContro
       )}
       {fb.msg && <small className="feedback">{fb.msg}</small>}
     </li>
+  );
+}
+
+/** Häckselkette einteilen: Häcksler mit Fahrer, Abfahrer (Fahrer, Schlepper, Wagen), Radlader am Silo */
+function ChopStart({ o, game, status, show }: { o: Order; game: GameController | null; status: GameStatus; show: (m: string) => void }) {
+  const c = status.company!;
+  const harvesters = c.machines.filter((m) => m.type === 'feldhaecksler');
+  const tractors = c.machines.filter((m) => m.type === 'schlepper');
+  const wagons = c.machines.filter((m) => m.type === 'haeckselwagen');
+  const loaders = c.machines.filter((m) => m.type === 'radlader');
+  const drivers = c.drivers;
+  const name = (d: Employee) => (d.isPlayer ? 'Chef' : d.name);
+  const [h, setH] = useState(harvesters[0]?.id ?? 0);
+  const [hd, setHd] = useState(drivers.find((d) => (d.skills.haecksler ?? 0) >= 2)?.id ?? 1);
+  const [haulers, setHaulers] = useState<{ driverId: number; tractorId: number; implementId: number }[]>([]);
+  const [roller, setRoller] = useState<{ driverId: number; machineId: number } | null>(null);
+  const addHauler = () => {
+    const usedD = new Set([hd, ...haulers.map((x) => x.driverId)]);
+    const usedM = new Set(haulers.flatMap((x) => [x.tractorId, x.implementId]));
+    const d = drivers.find((x) => !usedD.has(x.id) && (x.skills.boden ?? 0) >= 1);
+    const t = tractors.find((x) => !usedM.has(x.id));
+    const w = wagons.find((x) => !usedM.has(x.id));
+    if (!d || !t || !w) { show('Für einen weiteren Abfahrer fehlt ein freier Fahrer, Schlepper oder Häckselwagen'); return; }
+    setHaulers([...haulers, { driverId: d.id, tractorId: t.id, implementId: w.id }]);
+  };
+  const start = async () => {
+    show(await game!.command({ kind: 'startJob', orderId: o.id, tractorId: h, implementId: h, driverId: hd, haulers, roller: roller ?? undefined }));
+  };
+  if (!harvesters.length) return <small className="warn">Kein Feldhäcksler im Fuhrpark – im Markt kaufen oder leasen</small>;
+  return (
+    <div className="chop-start">
+      <div className="card-actions">
+        <select value={h} onChange={(e) => setH(Number(e.target.value))} aria-label="Feldhäcksler">
+          {harvesters.map((m) => <option key={m.id} value={m.id}>{machineName(m)}</option>)}
+        </select>
+        <select value={hd} onChange={(e) => setHd(Number(e.target.value))} aria-label="Häckslerfahrer">
+          {drivers.map((d) => <option key={d.id} value={d.id}>{name(d)} · Häcksler {d.skills.haecksler ?? 0}</option>)}
+        </select>
+      </div>
+      {haulers.map((x, i) => (
+        <div className="card-actions" key={i}>
+          <small>Abfahrer {i + 1}:</small>
+          <select value={x.driverId} onChange={(e) => setHaulers(haulers.map((y, j) => (j === i ? { ...y, driverId: Number(e.target.value) } : y)))} aria-label="Fahrer Abfahrer">
+            {drivers.map((d) => <option key={d.id} value={d.id}>{name(d)}</option>)}
+          </select>
+          <select value={x.tractorId} onChange={(e) => setHaulers(haulers.map((y, j) => (j === i ? { ...y, tractorId: Number(e.target.value) } : y)))} aria-label="Schlepper Abfahrer">
+            {tractors.map((t) => <option key={t.id} value={t.id}>{machineName(t)} ({t.power} PS)</option>)}
+          </select>
+          <select value={x.implementId} onChange={(e) => setHaulers(haulers.map((y, j) => (j === i ? { ...y, implementId: Number(e.target.value) } : y)))} aria-label="Häckselwagen">
+            {wagons.map((w) => <option key={w.id} value={w.id}>{machineName(w)} ({w.payloadT} t)</option>)}
+          </select>
+          <button onClick={() => setHaulers(haulers.filter((_, j) => j !== i))}>✕</button>
+        </div>
+      ))}
+      <div className="card-actions">
+        <button onClick={addHauler} disabled={!wagons.length}>+ Abfahrer</button>
+        {loaders.length > 0 && (
+          roller ? (
+            <>
+              <select value={roller.driverId} onChange={(e) => setRoller({ ...roller, driverId: Number(e.target.value) })} aria-label="Radladerfahrer">
+                {drivers.map((d) => <option key={d.id} value={d.id}>{name(d)} · Radlader {d.skills.radlader ?? 0}</option>)}
+              </select>
+              <select value={roller.machineId} onChange={(e) => setRoller({ ...roller, machineId: Number(e.target.value) })} aria-label="Radlader">
+                {loaders.map((m) => <option key={m.id} value={m.id}>{machineName(m)} ({m.weightT} t)</option>)}
+              </select>
+              <button onClick={() => setRoller(null)}>✕</button>
+            </>
+          ) : (
+            <button onClick={() => setRoller({ driverId: drivers.find((d) => (d.skills.radlader ?? 0) >= 1 && d.id !== hd)?.id ?? 1, machineId: loaders[0].id })}>+ Radlader am Silo</button>
+          )
+        )}
+        <button onClick={start} data-testid="start-chop">Kette starten</button>
+      </div>
+      <small className="hint">
+        {o.chain === 'komplett'
+          ? 'Komplettkette: Abfahrer vom Lohnbetrieb (mindestens einer, besser zwei bis drei). Ohne eigenen Radlader walzt eine Fremdwalze (110 €/h). Der Häcksler arbeitet nur mit Abfahrer nebenher.'
+          : 'Nur Häcksler: Der Kunde stellt Abfahrer und Walze. Eigene Abfahrer können zusätzlich mitfahren.'}
+      </small>
+    </div>
   );
 }
 
@@ -186,8 +265,9 @@ function OrderItem({ o, game, status }: { o: Order; game: GameController | null;
         <small className={`badge ${o.status === 'fertig' ? 'done' : o.status === 'läuft' ? 'run' : ''}`}>{o.status}</small>
       </div>
       <div>
-        {SERVICE_NAMES[o.service]} {ha(o.areaHa)} zu {o.gabe ? `${(o.priceHa / o.gabe).toLocaleString('de-DE', { maximumFractionDigits: 2 })} €/m³ (${Math.round(o.areaHa * o.gabe).toLocaleString('de-DE')} m³)` : `${o.priceHa.toLocaleString('de-DE')} €/ha`} = {eur(o.priceHa * o.areaHa)}
+        {SERVICE_NAMES[o.service]}{o.chain ? ` (${o.chain === 'komplett' ? 'Komplettkette' : 'nur Häcksler'})` : ''} {ha(o.areaHa)} zu {o.gabe ? `${(o.priceHa / o.gabe).toLocaleString('de-DE', { maximumFractionDigits: 2 })} €/m³ (${Math.round(o.areaHa * o.gabe).toLocaleString('de-DE')} m³)` : `${o.priceHa.toLocaleString('de-DE')} €/ha`} = {eur(o.priceHa * o.areaHa)}
         {o.gabe && o.status === 'läuft' ? <small className="hint"> · ausgebracht {Math.round(o.doneM3 ?? 0).toLocaleString('de-DE')} m³</small> : null}
+        {o.chain && o.status !== 'offen' ? <small className="hint"> · am Silo {Math.round(o.doneT ?? 0).toLocaleString('de-DE')} t</small> : null}
       </div>
       <small className={late ? 'warn' : 'hint'}>
         Zeitfenster bis {fmtDay(o.latest)}
@@ -197,7 +277,8 @@ function OrderItem({ o, game, status }: { o: Order; game: GameController | null;
         {o.dieselL > 0 ? ` · Diesel ${o.dieselL.toLocaleString('de-DE')} l (${eur(o.dieselCost)})` : ''}
       </small>
       {o.status !== 'fertig' && <EstimateLine e={status.business?.estimates[o.id]} latest={o.latest} />}
-      {o.status === 'offen' && (
+      {o.status === 'offen' && o.service === 'haeckseln' && <ChopStart o={o} game={game} status={status} show={fb.show} />}
+      {o.status === 'offen' && o.service !== 'haeckseln' && (
         <div className="card-actions">
           <select value={tractor} onChange={(e) => setTractor(Number(e.target.value))} aria-label="Schlepper">
             {tractors.map((m) => <option key={m.id} value={m.id}>{machineName(m)}</option>)}
@@ -477,11 +558,14 @@ export function StaffTab({ status, game }: { status: GameStatus; game: GameContr
   );
 }
 
-const TYPE_NAMES: Record<string, string> = { schlepper: 'Schlepper', grubber: 'Grubber', kurzscheibenegge: 'Kurzscheibenegge', firmenwagen: 'Firmenwagen', guellefass: 'Güllefass', zubringer: 'Zubringerfass' };
+const TYPE_NAMES: Record<string, string> = { schlepper: 'Schlepper', grubber: 'Grubber', kurzscheibenegge: 'Kurzscheibenegge', firmenwagen: 'Firmenwagen', guellefass: 'Güllefass', zubringer: 'Zubringerfass', feldhaecksler: 'Feldhäcksler', haeckselwagen: 'Häckselwagen', radlader: 'Radlader' };
 
-function machineSpecs(m: Pick<Machine, 'type' | 'power' | 'width' | 'powerNeed' | 'haPerHour' | 'seats' | 'tankM3'>): string {
+function machineSpecs(m: Pick<Machine, 'type' | 'power' | 'width' | 'powerNeed' | 'haPerHour' | 'seats' | 'tankM3' | 'payloadT' | 'weightT'>): string {
   if (m.type === 'schlepper') return `${m.power} PS`;
   if (m.type === 'zubringer') return `${m.tankM3} m³ · ab ${m.powerNeed} PS`;
+  if (m.type === 'feldhaecksler') return `${m.power} PS · ${m.haPerHour?.toLocaleString('de-DE')} ha/h Silomais`;
+  if (m.type === 'haeckselwagen') return `${m.payloadT} t · ab ${m.powerNeed} PS`;
+  if (m.type === 'radlader') return `${m.weightT} t Betriebsgewicht · walzt etwa ${(m.weightT ?? 0) * 4} t/h`;
   if (m.type === 'guellefass') return `${m.tankM3} m³ · ${m.width} m · ab ${m.powerNeed} PS`;
   if (m.type === 'firmenwagen') return `${m.seats ?? 5} Plätze`;
   if (m.width) return `${m.width.toLocaleString('de-DE')} m · ab ${m.powerNeed} PS · ${m.haPerHour?.toLocaleString('de-DE')} ha/h`;
@@ -514,6 +598,9 @@ export function MarketTab({ status, game }: { status: GameStatus; game: GameCont
           <option value="kurzscheibenegge">Kurzscheibenegge</option>
           <option value="guellefass">Güllefass</option>
           <option value="zubringer">Zubringerfass</option>
+          <option value="feldhaecksler">Feldhäcksler</option>
+          <option value="haeckselwagen">Häckselwagen</option>
+          <option value="radlader">Radlader</option>
           <option value="firmenwagen">Firmenwagen</option>
         </select>
       </div>

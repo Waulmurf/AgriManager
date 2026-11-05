@@ -18,6 +18,11 @@ export const BRANDS: BrandColors[] = [
   { name: 'Massey Ferguson', main: '#C71121', accent: '#606163' },
   { name: 'Deutz-Fahr', main: '#7AB51D', accent: '#2B2B2B' },
   { name: 'Valtra', main: '#D52B1E', accent: '#F2F2F2' },
+  // Häcksler und Radlader (Annahme, Lacknäherung)
+  { name: 'Krone', main: '#2E7D32', accent: '#C62828' },
+  { name: 'JCB', main: '#F2B705', accent: '#1A1A1A' },
+  { name: 'Liebherr', main: '#F5C400', accent: '#3A3A3A' },
+  { name: 'Volvo', main: '#F0B323', accent: '#2B2B2B' },
 ];
 
 /** Firmenwagen ohne Marke (Kombi) */

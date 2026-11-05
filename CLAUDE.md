@@ -85,6 +85,8 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
   Saisonkalender `seasonServices`, Wintercheck (`Machine.winterCheckAt`).
 - Schritt 4a Gülle-Kette fertig: Dienstleistung `guelle` (je m³, Gabe), Güllefass/Zubringer im Katalog,
   Umlauf Lager↔Feld (`slurry` im Job, `startSlurrySlice`, `sliceFieldRoute`), Zubringer-Task `feeder`.
+- Schritt 4b Häckselkette fertig: Dienstleistung `haeckseln` (nur Häcksler/Komplettkette), Häcksler,
+  Häckselwagen, Radlader im Katalog; `chop` im Job (`chopTick`), Tasks `haul` und `silo`, Oberfläche `ChopStart`.
 
 ## CI (GitHub Actions)
 

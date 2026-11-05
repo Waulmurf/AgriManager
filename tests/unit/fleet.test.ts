@@ -36,7 +36,9 @@ describe('Katalog und Händler', () => {
     for (const m of CATALOG) {
       expect(DEALERS.some((d) => d.tractorBrands.includes(m.brand) || d.implementBrands.includes(m.brand))).toBe(true);
       expect(m.newPrice).toBeGreaterThan(0);
-      if (m.type === 'schlepper') expect(m.power).toBeGreaterThan(90);
+      if (m.type === 'schlepper' || m.type === 'feldhaecksler') expect(m.power).toBeGreaterThan(90);
+      else if (m.type === 'radlader') expect(m.weightT).toBeGreaterThan(8);
+      else if (m.type === 'haeckselwagen') expect(m.payloadT).toBeGreaterThan(8);
       else if (m.type === 'firmenwagen') expect(m.seats).toBeGreaterThanOrEqual(3);
       else if (m.type === 'zubringer') expect(m.tankM3).toBeGreaterThan(10);
       else { expect(m.width).toBeGreaterThan(0); expect(m.powerNeed).toBeGreaterThan(0); expect(m.haPerHour).toBeGreaterThan(0); }

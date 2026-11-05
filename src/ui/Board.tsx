@@ -75,6 +75,13 @@ export function PlanningBoard({ status, game, onClose }: { status: GameStatus; g
     const notBefore = dayStart <= b.time ? undefined : dayStart;
     if (data.kind === 'order') {
       const o = b.orders.find((x) => x.id === data.orderId);
+      if (o?.service === 'haeckseln') {
+        if (o.chain === 'komplett') { show('Komplettkette (mehrere Fahrer) bitte im Reiter Aufträge einteilen'); return; }
+        const hv = c.machines.find((m) => m.type === 'feldhaecksler');
+        if (!hv) { show('Kein Feldhäcksler im Fuhrpark'); return; }
+        void send({ kind: 'plan', orderId: data.orderId, driverId, tractorId: hv.id, implementId: hv.id, notBefore });
+        return;
+      }
       const combo = bestCombo(c.machines, o?.service);
       if (!combo) { show(`Kein passendes Gespann für ${o ? SERVICE_NAMES[o.service] : 'den Auftrag'} im Fuhrpark`); return; }
       void send({ kind: 'plan', orderId: data.orderId, driverId, ...combo, notBefore });

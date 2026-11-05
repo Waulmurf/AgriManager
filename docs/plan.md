@@ -586,3 +586,38 @@ Schritte:
 - **Später:** Lkw-Zubringer mit Tankauflieger, Feldrandcontainer, Gärrest aus Biogasanlagen,
   Häckselkette (Häcksler + Abfahrer + Silo mit Radlader/Walze), Kleinbus-Mannschaftsfahrten.
 
+### Schritt 4b: Häckselkette (Annahmen)
+
+- **Dienstleistung „Maishäckseln“** (Silomais) vom 10.9. bis 20.10., am stärksten vom 20.9. bis
+  10.10. Kurze Termine (3–7 Tage), weil der Mais reif ist.
+  - Zwei Arten: **nur Häcksler** (Kunde stellt Abfahrer und Walze, etwa 230 €/ha) oder
+    **Komplettkette** (Häcksler, Abfahrer und Walzen, etwa 430 €/ha). Betriebe mit viel eigener
+    Technik geben eher nur den Häcksler in Auftrag.
+  - Kostenanker: Häcksler 241 €/h, Transport 87 €/h, Walzschlepper 110 €/h (Bayerisches
+    Wochenblatt, siehe `docs/ablaeufe.md`).
+  - Ertrag 42 t Frischmasse je ha (Annahme Niedersachsen 40–45 t).
+- **Maschinen:**
+  - Feldhäcksler mit passendem Maisgebiss: Claas Jaguar 940 (2,4 ha/h), Krone BiG X 780
+    (3,0 ha/h), John Deere 8500i (3,3 ha/h). Preisanker Krone BiG X 780 Bj. 2023 398.000 €.
+    Fahrer: Häcksler ab Stufe 2.
+  - Häckselwagen mit 11 bzw. 14 t Nutzlast (36 bzw. 45 m³).
+  - Radlader JCB, Liebherr, Volvo mit 12–15 t Betriebsgewicht. Walzleistung = Betriebsgewicht ×
+    4 t/h (Faustregel Walzgewicht = Anlieferung ÷ 4).
+  - Neuer fiktiver Händler „Baumaschinen Lüneburg“. Krampe und Fliegl gibt es in Salzwedel.
+- **Ablauf:**
+  - Der Häcksler fährt die Feldbahnen nur, solange ein Abfahrer nebenher fährt; sonst steht er.
+  - Der Abfahrer fährt sichtbar mit und wird mit Flächenleistung × Ertrag gefüllt.
+  - Ist er voll, fährt er zum Silo an der Hofstelle des Kunden, der nächste wartende Wagen
+    übernimmt.
+  - Am Silo wird abgekippt (5 min), sobald der Rückstau unter 20 t liegt, sonst wartet der
+    Wagen. Radlader bzw. Walze bauen den Rückstau mit ihrer Walzleistung ab.
+  - Nur Häcksler: 3 Wagen des Kunden à 12 t mit Umlaufzeit aus der Entfernung, nicht als
+    Fahrzeuge auf der Karte, Annahme am Silo 120 t/h. Eigene Abfahrer können zusätzlich mitfahren.
+  - Komplettkette: mindestens ein eigener Abfahrer. Ohne eigenen Radlader kommt eine Fremdwalze
+    (100 t/h, 110 €/h, gebucht unter Sonstiges und in der Auftragsauswertung).
+- **Einteilung** im Reiter Aufträge: Häcksler und Fahrer, beliebig viele Abfahrer (Fahrer,
+  Schlepper, Wagen), optional Radlader mit Fahrer. Im Planungsboard lässt sich „nur Häcksler“
+  einplanen.
+- **Später:** Mannschaftsfahrten mit dem Kleinbus, Grasernte (Pickup), Walzschlepper als
+  Alternative zum Radlader, Silage-Qualität nach Verdichtung.
+

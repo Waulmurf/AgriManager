@@ -69,19 +69,29 @@ export const TRIAL_MAX_HA = 10;
 export const REPAIR_TRACTOR_EUR_H = 8;
 export const WEAR_GRUBBER_EUR_HA = 3;
 
-export type Service = 'grubbern' | 'stoppel' | 'guelle';
-export const SERVICE_NAMES: Record<Service, string> = { grubbern: 'Grubbern', stoppel: 'Stoppelbearbeitung', guelle: 'Gülle ausbringen' };
+export type Service = 'grubbern' | 'stoppel' | 'guelle' | 'haeckseln';
+export const SERVICE_NAMES: Record<Service, string> = { grubbern: 'Grubbern', stoppel: 'Stoppelbearbeitung', guelle: 'Gülle ausbringen', haeckseln: 'Maishäckseln' };
 /** Gerät je Dienstleistung und Tätigkeitswort für die Anzeige */
-export const SERVICE_IMPLEMENT: Record<Service, MachineType> = { grubbern: 'grubber', stoppel: 'kurzscheibenegge', guelle: 'guellefass' };
-export const SERVICE_VERB: Record<Service, string> = { grubbern: 'grubbert', stoppel: 'bearbeitet Stoppeln', guelle: 'bringt Gülle aus' };
+export const SERVICE_IMPLEMENT: Record<Service, MachineType> = { grubbern: 'grubber', stoppel: 'kurzscheibenegge', guelle: 'guellefass', haeckseln: 'feldhaecksler' };
+export const SERVICE_VERB: Record<Service, string> = { grubbern: 'grubbert', stoppel: 'bearbeitet Stoppeln', guelle: 'bringt Gülle aus', haeckseln: 'häckselt' };
 /** Tätigkeit des Fahrers je Dienstleistung (Skill) */
-export const SERVICE_SKILL: Record<Service, Skill> = { grubbern: 'boden', stoppel: 'boden', guelle: 'guelle' };
+export const SERVICE_SKILL: Record<Service, Skill> = { grubbern: 'boden', stoppel: 'boden', guelle: 'guelle', haeckseln: 'haecksler' };
+/** Silomais: Ertrag Frischmasse (t/ha, Annahme Niedersachsen 40–45) */
+export const SILAGE_YIELD_T_HA = 42;
+/**
+ * Häckseln: „nur Häcksler“ (Kunde stellt Abfahrer und Walze) oder Komplettkette (Abfahrer und Walzen
+ * vom Lohnunternehmen). Preise je ha (Annahme; Kostenanker Häcksler 241 €/h, Transport 87 €/h,
+ * Walzschlepper 110 €/h laut Bayerischem Wochenblatt, siehe docs/ablaeufe.md).
+ */
+export const CHOP_PRICE_HA: Record<'haecksler' | 'komplett', number> = { haecksler: 230, komplett: 430 };
+/** Fremdwalze, wenn bei der Komplettkette kein eigener Radlader am Silo ist (€/h) */
+export const HIRED_ROLLER_EUR_H = 110;
 /**
  * Startpreis je ha inkl. Schlepper, Fahrer, Diesel (Annahme): Stoppelbearbeitung flach, günstiger als
  * Grubbern. Gülle wird je m³ abgerechnet: 4 €/m³ (Spanne für Lohnausbringung 2,50–8 €/m³ je nach
  * Entfernung und System laut LK Niederösterreich); priceHa = €/m³ × Gabe.
  */
-export const SERVICE_BASE_PRICE: Record<Service, number> = { grubbern: 55, stoppel: 38, guelle: 4 };
+export const SERVICE_BASE_PRICE: Record<Service, number> = { grubbern: 55, stoppel: 38, guelle: 4, haeckseln: 230 };
 
 /**
  * Jahreslauf (AK-04): welche Dienstleistung wann gefragt ist, für welche Kulturen, und wie stark.
@@ -103,6 +113,8 @@ export function seasonServices(time: number): { service: Service; crops: Crop[];
   if (md >= 201 && md <= 430) out.push({ service: 'guelle', crops: [Crop.Getreide, Crop.Raps], weight: 1 });
   if (md >= 301 && md <= 515) out.push({ service: 'guelle', crops: [Crop.Mais, Crop.Zuckerrueben], weight: 1 });
   if (md >= 801 && md <= 920) out.push({ service: 'guelle', crops: [Crop.Raps, Crop.Getreide], weight: 0.4 });
+  // Silomais häckseln: Mitte September bis Mitte Oktober (Reife ~32 % TS), eilig
+  if (md >= 910 && md <= 1020) out.push({ service: 'haeckseln', crops: [Crop.Mais], weight: md >= 920 && md <= 1010 ? 1.4 : 0.8 });
   return out;
 }
 
@@ -122,6 +134,8 @@ export interface Request {
   priceHa: number;
   /** Gülle: Gabe (m³/ha) */
   gabe?: number;
+  /** Häckseln: nur Häcksler oder Komplettkette */
+  chain?: 'haecksler' | 'komplett';
   createdAt: number;
   /** Antwortfrist */
   replyBy: number;
@@ -142,6 +156,11 @@ export interface Order {
   /** Gülle: Gabe (m³/ha) und schon ausgebrachte Menge */
   gabe?: number;
   doneM3?: number;
+  /** Häckseln: Art der Kette, geerntete und am Silo angekommene Menge (t) */
+  chain?: 'haecksler' | 'komplett';
+  doneT?: number;
+  /** Fremdleistungen (€), z. B. Fremdwalze */
+  externalCost?: number;
   earliest: number;
   latest: number;
   status: OrderStatus;
@@ -234,6 +253,9 @@ export type Command =
       kind: 'startJob'; orderId: number; tractorId: number; implementId: number; driverId?: number;
       /** Gülle-Kette: Zubringer mit eigenem Fahrer, Schlepper und Zubringerfass */
       feeder?: { driverId: number; tractorId: number; implementId: number };
+      /** Häckselkette: Abfahrer (Fahrer, Schlepper, Häckselwagen) und Radlader am Silo */
+      haulers?: { driverId: number; tractorId: number; implementId: number }[];
+      roller?: { driverId: number; machineId: number };
     }
   | { kind: 'buy'; offerId: number }
   | { kind: 'recall'; vehicle: number }
@@ -480,9 +502,13 @@ export class Business {
     }
     // Gülle: Gabe 20 m³/ha zu Getreide/Raps, 25 m³/ha vor Mais/Rüben (Annahme, etwa 80–100 kg N/ha)
     const gabe = sv.service === 'guelle' ? (sv.crops.includes(Crop.Mais) ? 25 : 20) : undefined;
+    // Häckseln: Viehbetriebe mit eigener Technik geben oft nur den Häcksler in Auftrag
+    const chain = sv.service === 'haeckseln' ? (this.rng.next() < 0.3 + 0.5 * farm.mechanization ? 'haecksler' : 'komplett') : undefined;
     const priceHa = gabe
       ? Math.round(SERVICE_BASE_PRICE.guelle * (0.9 + this.rng.next() * 0.25) * 10) / 10 * gabe
-      : Math.round(SERVICE_BASE_PRICE[sv.service] * (0.92 + this.rng.next() * 0.16) * 2) / 2;
+      : chain
+        ? Math.round((CHOP_PRICE_HA[chain] * (0.92 + this.rng.next() * 0.16)) / 5) * 5
+        : Math.round(SERVICE_BASE_PRICE[sv.service] * (0.92 + this.rng.next() * 0.16) * 2) / 2;
     const req: Request = {
       id: this.nextId++,
       farmId,
@@ -490,9 +516,10 @@ export class Business {
       fields: picked,
       areaHa: Math.round(ha * 100) / 100,
       earliest: time,
-      latest: time + (5 + this.rng.int(8)) * 1440,
+      latest: time + (chain ? 3 + this.rng.int(5) : 5 + this.rng.int(8)) * 1440,
       priceHa,
       gabe,
+      chain,
       createdAt: time,
       replyBy: time + REPLY_MINUTES,
       status: 'offen',
@@ -603,6 +630,8 @@ export class Business {
       priceHa: price,
       gabe: r.gabe,
       doneM3: r.gabe ? 0 : undefined,
+      chain: r.chain,
+      doneT: r.chain ? 0 : undefined,
       earliest: r.earliest,
       latest: r.latest,
       status: 'offen',
@@ -1108,6 +1137,15 @@ export class Business {
     return `bestellt, Lieferung ${fmtDay(at)} ${fmtTime(at)}`;
   }
 
+  /** Fremdleistung (z. B. Fremdwalze) buchen und dem Auftrag zurechnen */
+  bookExternal(time: number, text: string, amount: number, o?: Order) {
+    if (amount <= 0) return;
+    this.company.cash = Math.round((this.company.cash - amount) * 100) / 100;
+    this.ledger.push({ time, text, amount: -amount, category: 'Sonstiges' });
+    if (o) o.externalCost = Math.round(((o.externalCost ?? 0) + amount) * 100) / 100;
+    this.emit(time, 'info', `${text}: ${fmtEur(amount)}.`);
+  }
+
   /** Verbrauch von Verschleißteilen bei der Arbeit (z. B. Grubberschare je ha); false = Lager leer */
   useWearParts(amount: number): boolean {
     const st = this.company.partsStock ?? 0;
@@ -1256,7 +1294,9 @@ export class Business {
       number: `RE-${d.year}-${String(this.invoices.length + 1).padStart(4, '0')}`,
       orderId: o.id,
       farmId: o.farmId,
-      text: o.gabe
+      text: o.chain
+        ? `${SERVICE_NAMES[o.service]} (${o.chain === 'komplett' ? 'Komplettkette' : 'nur Häcksler'}) ${fmtHa(o.areaHa)} à ${fmtEur(o.priceHa)}/ha, ${Math.round(o.doneT ?? 0)} t`
+        : o.gabe
         ? `${SERVICE_NAMES[o.service]} ${fmtM3(o.areaHa * o.gabe)} à ${fmtEur(o.priceHa / o.gabe)}/m³ (${fmtHa(o.areaHa)})`
         : `${SERVICE_NAMES[o.service]} ${fmtHa(o.areaHa)} à ${fmtEur(o.priceHa)}/ha`,
       amount: Math.round(o.priceHa * o.areaHa * 100) / 100,
@@ -1316,7 +1356,7 @@ export class Business {
     const revenue = Math.round(o.priceHa * o.areaHa * 100) / 100;
     const tractor = this.company.machines.find((m) => m.id === o.tractorId);
     const perH = tractor ? this.repairPerHour(tractor) : REPAIR_TRACTOR_EUR_H;
-    const machines = Math.round((o.tractorHours * perH + o.areaHa * WEAR_GRUBBER_EUR_HA) * 100) / 100;
+    const machines = Math.round((o.tractorHours * perH + o.areaHa * WEAR_GRUBBER_EUR_HA + (o.externalCost ?? 0)) * 100) / 100;
     return { revenue, diesel: o.dieselCost, machines, margin: Math.round((revenue - o.dieselCost - machines) * 100) / 100 };
   }
 

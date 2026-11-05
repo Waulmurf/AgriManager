@@ -17,7 +17,11 @@ export function marketValue(newPrice: number, ageYears: number, hours: number): 
   return Math.max(newPrice * 0.15, w);
 }
 
-export type MachineType = 'schlepper' | 'firmenwagen' | 'grubber' | 'kurzscheibenegge' | 'guellefass' | 'zubringer';
+export type MachineType =
+  | 'schlepper' | 'firmenwagen' | 'grubber' | 'kurzscheibenegge' | 'guellefass' | 'zubringer'
+  | 'feldhaecksler' | 'haeckselwagen' | 'radlader';
+/** Selbstfahrende Maschinen erscheinen wie Schlepper als Fahrzeug auf der Karte */
+export const SELF_PROPELLED: MachineType[] = ['schlepper', 'feldhaecksler', 'radlader'];
 
 export interface Machine {
   id: number;
@@ -42,6 +46,9 @@ export interface Machine {
   dieselLHa?: number;
   /** Güllefass und Zubringer: Fassvolumen (m³) */
   tankM3?: number;
+  /** Häckselwagen: Nutzlast Silomais (t); Radlader: Betriebsgewicht (t, Walzgewicht) */
+  payloadT?: number;
+  weightT?: number;
   /** Firmenwagen: Sitzplätze inkl. Fahrer und Art */
   seats?: number;
   carKind?: CarKind;
@@ -120,7 +127,7 @@ export const CAR_KINDS: Record<CarKind, string> = { kombi: 'Kombi', kleinbus: 'K
 
 /** Wartungsintervall (Betriebsstunden): Schlepper 500 h, Geräte 250 h (Annahme) */
 export function serviceInterval(m: Pick<Machine, 'type'>): number {
-  return m.type === 'schlepper' || m.type === 'firmenwagen' ? 500 : 250;
+  return m.type === 'schlepper' || m.type === 'firmenwagen' || m.type === 'feldhaecksler' || m.type === 'radlader' ? 500 : 250;
 }
 
 export interface MarketOffer {
@@ -222,6 +229,8 @@ export const SKILLS: { key: Skill; name: string; short: string }[] = [
 export const MACHINE_SKILL: Partial<Record<MachineType, { skill: Skill; min: number }>> = {
   schlepper: { skill: 'boden', min: 1 },
   guellefass: { skill: 'guelle', min: 1 },
+  feldhaecksler: { skill: 'haecksler', min: 2 },
+  radlader: { skill: 'radlader', min: 1 },
 };
 /** Eigene Reparatur mit dem Werkstattwagen: ab Stufe 2 */
 export const MECHANIC_MIN = 2;
