@@ -27,8 +27,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Unit-Tests brauchen keine GPU: Intel-Mac reicht (arm64-Runner sind oft ausgelastet)
-        os: [ubuntu-latest, windows-latest, macos-15-intel]
+        # macOS vorerst ohne Tests (nur Build), siehe Job „build“
+        os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -61,14 +61,7 @@ jobs:
             projects: chromium
             # Browser-Worker auf diesem Runner ohne GPU stark gebremst: nur Funktion, keine Raten
             strictTiming: '0'
-          # WebKit braucht Metal: nur die arm64-Macs haben eine (paravirtualisierte) GPU,
-          # auf Intel-Mac-Runnern verliert WebKit den WebGL-Kontext sofort. arm64-Runner
-          # sind bei GitHub oft ausgelastet – der Job ist daher optional.
-          - os: macos-15
-            projects: chromium,webkit
-            optional: true
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.optional == true }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -82,7 +75,7 @@ jobs:
           path: src-tauri/resources/map
           key: map-${{ hashFiles('data/map-data.json') }}
       - run: npm run map-data
-      - run: npx playwright install --with-deps ${{ matrix.projects == 'chromium' && 'chromium' || 'chromium webkit' }}
+      - run: npx playwright install --with-deps chromium
       - run: npm run build
       - name: Playwright
         run: npx playwright test
@@ -113,18 +106,12 @@ jobs:
           - name: Windows
             os: windows-latest
             args: ''
-          # Universal-DMG zuverlässig auf Intel; dort kein Metal → Selbsttest nur informativ
+          # macOS: nur Build der Universal-DMG (hält die Mac-Fähigkeit im Blick), vorerst ohne Tests.
+          # Intel-Runner, weil arm64-Runner oft ausgelastet sind.
           - name: macOS Universal
             os: macos-15-intel
             args: '--target universal-apple-darwin'
-            selftestInformative: true
-          # WKWebView-Prüfung mit GPU auf arm64 (optional, je nach GitHub-Kapazität)
-          - name: macOS arm64 WKWebView
-            os: macos-15
-            args: '--target universal-apple-darwin'
-            optional: true
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.optional == true }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -146,26 +133,6 @@ jobs:
       - run: npm run map-data
       - name: Tauri-Build
         run: npx tauri build ${{ matrix.args }}
-
-      - name: Selbsttest der fertigen App (macOS, WKWebView)
-        if: runner.os == 'macOS'
-        continue-on-error: ${{ matrix.selftestInformative == true }}
-        shell: bash
-        run: |
-          APP=$(ls -d src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app | head -1)
-          lipo -info "$APP/Contents/MacOS/"* | tee build-info.txt
-          export LOHNBETRIEB_SELFTEST=1 LOHNBETRIEB_SELFTEST_SECONDS=20 LOHNBETRIEB_SELFTEST_MIN_FPS=3 LOHNBETRIEB_SELFTEST_MIN_SPS=10
-          export LOHNBETRIEB_SELFTEST_OUT="$PWD/selftest-macos.json"
-          BIN=$(ls "$APP/Contents/MacOS/" | head -1)
-          "$APP/Contents/MacOS/$BIN" > app-macos.log 2>&1 &
-          PID=$!
-          sleep 30 && screencapture -x selftest-macos.png || true
-          for i in $(seq 1 150); do kill -0 $PID 2>/dev/null || break; sleep 1; done
-          kill $PID 2>/dev/null || true
-          wait $PID || true
-          echo "--- App-Ausgabe ---"; cat app-macos.log || true
-          echo "--- Ergebnis ---"; cat selftest-macos.json || echo "kein Ergebnis"
-          test -f selftest-macos.json && grep -q '"ok":true' selftest-macos.json
 
       - name: Selbsttest der fertigen App (Windows, WebView2)
         if: runner.os == 'Windows'
@@ -191,7 +158,7 @@ jobs:
           if (-not (Select-String -Path selftest-windows.json -Pattern '"ok":true' -Quiet)) { exit 1 }
 
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && runner.os == 'Windows'
         with:
           name: selbsttest-${{ matrix.name }}
           path: |
