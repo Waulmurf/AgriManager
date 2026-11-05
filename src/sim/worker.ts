@@ -112,7 +112,11 @@ function sendBusiness(force = false) {
     queue: sim.queue.map((q) => ({ ...q, cmd: { ...q.cmd } })),
     estimates: sim.planEstimates(),
     driverMinutes: { ...sim.driverMinutes },
-    driverStatus: Object.fromEntries(sim.company.drivers.map((d) => [d.id, sim!.driverBusy(d.id)])),
+    driverStatus: Object.fromEntries(sim.company.drivers.map((d) => {
+      const abs = b.absence(d.id, sim!.time);
+      return [d.id, sim!.driverBusy(d.id) ?? (abs === 'urlaub' ? 'im Urlaub' : abs === 'krank' ? 'krank' : null)];
+    })),
+    staffRequests: structuredClone(b.staffRequests),
     applicants: structuredClone(b.applicants),
     deliveries: structuredClone(b.deliveries),
     discounts: Object.fromEntries(DEALERS.map((d) => [d.id, b.dealerDiscount(d.id)])),

@@ -9,7 +9,7 @@ import { Rng } from './rng';
 import { Crop, SURNAMES, type FarmSet } from './farms';
 import type { FieldSet } from './fields';
 import {
-  EMPLOYER_SV, MIN_WAGE, MONTH_HOURS, SKILLS, XP_MINUTES_PER_LEVEL, baseSkills, gameDate, marketValue,
+  EMPLOYER_SV, MIN_WAGE, MONTH_HOURS, SKILLS, VACATION_DAYS, marketWage, XP_MINUTES_PER_LEVEL, baseSkills, gameDate, marketValue,
   serviceInterval, START_OFFERS, type Company, type Employee, type Machine, type MarketOffer, type Skill,
 } from './economy';
 import { CATALOG, DEALERS, dealersFor, type CatalogModel } from '../data/catalog';
@@ -182,6 +182,9 @@ export type Command =
   | { kind: 'service'; machineId: number }
   | { kind: 'hire'; applicantId: number; asKind: 'fest' | 'saison' }
   | { kind: 'fire'; employeeId: number }
+  | { kind: 'vacation'; employeeId: number; fromDay: number; days: number }
+  | { kind: 'staffAnswer'; requestId: number; accept: boolean }
+  | { kind: 'setWage'; employeeId: number; wage: number }
   | { kind: 'plan'; orderId: number; driverId: number; tractorId: number; implementId: number; notBefore?: number }
   | { kind: 'queueEdit'; queueId: number; driverId?: number; tractorId?: number; implementId?: number; notBefore?: number | null }
   | { kind: 'dequeue'; queueId: number }
@@ -189,6 +192,17 @@ export type Command =
 
 /** Befehle, die in die Warteschlange eines Fahrers passen */
 export type QueueCommand = Extract<Command, { kind: 'visit' } | { kind: 'startJob' }>;
+/** Wunsch eines Mitarbeiters (KK-11, PA-17) */
+export interface StaffRequest {
+  id: number;
+  employeeId: number;
+  kind: 'urlaub' | 'gehalt';
+  from?: number;
+  days?: number;
+  wage?: number;
+  until: number;
+}
+
 export interface QueueItem {
   id: number;
   /** Fahrer, der die Aufgabe übernimmt (Besuche immer der Chef) */
@@ -206,6 +220,7 @@ export class Business {
   readonly ledger: LedgerEntry[] = [];
   readonly applicants: Applicant[] = [];
   readonly deliveries: Delivery[] = [];
+  readonly staffRequests: StaffRequest[] = [];
   /** Umsatz je Händler (Rabatt und Werkstattvorrang, HM-07) */
   readonly dealerSpend: Record<number, number> = {};
   /** aufgelaufene Lohnkosten des laufenden Monats (wird am Monatsersten gebucht) */
@@ -247,6 +262,7 @@ export class Business {
       applicants: this.applicants,
       payrollAccrued: this.payrollAccrued,
       deliveries: this.deliveries,
+      staffRequests: this.staffRequests,
       dealerSpend: this.dealerSpend,
     };
   }
@@ -265,6 +281,7 @@ export class Business {
     this.dieselTodayEur = s.dieselTodayEur;
     put(this.applicants, s.applicants ?? []);
     put(this.deliveries, s.deliveries ?? []);
+    put(this.staffRequests, s.staffRequests ?? []);
     for (const k of Object.keys(this.dealerSpend)) delete this.dealerSpend[Number(k)];
     Object.assign(this.dealerSpend, s.dealerSpend ?? {});
     this.payrollAccrued = s.payrollAccrued ?? 0;
@@ -393,9 +410,10 @@ export class Business {
   }
 
   /** Täglich um 06:00: Anfragen per Anruf/Nachricht von bekannten Betrieben, Fristen prüfen */
-  daily(time: number, workedMinutes: Record<number, number> = {}) {
+  daily(time: number, workedMinutes: Record<number, number> = {}, surcharge: Record<number, number> = {}, busyDrivers: Set<number> = new Set()) {
     this.bookDiesel(time);
-    this.payroll(time, workedMinutes);
+    this.payroll(time, workedMinutes, surcharge);
+    this.staffDaily(time, workedMinutes, busyDrivers);
     this.updateApplicants(time);
     this.updateMarket(time);
     this.arriveDeliveries(time);
@@ -881,11 +899,17 @@ export class Business {
    * geleistete Stunden), am Monatsersten als eine Buchung „Löhne“ abziehen. Je Mitarbeiter
    * Erfahrung aus der Arbeit gutschreiben, macht der Rechenkern über addExperience.
    */
-  private payroll(time: number, worked: Record<number, number>) {
+  private payroll(time: number, worked: Record<number, number>, surcharge: Record<number, number> = {}) {
     let day = 0;
     for (const e of this.company.drivers) {
-      if (e.kind === 'fest') day += (e.wage * MONTH_HOURS * (1 + EMPLOYER_SV)) / 30;
-      else if (e.kind === 'saison') day += ((worked[e.id] ?? 0) / 60) * e.wage * (1 + EMPLOYER_SV);
+      if (e.kind === 'chef') continue;
+      const w = worked[e.id] ?? 0;
+      const over = Math.max(0, w - 480); // über 8 h: Überstundenzuschlag 25 % (ZU-03)
+      // Zuschläge (ZU-01): gewichtete Minuten aus dem Rechenkern
+      let pay = ((surcharge[e.id] ?? 0) / 60) * e.wage + (over / 60) * e.wage * 0.25;
+      if (e.kind === 'fest') pay += (e.wage * MONTH_HOURS) / 30 + (over / 60) * e.wage;
+      else pay += (w / 60) * e.wage;
+      day += pay * (1 + EMPLOYER_SV);
     }
     this.payrollAccrued += day;
     if (gameDate(time).day === 1 && this.payrollAccrued > 0) {
@@ -935,13 +959,15 @@ export class Business {
     for (const k of SKILLS) { top = Math.max(top, skills[k.key]); sum += skills[k.key] - 1; }
     // Gehaltsvorstellung: Mindestlohn + Stufe der besten Tätigkeit + Breite, LKW-Schein extra
     const wantFest = Math.round((ECK_WAGE - 2 + (top - 1) * 1.1 + sum * 0.15 + (licenseC ? 0.8 : 0) + (r.next() - 0.5)) * 10) / 10;
+    const reliability = Math.round((0.5 + r.next() * 0.5) * 100) / 100;
+    const resilience = Math.round((0.5 + r.next() * 0.5) * 100) / 100;
     const wage = Math.max(MIN_WAGE, wantFest);
     const first = FIRST_NAMES[r.int(FIRST_NAMES.length)];
     const last = SURNAMES[r.int(SURNAMES.length)];
     const notes = ['sucht feste Stelle', 'auch als Saisonkraft', 'Landwirtssohn, kennt Schlepper', 'kommt aus der Region', 'bisher bei einem anderen Lohnunternehmen'];
     return {
       id: this.nextId++,
-      person: { name: `${first} ${last}`, isPlayer: false, kind: 'fest', wage, skills, xp: {}, licenseC, age },
+      person: { name: `${first} ${last}`, isPlayer: false, kind: 'fest', wage, skills, xp: {}, licenseC, age, reliability, resilience, satisfaction: 70, absences: [] },
       until: time + (7 + r.int(14)) * 1440,
       note: notes[r.int(notes.length)],
     };
@@ -954,21 +980,172 @@ export class Business {
     const id = this.company.drivers.reduce((m, d) => Math.max(m, d.id), 0) + 1;
     // Saisonkräfte verlangen etwas mehr je Stunde, weil sie nur für geleistete Stunden bezahlt werden
     const wage = asKind === 'saison' ? Math.round(a.person.wage * 1.08 * 10) / 10 : a.person.wage;
-    this.company.drivers.push({ ...structuredClone(a.person), id, kind: asKind, wage, hiredAt: time });
+    // Urlaubsanspruch anteilig für den Rest des Jahres (Spieljahr ab März: 10 Monate)
+    const monthsLeft = 12 - gameDate(time).month + 1;
+    const vacationLeft = asKind === 'fest' ? Math.round((VACATION_DAYS * monthsLeft) / 12) : 0;
+    this.company.drivers.push({ ...structuredClone(a.person), id, kind: asKind, wage, hiredAt: time, vacationLeft, satisfaction: 70, absences: [] });
     this.applicants.splice(i, 1);
     this.emit(time, 'info', `${a.person.name} eingestellt (${asKind === 'fest' ? 'fest' : 'Saisonkraft'}, ${fmtEur(wage)}/h).`);
     return 'eingestellt';
   }
 
-  /** Entlassen; die Engine prüft vorher, dass der Mitarbeiter nicht unterwegs ist */
-  fire(employeeId: number, time: number): string {
+  /**
+   * Kündigen: Saisonkräfte sofort (befristet), Feste mit 4 Wochen Frist – sie arbeiten bis dahin
+   * weiter und werden bezahlt. Die Engine prüft bei sofortigem Gehen, dass niemand unterwegs ist.
+   */
+  fire(employeeId: number, time: number, immediate = false): string {
     const i = this.company.drivers.findIndex((d) => d.id === employeeId);
     if (i < 0) return 'Mitarbeiter unbekannt';
     const e = this.company.drivers[i];
     if (e.isPlayer) return 'Den Chef kann man nicht entlassen';
+    if (e.kind === 'fest' && !immediate) {
+      if (e.leavesAt !== undefined) return `Ist schon gekündigt (geht am ${fmtDay(e.leavesAt)})`;
+      e.leavesAt = (Math.floor(time / 1440) + 28) * 1440;
+      this.emit(time, 'info', `${e.name} gekündigt – arbeitet bis ${fmtDay(e.leavesAt)} weiter.`);
+      return `gekündigt zum ${fmtDay(e.leavesAt)}`;
+    }
     this.company.drivers.splice(i, 1);
+    this.staffRequests.splice(0, this.staffRequests.length, ...this.staffRequests.filter((r) => r.employeeId !== employeeId));
     this.emit(time, 'info', `${e.name} hat den Betrieb verlassen.`);
     return 'entlassen';
+  }
+
+  // ---------- Abwesenheit, Zufriedenheit, Wünsche (Schritt 4) ----------
+
+  /** Mitarbeiter heute bzw. zu dieser Minute abwesend (Urlaub, krank)? */
+  absence(employeeId: number, time: number): 'urlaub' | 'krank' | null {
+    const e = this.company.drivers.find((d) => d.id === employeeId);
+    for (const a of e?.absences ?? []) if (time >= a.from && time < a.to) return a.kind;
+    return null;
+  }
+
+  /** Urlaub eintragen (ganze Tage ab 06:00) */
+  grantVacation(employeeId: number, fromDay: number, days: number, time: number): string {
+    const e = this.company.drivers.find((d) => d.id === employeeId);
+    if (!e || e.isPlayer) return 'Nur für Mitarbeiter';
+    if (e.kind !== 'fest') return 'Saisonkräfte haben keinen Urlaubsanspruch';
+    if (days < 1) return 'Mindestens ein Tag';
+    if ((e.vacationLeft ?? 0) < days) return `Nur noch ${e.vacationLeft ?? 0} Tage Urlaub übrig`;
+    const from = Math.max(fromDay, Math.floor(time / 1440) + 1) * 1440;
+    const to = from + days * 1440;
+    if ((e.absences ?? []).some((a) => from < a.to && a.from < to)) return 'Überschneidet sich mit einer anderen Abwesenheit';
+    (e.absences ??= []).push({ from, to, kind: 'urlaub' });
+    e.vacationLeft = (e.vacationLeft ?? 0) - days;
+    this.version++;
+    this.emit(time, 'info', `${e.name}: Urlaub ${fmtDay(from)} bis ${fmtDay(to - 1)} (${days} Tage).`);
+    return `Urlaub eingetragen (${days} Tage, Rest ${e.vacationLeft})`;
+  }
+
+  /** Antwort auf einen Wunsch (Urlaubsantrag, Gehaltsforderung) */
+  answerRequest(requestId: number, accept: boolean, time: number): string {
+    const i = this.staffRequests.findIndex((r) => r.id === requestId);
+    if (i < 0) return 'Nicht mehr aktuell';
+    const r = this.staffRequests[i];
+    const e = this.company.drivers.find((d) => d.id === r.employeeId);
+    this.staffRequests.splice(i, 1);
+    this.version++;
+    if (!e) return 'Mitarbeiter nicht mehr da';
+    if (r.kind === 'urlaub') {
+      if (!accept) {
+        e.grudge = (e.grudge ?? 0) + 8;
+        return 'Urlaub abgelehnt';
+      }
+      return this.grantVacation(e.id, Math.floor(r.from! / 1440), r.days!, time);
+    }
+    if (!accept) {
+      e.grudge = (e.grudge ?? 0) + 15;
+      return 'Gehaltserhöhung abgelehnt';
+    }
+    e.wage = r.wage!;
+    e.grudge = 0;
+    e.satisfaction = Math.min(100, (e.satisfaction ?? 60) + 15);
+    this.emit(time, 'info', `${e.name}: Lohn jetzt ${fmtEur(e.wage)}/h.`);
+    return `Lohn auf ${fmtEur(e.wage)}/h erhöht`;
+  }
+
+  /** Lohn von sich aus anpassen */
+  setWage(employeeId: number, wage: number, time: number): string {
+    const e = this.company.drivers.find((d) => d.id === employeeId);
+    if (!e || e.isPlayer) return 'Nur für Mitarbeiter';
+    if (!(wage >= MIN_WAGE)) return `Mindestens Mindestlohn ${fmtEur(MIN_WAGE)}/h`;
+    const up = wage > e.wage;
+    if (!up) e.grudge = (e.grudge ?? 0) + Math.round((e.wage - wage) * 10);
+    else e.satisfaction = Math.min(100, (e.satisfaction ?? 60) + Math.round((wage - e.wage) * 6));
+    e.wage = Math.round(wage * 100) / 100;
+    for (const r of this.staffRequests) if (r.employeeId === e.id && r.kind === 'gehalt' && wage >= (r.wage ?? 0)) r.until = time;
+    this.version++;
+    this.emit(time, 'info', `${e.name}: Lohn jetzt ${fmtEur(e.wage)}/h.`);
+    return `Lohn ${fmtEur(e.wage)}/h`;
+  }
+
+  /**
+   * Täglich 06:00: Krankmeldungen (KK-11, PA-05), Zufriedenheit (PA-16), Wünsche, Kündigungen
+   * (PA-17), Abgänge nach Kündigungsfrist. `worked`: gestrige Minuten je Mitarbeiter.
+   */
+  private staffDaily(time: number, worked: Record<number, number>, busy: Set<number>) {
+    const fleet = this.company.machines.filter((m) => m.type === 'schlepper');
+    const fleetCond = fleet.length ? fleet.reduce((a, m) => a + m.condition, 0) / fleet.length : 70;
+    for (const e of [...this.company.drivers]) {
+      if (e.isPlayer) continue;
+      // Abgang nach Kündigungsfrist
+      if (e.leavesAt !== undefined && time >= e.leavesAt && !busy.has(e.id)) {
+        this.fire(e.id, time, true);
+        continue;
+      }
+      e.absences = (e.absences ?? []).filter((a) => a.to > time - 30 * 1440);
+      // Überstunden gleitend über 30 Tage (über 8 h am Tag)
+      const over = Math.max(0, (worked[e.id] ?? 0) - 480);
+      e.overtime30 = Math.round(((e.overtime30 ?? 0) * 29) / 30 + over);
+      // Krankheit: im Mittel etwa 12 Tage im Jahr, weniger bei hoher Zuverlässigkeit, mehr bei vielen Überstunden
+      const rel = e.reliability ?? 0.75;
+      const res = e.resilience ?? 0.75;
+      const stress = (e.overtime30 ?? 0) / 60 / 20; // 20 Überstunden im Monat = +1
+      if (!this.absence(e.id, time) && this.rng.next() < 0.008 * (1.6 - rel) * (1 + stress * (1.2 - res))) {
+        const r = this.rng.next();
+        const days = r < 0.5 ? 1 + this.rng.int(2) : r < 0.85 ? 3 + this.rng.int(3) : 7 + this.rng.int(8);
+        (e.absences ??= []).push({ from: time, to: time + days * 1440, kind: 'krank' });
+        this.emit(time, 'warnung', `${e.name} hat sich krank gemeldet (etwa ${days} ${days === 1 ? 'Tag' : 'Tage'}).`);
+      }
+      // Zufriedenheit nähert sich einem Zielwert (2 % je Tag)
+      const mw = marketWage(e);
+      let target = 70 + 150 * (e.wage / mw - 1) - ((e.overtime30 ?? 0) / 60) * (1.3 - res) - (fleetCond < 50 ? 10 : 0) - (e.grudge ?? 0);
+      if (e.kind === 'fest' && (e.vacationLeft ?? 0) > 20 && gameDate(time).month >= 10) target -= 5; // Urlaub verfällt bald
+      target = Math.max(0, Math.min(100, target));
+      const sat = e.satisfaction ?? 70;
+      e.satisfaction = Math.round((sat + (target - sat) * 0.02) * 10) / 10;
+      e.grudge = Math.max(0, Math.round(((e.grudge ?? 0) * 0.97) * 10) / 10);
+      const open = this.staffRequests.some((r) => r.employeeId === e.id);
+      // Gehaltsforderung bei Unzufriedenheit oder deutlich unter Markt
+      if (!open && e.leavesAt === undefined && (e.satisfaction < 45 || e.wage < mw - 1) && this.rng.next() < 0.05) {
+        const wage = Math.max(mw, Math.round((e.wage + 0.8) * 10) / 10);
+        this.staffRequests.push({ id: this.nextId++, employeeId: e.id, kind: 'gehalt', wage, until: time + 14 * 1440 });
+        this.emit(time, 'warnung', `${e.name} möchte mehr Lohn: ${fmtEur(wage)}/h statt ${fmtEur(e.wage)}/h.`);
+      }
+      // Urlaubsantrag (Feste, etwa alle zwei Monate)
+      if (!open && e.kind === 'fest' && (e.vacationLeft ?? 0) >= 3 && this.rng.next() < 0.015) {
+        const days = Math.min(e.vacationLeft ?? 0, 3 + this.rng.int(8));
+        const from = (Math.floor(time / 1440) + 7 + this.rng.int(21)) * 1440;
+        this.staffRequests.push({ id: this.nextId++, employeeId: e.id, kind: 'urlaub', from, days, until: time + 5 * 1440 });
+        this.emit(time, 'info', `${e.name} fragt nach Urlaub: ${days} Tage ab ${fmtDay(from)}.`);
+      }
+      // Kündigung durch den Mitarbeiter (PA-17), gute Leute werden auch abgeworben
+      if (e.leavesAt === undefined && e.satisfaction < 25 && this.rng.next() < 0.03) {
+        e.leavesAt = (Math.floor(time / 1440) + 28) * 1440;
+        const rival = e.skills.boden >= 4 ? ' Ein anderes Lohnunternehmen hat ihn abgeworben.' : '';
+        this.emit(time, 'warnung', `${e.name} kündigt zum ${fmtDay(e.leavesAt)}.${rival}`);
+      }
+    }
+    // abgelaufene Wünsche: nicht beantwortet zählt wie abgelehnt
+    for (let i = this.staffRequests.length - 1; i >= 0; i--) {
+      const r = this.staffRequests[i];
+      if (r.until > time) continue;
+      const e = this.company.drivers.find((d) => d.id === r.employeeId);
+      if (e && !(r.kind === 'gehalt' && e.wage >= (r.wage ?? 0))) e.grudge = (e.grudge ?? 0) + (r.kind === 'gehalt' ? 15 : 8);
+      this.staffRequests.splice(i, 1);
+    }
+    // Jahreswechsel: neuer Urlaubsanspruch
+    const d = gameDate(time);
+    if (d.month === 1 && d.day === 1) for (const e of this.company.drivers) if (e.kind === 'fest') e.vacationLeft = Math.min(VACATION_DAYS + 10, (e.vacationLeft ?? 0) + VACATION_DAYS);
   }
 
   warn(time: number, text: string) {

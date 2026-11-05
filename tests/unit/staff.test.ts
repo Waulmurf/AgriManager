@@ -56,7 +56,10 @@ describe('Personal', () => {
     expect(s.business.applicants.some((x) => x.id === a.id)).toBe(false);
     const id = s.company.drivers[1].id;
     expect(s.command({ kind: 'fire', employeeId: 1 })).toMatch(/Chef/);
-    expect(s.command({ kind: 'fire', employeeId: id })).toBe('entlassen');
+    // feste Mitarbeiter: 4 Wochen Kündigungsfrist, arbeiten bis dahin weiter
+    expect(s.command({ kind: 'fire', employeeId: id })).toMatch(/^gekündigt zum/);
+    expect(s.company.drivers.length).toBe(2);
+    s.run(29 * 1440);
     expect(s.company.drivers.length).toBe(1);
   });
 
@@ -152,5 +155,76 @@ describe('Personal', () => {
     b.run(2000);
     expect(b.hash()).toBe(a.hash());
     expect(b.company.cash).toBe(a.company.cash);
+  });
+});
+
+describe('Urlaub, Krankheit, Zufriedenheit, Zuschläge', () => {
+  const hired = (seed = 5) => {
+    const s = world(seed);
+    runUntil(s, () => s.business.applicants.length > 0, 20 * 1440);
+    s.command({ kind: 'hire', applicantId: s.business.applicants[0].id, asKind: 'fest' });
+    return { s, e: s.company.drivers[1] };
+  };
+
+  it('Urlaub: Anspruch, Eintrag, Fahrer startet in der Zeit nichts', () => {
+    const { s, e } = hired();
+    expect(e.vacationLeft).toBeGreaterThan(15);
+    const today = Math.floor(s.time / 1440);
+    expect(s.command({ kind: 'vacation', employeeId: e.id, fromDay: today + 1, days: 3 })).toMatch(/Urlaub eingetragen/);
+    expect(s.command({ kind: 'vacation', employeeId: e.id, fromDay: today + 2, days: 2 })).toMatch(/Überschneidet/);
+    expect(s.command({ kind: 'vacation', employeeId: e.id, fromDay: today + 10, days: 99 })).toMatch(/Nur noch/);
+    s.run((today + 1) * 1440 - s.time + 60);
+    expect(s.business.absence(e.id, s.time)).toBe('urlaub');
+    expect(s.planBoard().some((x) => x.kind === 'absence' && x.driverId === e.id)).toBe(true);
+  });
+
+  it('Krankheit kommt vor, im Mittel einige Tage im Jahr', () => {
+    const { s, e } = hired(7);
+    e.reliability = 0.5;
+    e.wage = 30; // zufrieden halten, damit er bleibt
+    let episodes = 0;
+    for (let d = 0; d < 365; d++) {
+      s.run(1440);
+      episodes += s.business.drainEvents().filter((x) => x.text.includes('krank gemeldet')).length;
+    }
+    expect(s.company.drivers.some((x) => x.id === e.id)).toBe(true);
+    expect(episodes).toBeGreaterThanOrEqual(1);
+    expect(episodes).toBeLessThan(10);
+  });
+
+  it('unterbezahlte Mitarbeiter werden unzufrieden, fordern mehr Lohn und kündigen', () => {
+    const { s, e } = hired(5);
+    e.wage = 14.6;
+    e.skills.boden = 5;
+    let asked = false;
+    for (let d = 0; d < 200 && e.leavesAt === undefined; d++) {
+      s.run(1440);
+      const r = s.business.staffRequests.find((x) => x.employeeId === e.id && x.kind === 'gehalt');
+      if (r) { asked = true; s.command({ kind: 'staffAnswer', requestId: r.id, accept: false }); }
+    }
+    expect(asked).toBe(true);
+    expect(e.satisfaction!).toBeLessThan(40);
+    expect(e.leavesAt).toBeDefined();
+  });
+
+  it('Lohnerhöhung macht zufriedener', () => {
+    const { s, e } = hired(5);
+    const before = e.satisfaction!;
+    expect(s.command({ kind: 'setWage', employeeId: e.id, wage: e.wage + 2 })).toMatch(/Lohn/);
+    expect(e.satisfaction!).toBeGreaterThan(before);
+    expect(s.command({ kind: 'setWage', employeeId: e.id, wage: 10 })).toMatch(/Mindestlohn/);
+  });
+
+  it('Zuschläge und Überstunden erhöhen die Lohnkosten', () => {
+    const { s, e } = hired(5);
+    e.kind = 'saison';
+    const b = s.business as unknown as { payroll(t: number, w: Record<number, number>, sc: Record<number, number>): void; payrollAccrued: number };
+    b.payrollAccrued = 0;
+    b.payroll(s.time + 1, { [e.id]: 600 }, {});
+    const plain = b.payrollAccrued;
+    expect(plain).toBeCloseTo((600 / 60) * e.wage * 1.21 + (120 / 60) * e.wage * 0.25 * 1.21, 2);
+    b.payrollAccrued = 0;
+    b.payroll(s.time + 1, { [e.id]: 600 }, { [e.id]: 120 * 0.5 }); // 2 h Sonntag
+    expect(b.payrollAccrued - plain).toBeCloseTo(1 * e.wage * 1.21, 2);
   });
 });

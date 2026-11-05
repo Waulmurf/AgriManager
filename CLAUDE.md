@@ -69,6 +69,9 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
 - Schritt 2 Fuhrpark fertig: Katalog und Händler `src/data/catalog.ts`, Markt/Bestellung/Verkauf/Wartung/Pannen
   in `business.ts`, Pannen-Stillstand in `engine.ts` (`stepPlayer`), Reiter Fuhrpark und Markt.
 - Schritt 3 Planungsboard fertig: `src/ui/Board.tsx`, `Simulation.planBoard()`, Befehle `plan`/`queueEdit`.
+- Schritt 4 fertig: Kalender/Zuschläge `src/sim/calendar.ts`, Abwesenheit/Zufriedenheit/Wünsche in
+  `business.ts` (`staffDaily`), Ruhezeit und Abwesenheit in `engine.ts` (`driverBlocked`).
+- Phase 3 damit komplett → nächste Phase 4 (Wirtschaft: Finanzen, Kredit, Wetter, Jahreslauf).
 
 ## CI (GitHub Actions)
 

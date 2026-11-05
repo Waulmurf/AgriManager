@@ -13,6 +13,7 @@ import { generateFarms, type FarmSet } from './farms';
 import { START_OFFERS, normalizeDrivers, skillDiesel, skillSpeed, startCompany, type Company, type Machine } from './economy';
 import { Business, REMIND_CALL_MINUTES, VISIT_MINUTES, fmtDay, fmtHa, type Command, type QueueCommand, type QueueItem } from './business';
 import { appendEdgePoints, nearestNode, RoadClass, unproject, type RoadGraph } from './roadgraph';
+import { surchargeFactor } from './calendar';
 
 export const STEP_SECONDS = 60;
 /** Werte je Fahrzeug im Positions-Schnappschuss */
@@ -76,6 +77,8 @@ export interface SaveState {
   chefMinutes: number;
   /** heutige Arbeitsminuten je Mitarbeiter */
   driverMinutes?: Record<number, number>;
+  driverSurcharge?: Record<number, number>;
+  lastWork?: Record<number, number>;
   nextRouteId: number;
   rng: [number, number, number, number];
   company: Company;
@@ -97,7 +100,7 @@ export interface SaveState {
 export interface PlanBar {
   key: string;
   driverId: number;
-  kind: 'running' | 'visit' | 'queued';
+  kind: 'running' | 'visit' | 'queued' | 'absence';
   queueId?: number;
   orderId?: number;
   farmId?: number;
@@ -215,6 +218,10 @@ export class Simulation {
   time = 0;
   /** heutige Arbeitsminuten je Mitarbeiter (Reset um 06:00); Nr. 1 = Chef */
   driverMinutes: Record<number, number> = {};
+  /** heutige Zuschlagsminuten je Mitarbeiter (Minute × Zuschlagsfaktor, ZU-01) */
+  private driverSurcharge: Record<number, number> = {};
+  /** letzte Arbeitsminute je Mitarbeiter (Ruhezeit 11 h, PA-04) */
+  private lastWork: Record<number, number> = {};
   /** Zahl der Testfahrzeuge (davor), Spielerfahrzeuge folgen */
   private testCount = 0;
   /** steigt, wenn Fahrzeuge dazukommen (Oberfläche muss die Liste neu laden) */
@@ -336,17 +343,28 @@ export class Simulation {
   step(): void {
     this.time++;
     if (this.time % 1440 === 0) {
-      this.business.daily(this.time, this.driverMinutes); // täglich 06:00
+      const busyDrivers = new Set<number>();
+      for (const v of this.vehicles) if (v.owner === 'player' && v.task) busyDrivers.add(v.task.driverId);
+      this.business.daily(this.time, this.driverMinutes, this.driverSurcharge, busyDrivers); // täglich 06:00
       this.driverMinutes = {};
+      this.driverSurcharge = {};
+      // Ausgeschiedene Mitarbeiter: ihre Planung entfällt
+      const ids = new Set(this.company.drivers.map((d) => d.id));
+      const before = this.queue.length;
+      this.queue = this.queue.filter((q) => ids.has(q.driverId));
+      if (this.queue.length !== before) this.business.warn(this.time, 'Geplante Aufgaben ausgeschiedener Mitarbeiter wurden gestrichen.');
       const inUse = new Set(this.company.machines.filter((m) => this.machineBusy(m.id)).map((m) => m.id));
       this.business.completeSales(this.time, inUse);
       this.syncPlayerVehicles(); // Lieferungen und Verkäufe
     }
     // Arbeitszeit je Fahrer: zählt, solange er unterwegs ist (nicht im Feierabend)
     for (const v of this.vehicles) {
-      if (v.owner === 'player' && v.task && v.restUntil <= this.time) {
+      if (v.owner === 'player' && v.task && v.restUntil <= this.time && !this.business.absence(v.task.driverId, this.time)) {
         const d = v.task.driverId;
         this.driverMinutes[d] = (this.driverMinutes[d] ?? 0) + 1;
+        const f = surchargeFactor(this.time);
+        if (f) this.driverSurcharge[d] = (this.driverSurcharge[d] ?? 0) + f;
+        this.lastWork[d] = this.time;
       }
     }
     for (const v of this.vehicles) {
@@ -365,9 +383,25 @@ export class Simulation {
     return d ? (d.isPlayer ? 'Chef' : d.name) : `Fahrer ${driverId}`;
   }
 
+  /**
+   * Darf der Fahrer jetzt eine neue Aufgabe beginnen? Nicht bei Urlaub/Krankheit, nicht über
+   * 10 h, nicht vor Ablauf der Ruhezeit von 11 h nach dem letzten Arbeitstag (PA-04).
+   */
+  private driverBlocked(d: number): string | null {
+    const abs = this.business.absence(d, this.time);
+    if (abs) return abs === 'urlaub' ? 'hat Urlaub' : 'ist krank';
+    if (this.minutesOf(d) >= CHEF_MAX_MINUTES) return 'Arbeitszeit für heute erreicht';
+    const last = this.lastWork[d];
+    if (last !== undefined && Math.floor(last / 1440) < Math.floor(this.time / 1440) && this.time - last < 11 * 60) return 'Ruhezeit (11 h)';
+    return null;
+  }
+
   /** Aufgabe, die ein Fahrer gerade hat (null = frei, im Büro bzw. am Hof) */
   driverBusy(driverId: number): string | null {
     for (const v of this.vehicles) {
+      if (v.owner === 'player' && v.task?.driverId === driverId && this.business.absence(driverId, this.time)) {
+        return `${this.driverName(driverId)} ist krank – Gespann wartet`;
+      }
       if (v.owner !== 'player' || !v.task || v.task.driverId !== driverId) continue;
       const who = this.driverName(driverId);
       return v.task.kind === 'visit' ? `${who} ist auf Besuch bei ${this.business.farmName(v.task.farmId)}` : `${who} fährt einen Auftrag`;
@@ -419,7 +453,7 @@ export class Simulation {
       const d = item.driverId;
       if (tried.has(d)) continue;
       tried.add(d);
-      if (this.driverBusy(d) || this.minutesOf(d) >= CHEF_MAX_MINUTES) continue;
+      if (this.driverBusy(d) || this.driverBlocked(d)) continue;
       if ((item.notBefore ?? 0) > this.time) continue; // geplanter Starttermin noch nicht erreicht
       const err = this.checkQueueCommand(item.cmd, item.id);
       if (!err && this.machineInUse(item.cmd)) continue; // wartet auf die Maschine
@@ -581,15 +615,34 @@ export class Simulation {
         cursor[t.driverId] = Math.max(cursor[t.driverId] ?? this.time, end);
       }
     }
+    // Urlaub und Krankheit als gesperrte Zeiten
+    for (const e of this.company.drivers) {
+      for (const a of e.absences ?? []) {
+        if (a.to <= this.time) continue;
+        bars.push({ key: `a${e.id}-${a.from}`, driverId: e.id, kind: 'absence', label: a.kind === 'urlaub' ? 'Urlaub' : 'krank', start: Math.max(a.from, this.time), end: a.to, warnings: [] });
+      }
+    }
+    const available = (d: number, t: number) => {
+      const e = this.company.drivers.find((x) => x.id === d);
+      for (let k = 0; k < 4; k++) {
+        const a = (e?.absences ?? []).find((x) => t >= x.from && t < x.to);
+        if (!a) break;
+        t = a.to;
+      }
+      return t;
+    };
     for (const q of this.queue) {
       const d = q.driverId;
-      const start = this.workStart(Math.max(cursor[d] ?? this.time, q.notBefore ?? 0));
+      const start = this.workStart(available(d, this.workStart(Math.max(cursor[d] ?? this.time, q.notBefore ?? 0))));
       const need = this.estimateQueueItem(q.cmd);
       const end = this.finishAfter(need, d, start);
       cursor[d] = end;
       const warnings: string[] = [];
       const err = this.checkQueueCommand(q.cmd, q.id);
       if (err) warnings.push(err);
+      const dr = this.company.drivers.find((x) => x.id === d);
+      if ((dr?.absences ?? []).some((a) => a.from < end && start < a.to)) warnings.push(`${this.driverName(d)} ist in der Zeit abwesend`);
+      if (dr?.leavesAt !== undefined && end > dr.leavesAt) warnings.push(`${this.driverName(d)} hat dann den Betrieb verlassen`);
       if (q.cmd.kind === 'startJob') {
         const c = q.cmd;
         const o = b.orders.find((x) => x.id === c.orderId);
@@ -683,7 +736,8 @@ export class Simulation {
     if (err) return err;
     const d = this.cmdDriver(cmd);
     const busy = this.driverBusy(d);
-    const tired = this.minutesOf(d) >= CHEF_MAX_MINUTES;
+    const blocked = this.driverBlocked(d);
+    const tired = !!blocked;
     const inUse = this.machineInUse(cmd);
     const mine = this.queue.filter((q) => q.driverId === d);
     if (busy || tired || inUse || mine.length) {
@@ -691,7 +745,7 @@ export class Simulation {
       const label = this.queueLabel(cmd);
       this.queue.push({ id: this.nextQueueId++, driverId: d, cmd: { ...cmd }, label });
       this.business.version++;
-      const why = tired && !busy ? ' (ab 06:00)' : inUse && !busy ? ` (${inUse})` : '';
+      const why = blocked && !busy ? ` (${this.driverName(d)} ${blocked})` : inUse && !busy ? ` (${inUse})` : '';
       return `Eingeplant für ${this.driverName(d)} als Nr. ${mine.length + 1}: ${label}${why}`;
     }
     return this.startNow(cmd);
@@ -798,8 +852,15 @@ export class Simulation {
       }
       case 'hire':
         return b.hire(cmd.applicantId, cmd.asKind, t);
+      case 'vacation':
+        return b.grantVacation(cmd.employeeId, cmd.fromDay, cmd.days, t);
+      case 'staffAnswer':
+        return b.answerRequest(cmd.requestId, cmd.accept, t);
+      case 'setWage':
+        return b.setWage(cmd.employeeId, cmd.wage, t);
       case 'fire': {
-        if (this.driverBusy(cmd.employeeId)) return 'Mitarbeiter ist gerade unterwegs – erst zurückrufen';
+        const e = this.company.drivers.find((d) => d.id === cmd.employeeId);
+        if (e?.kind !== 'fest' && this.driverBusy(cmd.employeeId)) return 'Mitarbeiter ist gerade unterwegs – erst zurückrufen';
         const r = b.fire(cmd.employeeId, t);
         if (r === 'entlassen') {
           const before = this.queue.length;
@@ -888,6 +949,8 @@ export class Simulation {
       time: this.time,
       chefMinutes: this.chefMinutes,
       driverMinutes: { ...this.driverMinutes },
+      driverSurcharge: { ...this.driverSurcharge },
+      lastWork: { ...this.lastWork },
       nextRouteId: this.nextRouteId,
       rng: this.rng.getState(),
       company: structuredClone(this.company),
@@ -912,6 +975,8 @@ export class Simulation {
     if (s.vehicles.length !== this.vehicles.length) throw new Error('Spielstand passt nicht zu den Fahrzeugen');
     this.time = s.time;
     this.driverMinutes = s.driverMinutes ? { ...s.driverMinutes } : { 1: s.chefMinutes };
+    this.driverSurcharge = { ...(s.driverSurcharge ?? {}) };
+    this.lastWork = { ...(s.lastWork ?? {}) };
     this.nextRouteId = s.nextRouteId;
     this.rng.setState(s.rng);
     Object.assign(this.company, structuredClone(s.company));
@@ -1132,8 +1197,9 @@ export class Simulation {
     // Feierabend: Fahrzeug steht, bis der Chef wieder arbeiten darf
     if (v.restUntil > this.time) return;
     const t = v.task;
+    if (t && this.business.absence(t.driverId, this.time)) return; // Fahrer krank: Gespann wartet
     if (t?.kind === 'job' && (t.phase === 'to' || t.phase === 'setup' || t.phase === 'work') && this.minutesOf(t.driverId) >= CHEF_MAX_MINUTES) {
-      v.restUntil = this.time + (1440 - (this.time % 1440));
+      v.restUntil = Math.max(this.time + (1440 - (this.time % 1440)), this.time + 11 * 60);
       this.business.warn(this.time, `${v.name}: Feierabend – Höchstarbeitszeit (${this.driverName(t.driverId)}) erreicht, weiter morgen um 06:00.`);
       return;
     }

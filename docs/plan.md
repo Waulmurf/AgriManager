@@ -278,3 +278,42 @@ Schritte:
 - Später: Startzeit auf die Stunde genau, Ketten mit mehreren Rollen (Phase 4), Urlaub und
   Krankheit als gesperrte Zeiten (Schritt 4).
 
+### Schritt 4: Urlaub, Krankheit, Zufriedenheit, Zuschläge (Annahmen)
+
+- **Arbeitszeit (PA-04, PA-06):** höchstens 10 h am Tag je Fahrer. Ruhezeit 11 h: Wer bis spät
+  gearbeitet hat, beginnt am nächsten Tag entsprechend später, auch bei Feierabend mitten im
+  Auftrag. Der Arbeitstag beginnt und endet am Hof.
+- **Zuschläge (ZU-01 bis ZU-03)** nach § 3b EStG (`src/sim/calendar.ts`):
+  - Nacht 20–6 Uhr 25 %, 0–4 Uhr 40 %; Sonntag 50 %; Feiertage in Niedersachsen 125 %;
+    1. Mai, 25. und 26.12. sowie 24.12. ab 14 Uhr 150 %.
+  - Nacht wird zu Sonntag bzw. Feiertag addiert, Sonntag und Feiertag nicht.
+  - Überstunden über 8 h am Tag +25 %. Feste bekommen die Überstunden zusätzlich bezahlt.
+  - Ostern wird berechnet, die Feiertage liegen im Kalender.
+- **Krankheit (PA-05, PA-11, KK-11):**
+  - Wahrscheinlichkeit je Tag 0,8 % × (1,6 − Zuverlässigkeit) × (1 + Überstundenstress), im
+    Mittel etwa 8–12 Tage im Jahr.
+  - Dauer: 50 % 1–2 Tage, 35 % 3–5 Tage, 15 % 1–2 Wochen.
+  - Krankmeldung um 06:00. Ein laufender Auftrag des Fahrers wartet, bis er zurück ist oder
+    man das Gespann zurückruft.
+  - Feste werden weiterbezahlt (Lohnfortzahlung), Saisonkräfte nicht.
+- **Urlaub:** Feste haben 26 Tage im Jahr, im ersten Jahr anteilig. Urlaub trägt man im Reiter
+  Personal ein, oder der Mitarbeiter stellt einen Antrag (etwa alle zwei Monate).
+  - Antwortfrist 5 Tage. Ablehnen oder Nichtantworten kostet Zufriedenheit.
+  - Zum Jahreswechsel kommen 26 Tage dazu, übertragbar sind höchstens 10.
+- **Zufriedenheit (PA-16):** nähert sich täglich um 2 % einem Zielwert:
+  70 + 150 × (Lohn/Marktlohn − 1) − Überstunden der letzten 30 Tage × (1,3 − Belastbarkeit)
+  − 10 bei schlechtem Fuhrpark (Zustand der Schlepper < 50 %) − Ärger über abgelehnte Wünsche
+  (klingt mit 3 % je Tag ab).
+  - Der Marktlohn steigt mit den Skills (gleiche Formel wie der Gehaltswunsch). Wer
+    Erfahrung sammelt, will also mehr Geld.
+- **Gehalt und Kündigung (PA-17):**
+  - Unter 45 % Zufriedenheit oder mehr als 1 € unter Markt fordert der Mitarbeiter mehr Lohn,
+    Antwort binnen 14 Tagen.
+  - Unter 25 % kündigt er mit 4 Wochen Frist. Gute Fahrer (Boden ab 4) werden von der
+    Konkurrenz abgeworben.
+  - Den Lohn kann man jederzeit selbst setzen, eine Kürzung verärgert.
+- **Kündigung durch den Chef:** Feste mit 4 Wochen Frist (arbeiten und werden bezahlt bis
+  dahin), Saisonkräfte sofort. Ihre Planung entfällt beim Abgang.
+- **Planungsboard:** Urlaub und Krankheit erscheinen als schraffierte Balken. Geplante
+  Aufträge rücken hinter die Abwesenheit, Warnung bei Überschneidung oder Abgang.
+

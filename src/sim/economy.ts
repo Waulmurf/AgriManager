@@ -182,6 +182,31 @@ export interface Employee {
   hiredAt: number;
   /** Alter in Jahren (Anzeige) */
   age: number;
+  /** Zuverlässigkeit und Belastbarkeit 0,5–1 (PA-11): Krankheitstage, Überstunden-Toleranz */
+  reliability?: number;
+  resilience?: number;
+  /** Zufriedenheit 0–100 (PA-16) */
+  satisfaction?: number;
+  /** Resturlaub in Tagen (Jahresanspruch 26 Tage bei Festen) */
+  vacationLeft?: number;
+  /** Abwesenheiten (PA-05) */
+  absences?: { from: number; to: number; kind: 'urlaub' | 'krank' }[];
+  /** gekündigt, verlässt den Betrieb an diesem Tag */
+  leavesAt?: number;
+  /** Überstunden der letzten 30 Tage (Minuten, gleitend) */
+  overtime30?: number;
+  /** Ärger über abgelehnte Wünsche (klingt ab) */
+  grudge?: number;
+}
+
+/** Jahresurlaub fester Mitarbeiter (Tage, Annahme; gesetzlich mindestens 20 bei 5-Tage-Woche) */
+export const VACATION_DAYS = 26;
+
+/** Lohn, den ein Mitarbeiter mit diesen Skills am Markt bekommt (PA-13, auch Gehaltswunsch) */
+export function marketWage(e: Pick<Employee, 'skills' | 'licenseC'>): number {
+  let top = 0, sum = 0;
+  for (const k of SKILLS) { top = Math.max(top, e.skills[k.key]); sum += e.skills[k.key] - 1; }
+  return Math.max(MIN_WAGE, Math.round((15 + (top - 1) * 1.1 + sum * 0.15 + (e.licenseC ? 0.8 : 0)) * 10) / 10);
 }
 
 export function baseSkills(level = 1): Record<Skill, number> {

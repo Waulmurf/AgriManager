@@ -4,7 +4,7 @@
 import { useState } from 'react';
 import type { GameController, GameStatus } from '../game/controller';
 import type { JobEstimate } from '../sim/engine';
-import { SKILLS, employerHourCost, employerMonthCost, machineValue, type Employee, type Machine } from '../sim/economy';
+import { SKILLS, employerHourCost, employerMonthCost, machineValue, marketWage, type Employee, type Machine } from '../sim/economy';
 import { SERVICE_NAMES, fmtDay, fmtTime, CHECK_COST, type Invoice, type Request, type Order } from '../sim/business';
 import { CATALOG, DEALERS } from '../data/catalog';
 import { formatGameTime } from '../game/clock';
@@ -284,37 +284,90 @@ export function OrdersTab({ status, game }: { status: GameStatus; game: GameCont
 const skillShort = (e: Pick<Employee, 'skills'>) =>
   SKILLS.filter((k) => e.skills[k.key] > 1 || k.key === 'boden').map((k) => `${k.name.split('/')[0]} ${e.skills[k.key]}`).join(' · ');
 
-/** Personal (PA-01 bis PA-15): Mitarbeiter, Bewerbungen, Lohnkosten */
+function EmployeeCard({ e, status, game, show }: { e: Employee; status: GameStatus; game: GameController | null; show: (m: string) => void }) {
+  const b = status.business!;
+  const [days, setDays] = useState('5');
+  const [from, setFrom] = useState(1);
+  const [wage, setWage] = useState(String(e.wage));
+  const send = async (cmd: Parameters<GameController['command']>[0]) => show(await game!.command(cmd));
+  const today = Math.floor(b.time / 1440);
+  const sat = e.satisfaction ?? 70;
+  const abs = (e.absences ?? []).filter((a) => a.to > b.time);
+  return (
+    <li className="card" data-testid="employee">
+      <div className="card-head">
+        <strong>{e.isPlayer ? 'Chef (du)' : e.name}</strong>
+        <small>{e.kind === 'chef' ? 'kein Lohn' : e.kind === 'fest' ? `fest · ${eur(employerMonthCost(e))}/Monat` : `Saison · ${eur(employerHourCost(e))}/h`}</small>
+      </div>
+      <small className="hint">{skillShort(e)}{e.licenseC ? ' · Führerschein C/CE' : ''}{!e.isPlayer ? ` · ${e.age} Jahre · ${e.wage.toLocaleString('de-DE')} €/h brutto (Markt ${marketWage(e).toLocaleString('de-DE')} €)` : ''}</small>
+      <small>{b.driverStatus[e.id] ?? 'frei'} · heute {((b.driverMinutes[e.id] ?? 0) / 60).toLocaleString('de-DE', { maximumFractionDigits: 1 })} von 10 h</small>
+      {!e.isPlayer && (
+        <>
+          <small className={sat < 40 ? 'warn' : 'hint'}>
+            Zufriedenheit {Math.round(sat)} %
+            {e.reliability !== undefined ? ` · Zuverlässigkeit ${Math.round(e.reliability * 100)} % · Belastbarkeit ${Math.round((e.resilience ?? 0.75) * 100)} %` : ''}
+            {e.overtime30 ? ` · Überstunden (30 Tage) ${(e.overtime30 / 60).toLocaleString('de-DE', { maximumFractionDigits: 0 })} h` : ''}
+            {e.kind === 'fest' ? ` · Resturlaub ${e.vacationLeft ?? 0} Tage` : ''}
+          </small>
+          {abs.map((a, i) => <small key={i} className="hint">{a.kind === 'urlaub' ? 'Urlaub' : 'krank'} {fmtDay(a.from)} bis {fmtDay(a.to - 1)}</small>)}
+          {e.leavesAt !== undefined && <small className="warn">gekündigt – geht am {fmtDay(e.leavesAt)}</small>}
+          <div className="card-actions">
+            {e.kind === 'fest' && (
+              <span className="counter">
+                <select value={from} onChange={(x) => setFrom(Number(x.target.value))} aria-label="Urlaub ab">
+                  {Array.from({ length: 30 }, (_, d) => d + 1).map((d) => <option key={d} value={d}>ab {fmtDay((today + d) * 1440)}</option>)}
+                </select>
+                <input value={days} onChange={(x) => setDays(x.target.value)} aria-label="Urlaubstage" style={{ width: 36 }} />
+                <button onClick={() => send({ kind: 'vacation', employeeId: e.id, fromDay: today + from, days: Number(days) })}>Urlaub</button>
+              </span>
+            )}
+            <span className="counter">
+              <input value={wage} onChange={(x) => setWage(x.target.value)} aria-label="Stundenlohn" style={{ width: 48 }} />
+              <button onClick={() => send({ kind: 'setWage', employeeId: e.id, wage: Number(wage.replace(',', '.')) })}>€/h setzen</button>
+            </span>
+            {e.leavesAt === undefined && <button onClick={() => send({ kind: 'fire', employeeId: e.id })}>{e.kind === 'fest' ? 'Kündigen (4 Wochen)' : 'Entlassen'}</button>}
+          </div>
+        </>
+      )}
+    </li>
+  );
+}
+
+/** Personal (PA-01 bis PA-17): Mitarbeiter, Wünsche, Bewerbungen, Lohnkosten */
 export function StaffTab({ status, game }: { status: GameStatus; game: GameController | null }) {
   const fb = useFeedback();
   const b = status.business;
   const c = status.company;
   if (!b || !c) return <p className="hint">–</p>;
   const monthly = c.drivers.reduce((a, e) => a + (e.kind === 'fest' ? employerMonthCost(e) : 0), 0);
+  const name = (id: number) => c.drivers.find((d) => d.id === id)?.name ?? `Mitarbeiter ${id}`;
   return (
     <>
+      {b.staffRequests.length > 0 && (
+        <>
+          <h2>Wünsche ({b.staffRequests.length})</h2>
+          <ul className="cards">
+            {b.staffRequests.map((r) => (
+              <li key={r.id} className="card" data-testid="staff-request">
+                <strong>{name(r.employeeId)}</strong>
+                <small>{r.kind === 'urlaub' ? `Urlaub: ${r.days} Tage ab ${fmtDay(r.from!)}` : `mehr Lohn: ${r.wage!.toLocaleString('de-DE')} €/h`} · Antwort bis {fmtDay(r.until)}</small>
+                <div className="card-actions">
+                  <button onClick={async () => fb.show(await game!.command({ kind: 'staffAnswer', requestId: r.id, accept: true }))}>Zusagen</button>
+                  <button onClick={async () => fb.show(await game!.command({ kind: 'staffAnswer', requestId: r.id, accept: false }))}>Ablehnen</button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
       <h2>Mitarbeiter ({c.drivers.length})</h2>
       <ul className="cards" data-testid="staff">
-        {c.drivers.map((e) => (
-          <li key={e.id} className="card">
-            <div className="card-head">
-              <strong>{e.isPlayer ? 'Chef (du)' : e.name}</strong>
-              <small>{e.kind === 'chef' ? 'kein Lohn' : e.kind === 'fest' ? `fest · ${eur(employerMonthCost(e))}/Monat` : `Saison · ${eur(employerHourCost(e))}/h`}</small>
-            </div>
-            <small className="hint">{skillShort(e)}{e.licenseC ? ' · Führerschein C/CE' : ''}{!e.isPlayer ? ` · ${e.age} Jahre · ${e.wage.toLocaleString('de-DE')} €/h brutto` : ''}</small>
-            <small>{b.driverStatus[e.id] ?? 'frei'} · heute {((b.driverMinutes[e.id] ?? 0) / 60).toLocaleString('de-DE', { maximumFractionDigits: 1 })} von 10 h</small>
-            {!e.isPlayer && (
-              <div className="card-actions">
-                <button onClick={async () => fb.show(await game!.command({ kind: 'fire', employeeId: e.id }))}>Entlassen</button>
-              </div>
-            )}
-          </li>
-        ))}
+        {c.drivers.map((e) => <EmployeeCard key={e.id} e={e} status={status} game={game} show={fb.show} />)}
       </ul>
       <dl>
         <dt>Lohnkosten fest</dt><dd>{eur(monthly)} je Monat</dd>
       </dl>
-      <p className="hint">Löhne inkl. Arbeitgeberanteil (21 %) werden am Monatsersten gebucht. Saisonkräfte bekommen nur geleistete Stunden. Skills steigen mit der Arbeit (Stufe n → n+1 nach n × 100 h) und wirken auf Arbeitstempo und Diesel.</p>
+      <p className="hint">Löhne inkl. Arbeitgeberanteil (21 %) werden am Monatsersten gebucht, dazu Zuschläge für Nacht (25 %, 0–4 Uhr 40 %), Sonntag (50 %), Feiertage (125–150 %) und Überstunden über 8 h (25 %). Feste haben 4 Wochen Kündigungsfrist und 26 Tage Urlaub. Unzufriedene Mitarbeiter fordern mehr Lohn und kündigen sonst.</p>
       <h2>Bewerbungen ({b.applicants.length})</h2>
       {b.applicants.length ? (
         <ul className="cards" data-testid="applicants">
