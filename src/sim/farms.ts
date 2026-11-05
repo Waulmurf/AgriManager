@@ -49,6 +49,11 @@ export interface Farm {
   orderCount?: number;
   /** zuletzt nach Pachtland gefragt (Spielminute) */
   landAskedAt?: number;
+  /** Strukturwandel (Vorschlag 28): Betrieb aufgegeben bzw. auf Öko umgestellt (überschreibt den Startwert) */
+  closed?: boolean;
+  organic?: boolean;
+  /** Generationswechsel: neue Betriebsleitung seit */
+  handoverAt?: number;
 }
 
 /**
@@ -57,6 +62,21 @@ export interface Farm {
  */
 export function hasBga(f: Pick<Farm, 'id' | 'areaHa'>): boolean {
   return f.areaHa >= 120 && f.id % 9 === 4;
+}
+
+/** Kundencharakter (Vorschlag 26), fest aus der Id */
+export type Character = 'normal' | 'pedantisch' | 'preisdruecker' | 'spaetzahler' | 'treu';
+export const CHARACTER_NAMES: Record<Character, string> = {
+  normal: 'unkompliziert', pedantisch: 'pedantisch (achtet auf Termine)', preisdruecker: 'Preisdrücker', spaetzahler: 'zahlt gern spät', treu: 'sehr treu',
+};
+const hash01 = (n: number) => (((n + 13) * 2246822519) % 4294967296) / 4294967296;
+export function farmCharacter(f: Pick<Farm, 'id'>): Character {
+  const h = hash01(f.id * 7 + 3);
+  return h < 0.4 ? 'normal' : h < 0.55 ? 'pedantisch' : h < 0.75 ? 'preisdruecker' : h < 0.85 ? 'spaetzahler' : 'treu';
+}
+/** Ökobetrieb (Vorschlag 29): Start rund 8 % der Betriebe (Niedersachsen 2024: 7,9 % der Betriebe, 6 % der Fläche) */
+export function isOrganic(f: Pick<Farm, 'id' | 'organic' | 'livestock'>): boolean {
+  return f.organic ?? hash01(f.id * 11 + 5) < 0.08;
 }
 
 export interface FarmSet {

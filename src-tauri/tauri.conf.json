@@ -40,7 +40,7 @@
     "shortDescription": "Managementspiel für ein Agrar-Lohnunternehmen",
     "copyright": "Kartendaten © OpenStreetMap-Mitwirkende (ODbL)",
     "macOS": {
-      "minimumSystemVersion": "11.0"
+      "minimumSystemVersion": "12.0"
     }
   }
 }

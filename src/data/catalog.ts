@@ -127,6 +127,10 @@ export const CATALOG: CatalogModel[] = [
   // Überladewagen: fährt nebenher und lädt am Feldrand auf Lkw oder Anhänger über
   { key: 'fliegl-ulw2000', type: 'ueberladewagen', brand: 'Fliegl', model: 'Überladewagen ULW 2000 (16 t)', payloadT: 16, powerNeed: 160, newPrice: 62_000, deliveryWeeks: 10 },
   { key: 'fliegl-ulw3000', type: 'ueberladewagen', brand: 'Fliegl', model: 'Überladewagen ULW 3000 (22 t)', payloadT: 22, powerNeed: 200, newPrice: 85_000, deliveryWeeks: 10 },
+  // Mechanische Unkrautregulierung für Ökobetriebe (Annahme): Hackstriegel, kameragesteuerte Hacke
+  { key: 'einboeck-aerostar9', type: 'striegel', brand: 'Einböck', model: 'Aerostar 9 m', width: 9, powerNeed: 70, haPerHour: 5, workKmh: 8, dieselLHa: 3, newPrice: 16_000, deliveryWeeks: 6 },
+  { key: 'treffler-tg1200', type: 'striegel', brand: 'Treffler', model: 'Präzisions-Zinkenstriegel TS 1220 (12 m)', width: 12, powerNeed: 90, haPerHour: 7, workKmh: 8, dieselLHa: 3, newPrice: 28_000, deliveryWeeks: 8 },
+  { key: 'einboeck-chopstar6', type: 'hacke', brand: 'Einböck', model: 'Chopstar 6-reihig mit Kamera', width: 4.5, powerNeed: 90, haPerHour: 1.6, workKmh: 5, dieselLHa: 5, newPrice: 45_000, deliveryWeeks: 8 },
   // Kommunaltechnik (Annahme): Winterdienst, Auslegemäher, Astschere, Wegepflege
   { key: 'rauch-axeo', type: 'streuer', brand: 'Rauch', model: 'AXEO 18.1 + Frontschild 3 m', width: 3, powerNeed: 100, newPrice: 22_000, deliveryWeeks: 6 },
   { key: 'mulag-mkm700', type: 'auslegemaeher', brand: 'Mulag', model: 'MKM 700 Auslegemäher', width: 1.2, powerNeed: 110, newPrice: 48_000, deliveryWeeks: 8 },
@@ -156,7 +160,7 @@ export interface Dealer {
 
 /** Fiktive Händler an echten Orten (docs/maschinen.md, „Händler im Spiel“) */
 export const DEALERS: Dealer[] = [
-  { id: 1, name: 'Landtechnik Uelzen', town: 'Uelzen', lonLat: [10.5627, 52.9645], tractorBrands: ['Fendt', 'Massey Ferguson', 'Valtra'], implementBrands: ['Amazone', 'Lemken', 'Pöttinger'] },
+  { id: 1, name: 'Landtechnik Uelzen', town: 'Uelzen', lonLat: [10.5627, 52.9645], tractorBrands: ['Fendt', 'Massey Ferguson', 'Valtra'], implementBrands: ['Amazone', 'Lemken', 'Pöttinger', 'Einböck', 'Treffler'] },
   { id: 2, name: 'Kartoffel- und Rübentechnik Uelzen', town: 'Uelzen', lonLat: [10.5530, 52.9790], tractorBrands: [], implementBrands: ['Grimme', 'Ropa'] },
   { id: 3, name: 'Agrartechnik Lüneburg', town: 'Lüneburg', lonLat: [10.4140, 53.2490], tractorBrands: ['John Deere'], implementBrands: ['Kverneland', 'Krone'] },
   { id: 4, name: 'Landmaschinen Suhlendorf', town: 'Suhlendorf', lonLat: [10.7660, 52.9370], tractorBrands: ['Claas'], implementBrands: ['Horsch', 'Kotte', 'Zunhammer'] },

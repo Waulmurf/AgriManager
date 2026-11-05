@@ -10,7 +10,7 @@ import { CATALOG, DEALERS } from '../data/catalog';
 import { BUILDINGS, SITE_OFFERS } from '../data/sites';
 import { leaseRate } from '../sim/finance';
 import { FLEX_COST_KW, HEAT_COST, BIOGAS, EEG_MAX_CT, GAER_GABE, GAER_SELL_EUR, KWH_PER, MAIS_CAP, SUBSTRATE_NAME, SUBSTRATE_PRICE, dailyTarget, farmSlurryPerDay, type BiogasSize, type Substrate } from '../sim/biogas';
-import { Crop } from '../sim/farms';
+import { CHARACTER_NAMES, Crop, farmCharacter } from '../sim/farms';
 import { CROPS, IRRIGATION_EUR_HA, rotationFactor, soilFactor, type OwnCrop } from '../sim/farming';
 import { N_NEED, ORGANIC_N_LIMIT, STORABLE } from '../sim/marketing';
 import { MUNICIPALITIES, MUNI_BASE, TOUR, WINTER_EUR_H, WINTER_STANDBY_MONTH, isTour } from '../sim/municipal';
@@ -131,6 +131,7 @@ function RequestItem({ r, game, time, estimate }: { r: Request; game: GameContro
         <button className="link" onClick={() => game?.flyToFarm(r.farmId)}>{farm?.name ?? `Betrieb ${r.farmId}`}</button>
         <small>{r.channel === 'besuch' ? 'beim Besuch' : r.channel === 'anruf' ? 'Anruf' : 'Nachricht'}</small>
       </div>
+      {r.farmId >= 0 && <small className="hint">{CHARACTER_NAMES[farmCharacter({ id: r.farmId })]}</small>}
       <div>
         {SERVICE_NAMES[r.service]}{r.chain ? ` (${chainName(r.service, r.chain)})` : ''}: {r.liquid ? `${Math.round(r.areaHa * (r.tPerHa ?? 0)).toLocaleString('de-DE')} m³ Gärrest von der Biogasanlage zum ${r.destName} (nur Transport)` : r.tPerHa ? `${Math.round(r.areaHa * r.tPerHa).toLocaleString('de-DE')} t ${r.tPerHa >= 50 ? 'Rüben ab Feldrandmiete' : 'Korn ab Hoflager'} nach ${r.destName}` : `${r.fields.length} ${r.fields.length === 1 ? 'Feld' : 'Felder'}, ${ha(r.areaHa)}`} · bis {fmtDay(r.latest)}
       </div>
@@ -749,7 +750,7 @@ export function StaffTab({ status, game }: { status: GameStatus; game: GameContr
   );
 }
 
-const TYPE_NAMES: Record<string, string> = { schlepper: 'Schlepper', grubber: 'Grubber', kurzscheibenegge: 'Kurzscheibenegge', firmenwagen: 'Firmenwagen', guellefass: 'Güllefass', zubringer: 'Zubringerfass', feldhaecksler: 'Feldhäcksler', haeckselwagen: 'Häckselwagen', radlader: 'Radlader', maehdrescher: 'Mähdrescher', kipper: 'Kipper', ruebenroder: 'Rübenroder', lkw: 'Lkw', drille: 'Drille', einzelkorn: 'Einzelkornsämaschine', spritze: 'Pflanzenschutzspritze', presse: 'Ballenpresse', kartoffelroder: 'Kartoffelroder', ueberladewagen: 'Überladewagen', streuer: 'Streuer mit Schneeschild', auslegemaeher: 'Auslegemäher', astschere: 'Astschere', wegehobel: 'Wegepflegegerät' };
+const TYPE_NAMES: Record<string, string> = { schlepper: 'Schlepper', grubber: 'Grubber', kurzscheibenegge: 'Kurzscheibenegge', firmenwagen: 'Firmenwagen', guellefass: 'Güllefass', zubringer: 'Zubringerfass', feldhaecksler: 'Feldhäcksler', haeckselwagen: 'Häckselwagen', radlader: 'Radlader', maehdrescher: 'Mähdrescher', kipper: 'Kipper', ruebenroder: 'Rübenroder', lkw: 'Lkw', drille: 'Drille', einzelkorn: 'Einzelkornsämaschine', spritze: 'Pflanzenschutzspritze', presse: 'Ballenpresse', kartoffelroder: 'Kartoffelroder', ueberladewagen: 'Überladewagen', streuer: 'Streuer mit Schneeschild', auslegemaeher: 'Auslegemäher', astschere: 'Astschere', wegehobel: 'Wegepflegegerät', striegel: 'Striegel', hacke: 'Hacke' };
 
 function machineSpecs(m: Pick<Machine, 'type' | 'power' | 'width' | 'powerNeed' | 'haPerHour' | 'seats' | 'tankM3' | 'payloadT' | 'weightT'>): string {
   if (m.type === 'schlepper') return `${m.power} PS`;
@@ -810,6 +811,8 @@ export function MarketTab({ status, game }: { status: GameStatus; game: GameCont
           <option value="auslegemaeher">Auslegemäher</option>
           <option value="astschere">Astschere</option>
           <option value="wegehobel">Wegepflegegerät</option>
+          <option value="striegel">Striegel</option>
+          <option value="hacke">Hacke</option>
           <option value="firmenwagen">Firmenwagen</option>
         </select>
       </div>
@@ -1008,6 +1011,12 @@ export function CompetitionTab({ status, game }: { status: GameStatus; game: Gam
           </div>
         </>
       )}
+      <h2>Nordzucker (Rübenabfuhr)</h2>
+      <dl>
+        <dt>Zuverlässigkeit</dt><dd>{Math.round(b.nz.score)} / 100</dd>
+        <dt>Wochenmenge</dt><dd>{b.nz.quota ? `${b.nz.quota.toLocaleString('de-DE')} t (montags ein Abfuhrfenster von 5 Tagen)` : 'erst mit eigenem Lkw zur Kampagne (ab 10. September)'}</dd>
+      </dl>
+      <p className="hint">Wer die Abfuhrfenster einhält, bekommt in der nächsten Kampagne mehr Touren; verpasste Fenster senken die Zuverlässigkeit deutlich.</p>
       <h2>Rahmenverträge</h2>
       <ul className="cards" data-testid="frames">
         {b.frameOffers.map((f) => (

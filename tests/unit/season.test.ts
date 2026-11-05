@@ -32,8 +32,8 @@ const at = (month: number, day: number) => (MONTH_START[month] + day - 1) * 1440
 describe('Jahreslauf', () => {
   it('Saisonkalender: Frühjahr Grubbern, Sommer Stoppel, Herbst Grubbern, Winter nur Rübenabfuhr', () => {
     const at2 = (m: number, d: number) => seasonServices(at(m, d)).map((x) => x.service).sort();
-    expect(at2(4, 10)).toEqual(['einzelkorn', 'grubbern', 'guelle', 'guelle', 'pflanzenschutz', 'transport']);
-    expect(seasonServices(at(6, 15)).map((x) => x.service)).toEqual(['pflanzenschutz']);
+    expect(at2(4, 10)).toEqual(['einzelkorn', 'grubbern', 'guelle', 'guelle', 'pflanzenschutz', 'striegeln', 'transport']);
+    expect(seasonServices(at(6, 15)).map((x) => x.service)).toEqual(['pflanzenschutz', 'hacken']);
     expect(seasonServices(at(7, 5))).toEqual([]);
     expect(at2(7, 20)).toEqual(['drusch', 'drusch', 'stoppel']);
     expect(at2(8, 20)).toEqual(['drusch', 'guelle', 'pressen', 'saat', 'stoppel', 'transport', 'transport']);

@@ -15,7 +15,7 @@ import { VehicleInterpolator, type VehicleSample } from '../map/interpolator';
 import type { BusinessState, FarmSummary, FromWorker, Speed, ToWorker, WorkerStats } from '../sim/protocol';
 import type { Command, GameEvent } from '../sim/business';
 import type { Company } from '../sim/economy';
-import { CROP_NAMES } from '../sim/farms';
+import { CROP_NAMES, CHARACTER_NAMES, farmCharacter } from '../sim/farms';
 import type { VehicleInfo } from '../sim/engine';
 import { FieldSource, fieldId, parseFields, type FieldSet } from '../sim/fields';
 import { AUTOSAVE, createSaveStore, type SaveInfo } from './savegame';
@@ -319,6 +319,19 @@ export class GameController {
         for (const fi of own) this.map.setFeatureState({ source: 'fields', sourceLayer: 'fields', id: fi + 1 }, { own: true });
         this.ownFields = own;
       }
+      // aufgegebene Betriebe ausblenden, Empfehlungen als Linien (Vorschläge 27, 28)
+      const closed = new Set(st.farmFlags.closed);
+      if (closed.size !== this.closedCount) { this.closedCount = closed.size; this.closedFarms = closed; this.setFarmData(); }
+      this.organicFarms = new Set(st.farmFlags.organic);
+      if (st.referrals.length !== this.referralCount && this.map?.getSource('referrals')) {
+        this.referralCount = st.referrals.length;
+        (this.map.getSource('referrals') as GeoJSONSource).setData({
+          type: 'FeatureCollection',
+          features: st.referrals.filter((r) => this.farms[r.from] && this.farms[r.to]).map((r) => ({
+            type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: [this.farms[r.from].home, this.farms[r.to].home] },
+          })),
+        });
+      }
       // Konkurrenten auf der Karte aktualisieren (nur bei Änderung)
       const compKey = st.market.competitors.map((c) => `${c.id}:${c.warUntil > st.time ? 1 : 0}`).join(',');
       if (compKey !== this.competitorKey && this.map?.getSource('competitors')) {
@@ -426,6 +439,10 @@ export class GameController {
   /** Spielstand speichern (Name; Standard: Autosave) */
   private competitorKey = '';
   private siteKey = '';
+  private closedCount = 0;
+  private closedFarms = new Set<number>();
+  private organicFarms = new Set<number>();
+  private referralCount = 0;
   private ownKey = '';
   private ownFields = new Set<number>();
 
@@ -545,7 +562,7 @@ export class GameController {
     const map = this.map!;
     (map.getSource('farms') as GeoJSONSource | undefined)?.setData({
       type: 'FeatureCollection',
-      features: this.farms.map((f) => ({
+      features: this.farms.filter((f) => !this.closedFarms.has(f.id)).map((f) => ({
         type: 'Feature',
         id: f.id,
         properties: { id: f.id, name: f.name, known: f.known, ha: f.areaHa },
@@ -567,6 +584,7 @@ export class GameController {
       `${f.areaHa.toLocaleString('de-DE', { maximumFractionDigits: 0 })} ha auf ${f.fieldCount} ${f.fieldCount === 1 ? 'Feld' : 'Feldern'}` +
       `${f.livestock ? ', mit Viehhaltung' : ', reiner Ackerbau'}<br>` +
       `<small>${crops}</small><br>` +
+      `<small>${this.organicFarms.has(f.id) ? 'Ökobetrieb · ' : ''}Charakter: ${CHARACTER_NAMES[farmCharacter(f)]}</small><br>` +
       `<small>${f.known ? `Im Adressbuch · Zufriedenheit ${f.satisfaction} % · bevorzugt ${f.contact === 'anruf' ? 'Anrufe' : 'Nachrichten'}` : 'Noch nicht besucht – erst nach einem Besuch im Adressbuch'}</small>` +
       (this.status.business?.rivalFarms.includes(f.id) ? `<small class="warn">Arbeitet zurzeit mit einem anderen Lohnunternehmen</small>` : this.status.business?.trialFarms.includes(f.id) ? `<small>Probephase: nur kleine Aufträge, bis das Vertrauen wieder da ist</small>` : '') +
       `<div class="popup-actions"><button data-visit="${f.id}">${f.known ? 'Erneut besuchen' : 'Besuchen'}</button>${f.known ? `<button data-askland="${f.id}">Land anfragen</button>` : ''}<span class="popup-msg"></span></div>`
@@ -708,6 +726,9 @@ export class GameController {
       e.preventDefault();
       new maplibregl.Popup({ maxWidth: '240px' }).setLngLat(e.lngLat).setHTML(`<strong>${p.name}</strong><br><small>${p.info}</small>`).addTo(map);
     });
+    // Empfehlungen zwischen Betrieben (Vorschlag 27)
+    map.addSource('referrals', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    map.addLayer({ id: 'referrals-line', type: 'line', source: 'referrals', minzoom: 9, paint: { 'line-color': '#2a78d6', 'line-width': 1.5, 'line-dasharray': [2, 2], 'line-opacity': 0.7 } });
     map.addSource('farms', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
     map.addLayer({
       id: 'farms-dot',

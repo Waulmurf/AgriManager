@@ -86,7 +86,9 @@ export function App() {
   useEffect(() => {
     if (!game) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement) return;
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.target instanceof HTMLTextAreaElement) return;
+      // Kürzel mit Cmd/Strg/Alt gehören dem System (macOS: Cmd+1 usw.)
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === 'Escape') { game.closeMenu(); setBoardOpen(false); }
       if (e.code === 'Space') {
         e.preventDefault();

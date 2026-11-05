@@ -5,6 +5,8 @@
  * Positionen gehen höchstens 10-mal pro Sekunde als übertragbares Zahlenfeld
  * an die Oberfläche, neue Routen einmalig mit Geometrie.
  */
+import '../polyfills';
+import { isOrganic } from './farms';
 import { DEALERS } from '../data/catalog';
 import { LEASE_BASE_RATE, RATING_SURCHARGE, loanBaseRate } from './finance';
 import { CHEF_MAX_MINUTES, Simulation, type RouteGeom } from './engine';
@@ -147,6 +149,12 @@ function sendBusiness(force = false) {
     frames: structuredClone(b.frames),
     frameOffers: structuredClone(b.frameOffers),
     takeoverOffer: b.takeoverOffer ? { ...b.takeoverOffer } : null,
+    farmFlags: {
+      closed: (sim.farms?.farms ?? []).filter((f) => f.closed).map((f) => f.id),
+      organic: (sim.farms?.farms ?? []).filter((f) => !f.closed && isOrganic(f)).map((f) => f.id),
+    },
+    referrals: b.referrals.map((r) => ({ ...r })),
+    nz: { score: b.nzScore, quota: b.nzQuotaT },
     municipal: { tenders: structuredClone(b.tenders), winterOffers: structuredClone(b.winterOffers), winterContracts: structuredClone(b.winterContracts) },
     incidents: { storm: b.stormDay === Math.floor(sim.time / 1440), hailInsured: b.hailInsured, fairDiscount: b.fairDiscount(sim.time) },
     marketing: {

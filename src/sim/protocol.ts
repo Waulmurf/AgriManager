@@ -89,6 +89,10 @@ export interface BusinessState {
   /** Kommunal (Vorschläge 2, 3) und Ereignisse (14) */
   municipal: { tenders: Tender[]; winterOffers: WinterContract[]; winterContracts: WinterContract[] };
   incidents: { storm: boolean; hailInsured: boolean; fairDiscount: number };
+  /** Strukturwandel und Öko (Vorschläge 28, 29): aufgegebene Betriebe, Ökobetriebe; Empfehlungen (27); Nordzucker (30) */
+  farmFlags: { closed: number[]; organic: number[] };
+  referrals: { from: number; to: number; time: number }[];
+  nz: { score: number; quota: number };
   /** Übernahmeangebot eines kleinen Konkurrenten (Vorschlag 12) */
   takeoverOffer: { competitorId: number; price: number; until: number } | null;
   /** Auswertung (Vorschlag 13) */

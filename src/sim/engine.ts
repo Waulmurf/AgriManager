@@ -9,7 +9,7 @@ import { Rng } from './rng';
 import { PROFILES, Router, curveSpeed, edgeSpeeds, type ProfileKey, type VehicleProfile } from './astar';
 import { BRANDS, CAR_COLORS, COMPANY_CAR } from '../data/brands';
 import { fieldPattern, type FieldSet } from './fields';
-import { Crop, generateFarms, type FarmSet } from './farms';
+import { Crop, generateFarms, isOrganic, type FarmSet } from './farms';
 import { MACHINE_SKILL, MECHANIC_MIN, SELF_PROPELLED, START_OFFERS, normalizeDrivers, skillDiesel, skillSpeed, startCompany, type CarKind, type Company, type Machine } from './economy';
 import { DEALERS } from '../data/catalog';
 import { SITE_OFFERS } from '../data/sites';
@@ -1483,6 +1483,8 @@ export class Simulation {
     }
     unit.state = VehicleState.Waiting;
     unit.waitMin = RUEST_HOF_MIN;
+    // Ökobetrieb (Vorschlag 29): Maschinen vorher gründlich reinigen (kein Saatgut/Mittel verschleppen)
+    if (this.farms && o.farmId >= 0 && isOrganic(this.farms.farms[o.farmId])) unit.waitMin += 20;
     // Matschplatz (ohne befestigten Platz): bei nassem Boden 10 min Rangieren
     if (!b.hasBuilding('platz', tractor.siteId ?? 1) && this.weather.day(Math.floor(t / 1440)).soil > 25) unit.waitMin += 10;
     if (cmd.feeder && unit.task.slurry) {

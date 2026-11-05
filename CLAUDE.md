@@ -14,7 +14,7 @@ Entscheidungen fragen, sonst autonom arbeiten.
 
 ## Zielplattformen
 
-Windows und macOS (kein Linux). Tests vorerst nur unter Windows; macOS wird nur gebaut.
+Windows und macOS (kein Linux), macOS ab 12 Monterey. Unit- und Oberflächentests unter Windows; macOS wird gebaut und per Selbsttest (WKWebView) geprüft, wenn `[mac]` in der Commit-Nachricht steht.
 
 ## Befehle
 
@@ -120,7 +120,12 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
   Übernahme `takeoverOffer`/`buyCompetitor`).
 - Paket 4 fertig: Kommunal `src/sim/municipal.ts` (Gemeinden, `Tender`, `WinterContract`, `municipalDaily`, `tourDone`), Task `tour`
   (`tourPoints`, `driveCapped`), Ereignisse `eventsDaily` (Sturm `stormDay`, Hagel `hailInsured`, Kontrollen, Messerabatt `fairDiscount`),
-  Reiter Kommunal. Damit ist der Auftrag vom 5. Nov. komplett; Ideen 20–45 warten auf Auswahl.
+  Reiter Kommunal. Damit ist der Auftrag vom 5. Nov. komplett.
+- Ideen 26–30 fertig: Kundencharaktere `farmCharacter`, Empfehlungen `maybeRecommend`/`referrals` (Kartenlinien), Strukturwandel
+  `structuralChange` (`Farm.closed/organic/handoverAt`, im Spielstand `farmChanges`), Ökobetriebe `isOrganic` (Striegeln/Hacken),
+  Nordzucker-Abfuhrfenster `campaignDaily`/`nzScore` (Kunde `NZ_ID`). Ideen 20–25 und 31–45 warten auf Auswahl.
+- macOS: Mindestversion 12 (WebGL 2, Module-Worker), `src/polyfills.ts` + Startprüfung, Kürzel ohne Cmd/Strg, Selbsttest im
+  macOS-CI-Job (läuft bei `[mac]` in der Commit-Nachricht).
 
 ## CI (GitHub Actions)
 

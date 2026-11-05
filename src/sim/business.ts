@@ -6,7 +6,7 @@
  * Preise und Wahrscheinlichkeiten sind Annahmen (siehe docs/plan.md), beim Testen nachjustierbar.
  */
 import { Rng } from './rng';
-import { Crop, SURNAMES, hasBga, type FarmSet } from './farms';
+import { Crop, SURNAMES, farmCharacter, hasBga, isOrganic, type FarmSet } from './farms';
 import type { FieldSet } from './fields';
 import {
   EMPLOYER_SV, MIN_WAGE, MONTH_HOURS, ROLES, SKILLS, VACATION_DAYS, marketWage, agencyRate, takeOverFee, AGENCY_MIN_HOURS, XP_MINUTES_PER_LEVEL, baseSkills, gameDate, marketValue,
@@ -20,6 +20,7 @@ import {
   SUBSTRATE_NAME, SUBSTRATE_PRICE, FLEX_COST_KW, FLEX_CT, FLEX_EUR_KW_YEAR, HEAT_COST, HEAT_CT, HEAT_SHARE, SILO_HIRED_EUR_H, SILO_HIRED_TPH, dailyTarget, farmSlurryPerDay, gaerBlocked, gaerOf, ration, type BiogasSize, type Feed, type Substrate,
 } from './biogas';
 import { DESTINATIONS } from '../data/destinations';
+import { weekday } from './calendar';
 import { MUNICIPALITIES, MUNI_BASE, TOUR, WINTER_EUR_H, WINTER_PENALTY, WINTER_STANDBY_MONTH, inWindow, type TourService } from './municipal';
 import { GAER_N_KG_M3, ORGANIC_N_LIMIT, SEASON_FACTOR, STORABLE, STORE_EUR_T_MONTH, landPrice } from './marketing';
 import { COMPETITOR_RANGE_KM, PRICE_WAR_KM, generateCompetitors, kmBetween, type Competitor } from './market';
@@ -81,13 +82,13 @@ export const WEAR_GRUBBER_EUR_HA = 3;
 
 export type Service = 'grubbern' | 'stoppel' | 'guelle' | 'haeckseln' | 'drusch' | 'roden' | 'transport'
   | 'saat' | 'einzelkorn' | 'pflanzenschutz' | 'pressen' | 'kartoffelroden'
-  | 'winterdienst' | 'maehen' | 'hecke' | 'wegebau';
-export const SERVICE_NAMES: Record<Service, string> = { grubbern: 'Grubbern', stoppel: 'Stoppelbearbeitung', guelle: 'Gülle ausbringen', haeckseln: 'Maishäckseln', drusch: 'Mähdrusch', roden: 'Rübenroden', transport: 'Lkw-Transport', saat: 'Drillsaat', einzelkorn: 'Einzelkornsaat', pflanzenschutz: 'Pflanzenschutz', pressen: 'Stroh pressen', kartoffelroden: 'Kartoffelroden', winterdienst: 'Winterdienst', maehen: 'Böschungsmähen', hecke: 'Heckenschnitt', wegebau: 'Wegebau' };
+  | 'winterdienst' | 'maehen' | 'hecke' | 'wegebau' | 'striegeln' | 'hacken';
+export const SERVICE_NAMES: Record<Service, string> = { grubbern: 'Grubbern', stoppel: 'Stoppelbearbeitung', guelle: 'Gülle ausbringen', haeckseln: 'Maishäckseln', drusch: 'Mähdrusch', roden: 'Rübenroden', transport: 'Lkw-Transport', saat: 'Drillsaat', einzelkorn: 'Einzelkornsaat', pflanzenschutz: 'Pflanzenschutz', pressen: 'Stroh pressen', kartoffelroden: 'Kartoffelroden', winterdienst: 'Winterdienst', maehen: 'Böschungsmähen', hecke: 'Heckenschnitt', wegebau: 'Wegebau', striegeln: 'Striegeln', hacken: 'Hacken' };
 /** Gerät je Dienstleistung und Tätigkeitswort für die Anzeige */
-export const SERVICE_IMPLEMENT: Record<Service, MachineType> = { grubbern: 'grubber', stoppel: 'kurzscheibenegge', guelle: 'guellefass', haeckseln: 'feldhaecksler', drusch: 'maehdrescher', roden: 'ruebenroder', transport: 'lkw', saat: 'drille', einzelkorn: 'einzelkorn', pflanzenschutz: 'spritze', pressen: 'presse', kartoffelroden: 'kartoffelroder', winterdienst: 'streuer', maehen: 'auslegemaeher', hecke: 'astschere', wegebau: 'wegehobel' };
-export const SERVICE_VERB: Record<Service, string> = { grubbern: 'grubbert', stoppel: 'bearbeitet Stoppeln', guelle: 'bringt Gülle aus', haeckseln: 'häckselt', drusch: 'drischt', roden: 'rodet Rüben', transport: 'fährt Lkw', saat: 'drillt', einzelkorn: 'legt Mais/Rüben', pflanzenschutz: 'spritzt', pressen: 'presst Stroh', kartoffelroden: 'rodet Kartoffeln', winterdienst: 'räumt und streut', maehen: 'mäht Böschungen', hecke: 'schneidet Hecken', wegebau: 'pflegt Wege' };
+export const SERVICE_IMPLEMENT: Record<Service, MachineType> = { grubbern: 'grubber', stoppel: 'kurzscheibenegge', guelle: 'guellefass', haeckseln: 'feldhaecksler', drusch: 'maehdrescher', roden: 'ruebenroder', transport: 'lkw', saat: 'drille', einzelkorn: 'einzelkorn', pflanzenschutz: 'spritze', pressen: 'presse', kartoffelroden: 'kartoffelroder', winterdienst: 'streuer', maehen: 'auslegemaeher', hecke: 'astschere', wegebau: 'wegehobel', striegeln: 'striegel', hacken: 'hacke' };
+export const SERVICE_VERB: Record<Service, string> = { grubbern: 'grubbert', stoppel: 'bearbeitet Stoppeln', guelle: 'bringt Gülle aus', haeckseln: 'häckselt', drusch: 'drischt', roden: 'rodet Rüben', transport: 'fährt Lkw', saat: 'drillt', einzelkorn: 'legt Mais/Rüben', pflanzenschutz: 'spritzt', pressen: 'presst Stroh', kartoffelroden: 'rodet Kartoffeln', winterdienst: 'räumt und streut', maehen: 'mäht Böschungen', hecke: 'schneidet Hecken', wegebau: 'pflegt Wege', striegeln: 'striegelt', hacken: 'hackt' };
 /** Tätigkeit des Fahrers je Dienstleistung (Skill) */
-export const SERVICE_SKILL: Record<Service, Skill> = { grubbern: 'boden', stoppel: 'boden', guelle: 'guelle', haeckseln: 'haecksler', drusch: 'drescher', roden: 'roder', transport: 'transport', saat: 'saat', einzelkorn: 'saat', pflanzenschutz: 'pflanzenschutz', pressen: 'boden', kartoffelroden: 'kartoffel', winterdienst: 'boden', maehen: 'boden', hecke: 'boden', wegebau: 'boden' };
+export const SERVICE_SKILL: Record<Service, Skill> = { grubbern: 'boden', stoppel: 'boden', guelle: 'guelle', haeckseln: 'haecksler', drusch: 'drescher', roden: 'roder', transport: 'transport', saat: 'saat', einzelkorn: 'saat', pflanzenschutz: 'pflanzenschutz', pressen: 'boden', kartoffelroden: 'kartoffel', winterdienst: 'boden', maehen: 'boden', hecke: 'boden', wegebau: 'boden', striegeln: 'boden', hacken: 'boden' };
 /** Erntedienste: selbstfahrende Hauptmaschine (Fahrzeug und Gerät zugleich), Abfahrer-Wagen (falls nötig) */
 export const HARVEST_SERVICES: Service[] = ['haeckseln', 'drusch', 'roden', 'kartoffelroden'];
 /** Wagen für die Abfuhr (erster = Standard); Überladewagen laden am Feldrand über */
@@ -128,7 +129,7 @@ export const HIRED_ROLLER_EUR_H = 110;
  * Grubbern. Gülle wird je m³ abgerechnet: 4 €/m³ (Spanne für Lohnausbringung 2,50–8 €/m³ je nach
  * Entfernung und System laut LK Niederösterreich); priceHa = €/m³ × Gabe.
  */
-export const SERVICE_BASE_PRICE: Record<Service, number> = { grubbern: 55, stoppel: 38, guelle: 4, haeckseln: 230, drusch: 150, roden: 280, transport: 0, saat: 65, einzelkorn: 55, pflanzenschutz: 22, pressen: 60, kartoffelroden: 330, winterdienst: 0, maehen: 60, hecke: 150, wegebau: 400 };
+export const SERVICE_BASE_PRICE: Record<Service, number> = { grubbern: 55, stoppel: 38, guelle: 4, haeckseln: 230, drusch: 150, roden: 280, transport: 0, saat: 65, einzelkorn: 55, pflanzenschutz: 22, pressen: 60, kartoffelroden: 330, winterdienst: 0, maehen: 60, hecke: 150, wegebau: 400, striegeln: 35, hacken: 60 };
 /**
  * Lkw-Transport (Annahme): Fracht 1,80 €/t Grundpreis + 0,12 €/t je Straßen-km (Straße ≈ Luftlinie × 1,3);
  * Diesel 32 l/100 km; Maut 0,35 €/km auf Bundesstraßen und Autobahn (Strecken ab 65 km/h); Laden an der
@@ -177,6 +178,9 @@ export function seasonServices(time: number): { service: Service; crops: Crop[];
   // Pflanzenschutz (nur mit Sachkunde): Frühjahr bis Juni, Herbst in Getreide und Raps
   if (md >= 320 && md <= 630) out.push({ service: 'pflanzenschutz', crops: [Crop.Getreide, Crop.Raps, Crop.Zuckerrueben, Crop.Kartoffeln, Crop.Mais], weight: 0.7 });
   if (md >= 915 && md <= 1031) out.push({ service: 'pflanzenschutz', crops: [Crop.Getreide, Crop.Raps], weight: 0.4 });
+  // Ökobetriebe: Striegeln (Getreide, Mais, Kartoffeln) und Hacken (Mais, Rüben) statt chemischem Pflanzenschutz
+  if (md >= 320 && md <= 531) out.push({ service: 'striegeln', crops: [Crop.Getreide, Crop.Mais, Crop.Kartoffeln], weight: 1 });
+  if (md >= 501 && md <= 630) out.push({ service: 'hacken', crops: [Crop.Mais, Crop.Zuckerrueben], weight: 1 });
   // Stroh pressen nach dem Getreidedrusch; Kartoffelroden September bis Mitte Oktober
   if (md >= 725 && md <= 915) out.push({ service: 'pressen', crops: [Crop.Getreide], weight: 0.6 });
   if (md >= 901 && md <= 1015) out.push({ service: 'kartoffelroden', crops: [Crop.Kartoffeln], weight: 1.2 });
@@ -342,6 +346,9 @@ export interface WinterContract {
   until: number;
   strikes: number;
 }
+
+/** Kunde Nordzucker für geplante Abfuhrfenster (Vorschlag 30) */
+export const NZ_ID = -90;
 
 /** Sparten für die Auswertung (Vorschlag 13) */
 export type Branch = 'lohn' | 'transport' | 'ackerbau' | 'biogas';
@@ -598,6 +605,11 @@ export class Business {
   readonly cropStock: Record<OwnCrop, number> = { weizen: 0, raps: 0, mais: 0, rueben: 0, kartoffeln: 0 };
   readonly forwards: { id: number; crop: OwnCrop; t: number; priceT: number; deliverBy: number }[] = [];
   storeHarvest = true;
+  /** Empfehlungen (Vorschlag 27): wer wen empfohlen hat (für die Karte) */
+  readonly referrals: { from: number; to: number; time: number }[] = [];
+  /** Nordzucker (Vorschlag 30): Zuverlässigkeit 0–100 und Wochenmenge der laufenden Kampagne */
+  nzScore = 50;
+  nzQuotaT = 0;
   /** Kommunal (Vorschläge 2, 3): Ausschreibungen, Winterdienst-Angebote und -Verträge */
   readonly tenders: Tender[] = [];
   readonly winterOffers: WinterContract[] = [];
@@ -694,6 +706,9 @@ export class Business {
       biogas: this.biogas,
       frameOffers: this.frameOffers,
       takeoverOffer: this.takeoverOffer,
+      referrals: this.referrals,
+      nz: { score: this.nzScore, quota: this.nzQuotaT },
+      farmChanges: (this.farms?.farms ?? []).filter((f) => f.closed || f.organic !== undefined || f.handoverAt !== undefined).map((f) => ({ id: f.id, closed: f.closed, organic: f.organic, handoverAt: f.handoverAt, fields: f.closed || f.handoverAt === undefined ? f.fields : undefined, areaHa: f.areaHa })),
       municipal: { tenders: this.tenders, winterOffers: this.winterOffers, winterContracts: this.winterContracts },
       events: { rng: this.eventRng.getState(), stormDay: this.stormDay, hail: this.hailInsured },
       frames: this.frames,
@@ -736,6 +751,18 @@ export class Business {
     this.biogas = s.biogas ? structuredClone(s.biogas) : null;
     put(this.frameOffers, s.frameOffers ?? []);
     this.takeoverOffer = s.takeoverOffer ?? null;
+    put(this.referrals, s.referrals ?? []);
+    this.nzScore = s.nz?.score ?? 50;
+    this.nzQuotaT = s.nz?.quota ?? 0;
+    // Strukturwandel wiederherstellen: aufgegebene Betriebe, Flächen bei den Nachfolgern
+    if (this.farms && s.farmChanges) {
+      for (const c of s.farmChanges) {
+        const f = this.farms.farms[c.id];
+        if (!f) continue;
+        f.closed = c.closed; f.organic = c.organic; f.handoverAt = c.handoverAt; f.areaHa = c.areaHa;
+        if (c.fields) { f.fields = c.fields.slice(); for (const fi of f.fields) this.farms.fieldFarm[fi] = f.id; }
+      }
+    }
     put(this.tenders, s.municipal?.tenders ?? []);
     put(this.winterOffers, s.municipal?.winterOffers ?? []);
     put(this.winterContracts, s.municipal?.winterContracts ?? []);
@@ -792,8 +819,12 @@ export class Business {
   private satisfy(farmId: number, delta: number, time: number) {
     const farm = this.farms?.farms[farmId];
     if (!farm) return;
+    // Charakter (Vorschlag 26): Pedantische reagieren stärker, Treue verzeihen mehr
+    const ch = farmCharacter(farm);
+    if (ch === 'pedantisch') delta = delta < 0 ? delta * 1.8 : delta * 1.3;
+    else if (ch === 'treu' && delta < 0) delta *= 0.5;
     farm.satisfaction = Math.max(0, Math.min(100, farm.satisfaction + delta));
-    if (delta < 0 && farm.satisfaction < RIVAL_SWITCH_SATISFACTION && farm.rivalUntil <= time && !this.frameOf(farmId)) {
+    if (delta < 0 && farm.satisfaction < (ch === 'treu' ? 10 : RIVAL_SWITCH_SATISFACTION) && farm.rivalUntil <= time && !this.frameOf(farmId)) {
       farm.rivalUntil = time + (RIVAL_MIN_DAYS + this.rng.int(RIVAL_EXTRA_DAYS + 1)) * 1440;
       for (const r of this.requests) if (r.farmId === farmId && r.status === 'offen') r.status = 'abgelaufen';
       this.emit(time, 'warnung', `${farm.name} ist unzufrieden und arbeitet ab jetzt mit einem anderen Lohnunternehmen. In einigen Wochen kann man es mit kleinen Aufträgen wieder versuchen.`, farmId);
@@ -1733,6 +1764,7 @@ export class Business {
   }
 
   farmName(id: number): string {
+    if (id === NZ_ID) return 'Nordzucker (Werk Uelzen)';
     if (id <= MUNI_BASE) return MUNICIPALITIES[MUNI_BASE - id]?.name ?? 'Gemeinde';
     if (id < 0) return 'Eigene Fläche';
     return this.farms?.farms[id]?.name ?? `Betrieb ${id}`;
@@ -1753,6 +1785,7 @@ export class Business {
     const season = seasonServices(time);
     if (!fs || !f || !season.length) return null;
     const farm = fs.farms[farmId];
+    if (farm.closed) return null; // Betrieb aufgegeben (Vorschlag 28)
     if (this.isRival(farmId, time)) return null;
     if (this.requests.some((r) => r.farmId === farmId && r.status === 'offen')) return null;
     const trial = this.isTrial(farmId, time);
@@ -1762,7 +1795,10 @@ export class Business {
     // viehlose Betriebe: Gärrest aus der eigenen Anlage oder Gülle/Gärrest von einem fremden Hof bzw. einer fremden BGA
     // (Annahme: etwa jeder dritte viehlose Betrieb nimmt organischen Dünger auf)
     const supplier = !farm.livestock && !bga && !gaerOk && farm.id % 3 === 0 ? this.slurrySupplier(farmId) : null;
-    const offered = season.filter((x) => (x.service !== 'guelle' || farm.livestock || bga || gaerOk || supplier !== null) && (!x.liquid || bga));
+    const organic = isOrganic(farm);
+    const offered = season.filter((x) => (x.service !== 'guelle' || farm.livestock || bga || gaerOk || supplier !== null) && (!x.liquid || bga)
+      // Öko: kein chemischer Pflanzenschutz, dafür Striegeln und Hacken; konventionell umgekehrt
+      && (organic ? x.service !== 'pflanzenschutz' : x.service !== 'striegeln' && x.service !== 'hacken'));
     if (!offered.length) return null;
     season.length = 0;
     season.push(...offered);
@@ -1815,6 +1851,9 @@ export class Business {
     const comp = gaerReq ? null : this.competitorOffer(farmId, sv.service, time, gabe, chain);
     let offerHa = priceHa;
     if (comp) offerHa = Math.min(priceHa, Math.round(comp.priceHa * (this.isLoyal(farmId) ? 1.06 : 1.02) * 2) / 2);
+    // Preisdrücker bieten weniger (Vorschlag 26)
+    const character = farmCharacter(farm);
+    if (character === 'preisdruecker') offerHa = Math.round(offerHa * 0.93 * 100) / 100;
     const req: Request = {
       id: this.nextId++,
       farmId,
@@ -1822,7 +1861,7 @@ export class Business {
       fields: picked,
       areaHa: Math.round(ha * 100) / 100,
       earliest: time,
-      latest: time + (chain ? 3 + this.rng.int(5) : tr ? 7 + this.rng.int(7) : 5 + this.rng.int(8)) * 1440,
+      latest: time + Math.max(2, (chain ? 3 + this.rng.int(5) : tr ? 7 + this.rng.int(7) : 5 + this.rng.int(8)) - (character === 'pedantisch' ? 2 : 0)) * 1440,
       priceHa: offerHa,
       competitorPriceHa: comp?.priceHa,
       competitorId: comp?.id,
@@ -1885,7 +1924,7 @@ export class Business {
 
   /** Routinearbeit: einfache Feldarbeit mit Schlepper und Gerät (keine Ketten, keine Transporte) */
   isRoutine(s: Service): boolean {
-    return s === 'grubbern' || s === 'stoppel' || s === 'saat' || s === 'einzelkorn' || s === 'pflanzenschutz' || s === 'pressen';
+    return s === 'grubbern' || s === 'stoppel' || s === 'saat' || s === 'einzelkorn' || s === 'pflanzenschutz' || s === 'pressen' || s === 'striegeln' || s === 'hacken';
   }
 
   // ---------- Ausbildung (Vorschlag 11) ----------
@@ -2226,6 +2265,122 @@ export class Business {
     }
   }
 
+  // ---------- Empfehlungen (Vorschlag 27) ----------
+
+  /** Zufriedener Kunde empfiehlt den Betrieb an einen unbekannten Nachbarn (bis 8 km) */
+  private maybeRecommend(farmId: number, time: number) {
+    const fs = this.farms;
+    const farm = fs?.farms[farmId];
+    if (!fs || !farm || farm.satisfaction < 75) return;
+    const chance = (this.isLoyal(farmId) ? 0.35 : 0.15) * (farmCharacter(farm) === 'treu' ? 1.5 : 1);
+    if (this.eventRng.next() >= chance) return;
+    const pos = this.farmLonLat(farmId);
+    if (!pos) return;
+    let best: number | null = null, bestKm = 8;
+    for (const f of fs.farms) {
+      if (f.known || f.closed || f.id === farmId) continue;
+      const p = this.nodeLonLat ? this.nodeLonLat(f.homeNode) : null;
+      if (!p) continue;
+      const k = kmBetween(p, pos);
+      if (k < bestKm) { bestKm = k; best = f.id; }
+    }
+    if (best === null) return;
+    const nb = fs.farms[best];
+    nb.known = true;
+    nb.satisfaction = Math.max(nb.satisfaction, 55);
+    this.referrals.push({ from: farmId, to: best, time });
+    if (this.referrals.length > 200) this.referrals.shift();
+    this.changeReputation(0.5);
+    this.version++;
+    this.emit(time, 'info', `${farm.name} hat Sie an ${nb.name} empfohlen – der Betrieb steht jetzt im Adressbuch.`, best);
+  }
+
+  // ---------- Strukturwandel (Vorschlag 28) ----------
+
+  /** 1. Januar: Betriebsaufgaben (≈ 1,5 %/Jahr), Generationswechsel (≈ 3 %), Umstellung auf Öko (≈ 0,6 %) */
+  private structuralChange(time: number) {
+    const fs = this.farms;
+    if (!fs) return;
+    const r = this.eventRng;
+    const active = fs.farms.filter((f) => !f.closed);
+    for (const f of active) {
+      const x = r.next();
+      if (x < 0.015 && !this.frameOf(f.id) && f.fields.length) {
+        // Aufgabe: Flächen gehen an den nächsten größeren Nachbarn (Pacht/Kauf)
+        const pos = this.farmLonLat(f.id);
+        let heir: (typeof f) | null = null, bestKm = 25;
+        for (const g of active) {
+          if (g === f || g.closed) continue;
+          const p = this.nodeLonLat ? this.nodeLonLat(g.homeNode) : null;
+          if (!p || !pos) continue;
+          const k = kmBetween(p, pos) - g.areaHa / 200;
+          if (k < bestKm) { bestKm = k; heir = g; }
+        }
+        f.closed = true;
+        for (const r2 of this.requests) if (r2.farmId === f.id && r2.status === 'offen') r2.status = 'abgelaufen';
+        if (heir) {
+          for (const fi of f.fields) fs.fieldFarm[fi] = heir.id;
+          heir.fields.push(...f.fields);
+          heir.areaHa = Math.round((heir.areaHa + f.areaHa) * 100) / 100;
+        }
+        f.fields = [];
+        if (f.known) this.emit(time, 'info', `${f.name} hat den Betrieb aufgegeben${heir ? `; ${heir.name} bewirtschaftet die Flächen weiter` : ''}.`, heir?.id);
+      } else if (x < 0.045) {
+        // Generationswechsel: neue Leitung, neue Beziehung, andere Mechanisierung
+        f.handoverAt = time;
+        f.mechanization = Math.max(0, Math.min(1, f.mechanization + (r.next() < 0.5 ? 0.15 : -0.2)));
+        if (f.known) {
+          f.satisfaction = 50;
+          this.emit(time, 'info', `${f.name}: Hofübergabe an die nächste Generation – neue Ansprechperson, ${f.mechanization > 0.5 ? 'will mehr selbst machen' : 'gibt mehr an Lohnunternehmer ab'}.`, f.id);
+        }
+      } else if (x < 0.051 && !isOrganic(f)) {
+        f.organic = true;
+        if (f.known) this.emit(time, 'info', `${f.name} stellt auf Ökolandbau um: Striegeln und Hacken statt Pflanzenschutz.`, f.id);
+      }
+    }
+    this.version++;
+  }
+
+  // ---------- Zuckerfabrik-Kampagnenplanung (Vorschlag 30) ----------
+
+  /** Nordzucker plant Lkw-Touren nach Zuverlässigkeit: Abfuhrfenster je Woche in der Kampagne */
+  private campaignDaily(time: number) {
+    const fs = this.farms, f = this.fields;
+    if (!fs || !f) return;
+    const d = gameDate(time);
+    const md = d.month * 100 + d.day;
+    const trucks = this.company.machines.filter((m) => m.type === 'lkw').length;
+    if (md === 910 && trucks > 0) {
+      this.nzQuotaT = Math.round(100 + this.nzScore * 4 * Math.min(3, trucks));
+      this.emit(time, 'info', `Nordzucker (Werk Uelzen) plant Sie für die Kampagne mit ${this.nzQuotaT.toLocaleString('de-DE')} t Rübenabfuhr je Woche ein (Zuverlässigkeit ${Math.round(this.nzScore)}/100). Jeden Montag kommt ein Abfuhrfenster von 5 Tagen.`);
+    }
+    const inCampaign = md >= 915 || md <= 115;
+    if (!inCampaign || !this.nzQuotaT || trucks === 0) return;
+    // Montag: neues Abfuhrfenster (Wochentag aus dem Kalender)
+    if (weekday(time) !== 0) return; // 0 = Montag
+    const beet = [];
+    for (let i = 0; i < fs.fieldCrop.length && beet.length < 400; i++) if (fs.fieldCrop[i] === Crop.Zuckerrueben && fs.fieldFarm[i] >= 0) beet.push(i);
+    if (!beet.length) return;
+    const field = beet[this.eventRng.int(beet.length)];
+    const dest = DESTINATIONS.find((x) => x.key === 'nz-uelzen')!;
+    const pos = this.nodeLonLat ? this.nodeLonLat(f.access[field]) : null;
+    const km = pos ? kmBetween(pos, dest.lonLat) * 1.3 : 20;
+    const perT = Math.round((FREIGHT_BASE_EUR_T + FREIGHT_EUR_TKM * km) * 100) / 100;
+    this.orders.push({
+      id: this.nextId++, requestId: 0, farmId: NZ_ID, service: 'transport', fields: [field], doneFields: [], areaHa: 1, priceHa: perT * this.nzQuotaT,
+      earliest: time, latest: time + 5 * 1440, status: 'offen', dieselL: 0, dieselCost: 0, tractorHours: 0, doneT: 0,
+      tPerHa: this.nzQuotaT, pickupNode: f.access[field], destNode: this.lonLatNode ? this.lonLatNode(dest.lonLat) : 0, destName: dest.name,
+    });
+    this.version++;
+    this.emit(time, 'auftrag', `Nordzucker-Abfuhrfenster: ${this.nzQuotaT.toLocaleString('de-DE')} t Rüben von einer Miete zur Zuckerfabrik bis ${fmtDay(time + 5 * 1440)} (${fmtEur(perT)}/t).`);
+  }
+
+  /** Lieferung im Fenster erhöht die Zuverlässigkeit, Verspätung senkt sie deutlich */
+  private nzDelivered(onTime: boolean, time: number) {
+    this.nzScore = Math.max(0, Math.min(100, this.nzScore + (onTime ? 3 : -8)));
+    if (!onTime) this.emit(time, 'warnung', `Nordzucker: Abfuhrfenster verpasst – Zuverlässigkeit sinkt auf ${Math.round(this.nzScore)}/100 (weniger Touren in der nächsten Kampagne).`);
+  }
+
   /** laufender Rahmenvertrag eines Betriebs */
   frameOf(farmId: number): FrameContract | undefined {
     return this.frames.find((f) => f.farmId === farmId);
@@ -2375,6 +2530,8 @@ export class Business {
     this.rivalsDaily(time);
     this.municipalDaily(time);
     this.eventsDaily(time);
+    this.campaignDaily(time);
+    if (gameDate(time).month === 1 && gameDate(time).day === 1) this.structuralChange(time);
     if (this.company.dispatcher && gameDate(time).day === 1) this.book(time, 'Disponent (Büro)', -DISPATCHER_MONTH, 'Personal');
     this.biogasDaily(time);
     // Auftrag steht wegen Panne: Kunde wartet und wird unzufriedener (MZ-07)
@@ -3136,6 +3293,8 @@ export class Business {
         return;
       }
       this.satisfy(o.farmId, onTime ? 5 : -10, time);
+      if (onTime) this.maybeRecommend(o.farmId, time);
+      if (o.farmId === NZ_ID) this.nzDelivered(onTime, time);
       const fr = this.frameOf(o.farmId);
       if (fr && !onTime && fr.services.includes(o.service)) {
         fr.strikes++;
@@ -3197,7 +3356,7 @@ export class Business {
   private issueInvoice(o: Order, time: number) {
     const farm = this.farms?.farms[o.farmId];
     const sat = farm?.satisfaction ?? 50;
-    const late = this.rng.next() < 0.05 + (0.35 * (100 - sat)) / 100;
+    const late = this.rng.next() < 0.05 + (0.35 * (100 - sat)) / 100 + (farm && farmCharacter(farm) === 'spaetzahler' ? 0.3 : 0);
     const payAt = late ? -1 : time + 1 + this.rng.int(PAYMENT_TERM_DAYS * 1440 - 1);
     const d = gameDate(time);
     const inv: Invoice = {

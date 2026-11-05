@@ -21,7 +21,7 @@ export type MachineType =
   | 'schlepper' | 'firmenwagen' | 'grubber' | 'kurzscheibenegge' | 'guellefass' | 'zubringer'
   | 'feldhaecksler' | 'haeckselwagen' | 'radlader' | 'maehdrescher' | 'kipper' | 'ruebenroder' | 'lkw'
   | 'drille' | 'einzelkorn' | 'spritze' | 'presse' | 'kartoffelroder' | 'ueberladewagen'
-  | 'streuer' | 'auslegemaeher' | 'astschere' | 'wegehobel';
+  | 'streuer' | 'auslegemaeher' | 'astschere' | 'wegehobel' | 'striegel' | 'hacke';
 /** Selbstfahrende Maschinen erscheinen wie Schlepper als Fahrzeug auf der Karte */
 export const SELF_PROPELLED: MachineType[] = ['schlepper', 'feldhaecksler', 'radlader', 'maehdrescher', 'ruebenroder', 'lkw'];
 

@@ -207,6 +207,31 @@ jobs:
       - name: Tauri-Build
         run: npx tauri build --target universal-apple-darwin
       - run: lipo -info src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app/Contents/MacOS/*
+      - name: Selbsttest der fertigen App (macOS, WKWebView)
+        run: |
+          app=$(ls -d src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app | head -1)
+          bin="$app/Contents/MacOS/$(ls "$app/Contents/MacOS" | head -1)"
+          sw_vers
+          export LOHNBETRIEB_SELFTEST=1 LOHNBETRIEB_SELFTEST_SECONDS=20 LOHNBETRIEB_SELFTEST_MIN_FPS=1 LOHNBETRIEB_SELFTEST_MIN_SPS=5
+          export LOHNBETRIEB_SELFTEST_OUT="$PWD/selftest-macos.json"
+          "$bin" > app-macos.log 2>&1 &
+          pid=$!
+          sleep 30
+          screencapture -x selftest-macos.png || true
+          for i in $(seq 1 150); do kill -0 $pid 2>/dev/null || break; sleep 1; done
+          kill $pid 2>/dev/null || true
+          tail -n 60 app-macos.log || true
+          if [ -f selftest-macos.json ]; then cat selftest-macos.json; else echo 'kein Ergebnis'; fi
+          grep -q '"ok":true' selftest-macos.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: selbsttest-macOS
+          path: |
+            selftest-macos.json
+            selftest-macos.png
+            app-macos.log
+          retention-days: 14
       - uses: actions/upload-artifact@v4
         with:
           name: app-macOS Universal

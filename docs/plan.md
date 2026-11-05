@@ -1053,3 +1053,64 @@ Nils wählt aus, was umgesetzt wird. Empfehlung für den nächsten Block: 4, 1, 
   - Verkehrskontrollen: bei überfälliger Wartung oder schlechtem Zustand 250 € Bußgeld.
   - Messen: Agritechnica (November, ungerade Jahre) 8 %, DLG-Feldtage (Juni, gerade Jahre) 4 %
     Rabatt auf Neumaschinen.
+
+## Umsetzung Ideen 26–30 und macOS-Kompatibilität (5. Nov. 2026)
+
+Recherche (Quellen siehe unten): Niedersachsen 2024 rund 7,9 % Ökobetriebe bzw. 6,0 % Ökofläche;
+von 2010 bis 2023 fiel die Zahl der Betriebe von etwa 41.730 auf 34.040 (rund 1,5 % im Jahr).
+Bei rund 63 % der Einzelunternehmen mit Leitung über 55 ist die Hofnachfolge offen.
+Die Nordzucker-Kampagne läuft von Anfang September bis Mitte Januar. Die Abfuhr wird eng
+getaktet, im Werk Nordstemmen kommen täglich 800–900 Lkw-Ladungen an. Einen belastbaren
+Lohnsatz fürs Hacken und Striegeln gibt es nicht; für Striegeln mit eigener Maschine werden
+40–55 €/ha genannt.
+
+- **26 Kundencharaktere** (`farmCharacter`, fest aus der Id): 40 % unkompliziert, 15 % pedantisch,
+  20 % Preisdrücker, 10 % zahlt gern spät, 15 % sehr treu.
+  - Pedantisch: 2 Tage kürzere Fristen, Ärger ×1,8, Lob ×1,3.
+  - Preisdrücker: bieten 7 % weniger.
+  - Spätzahler: +30 % Wahrscheinlichkeit, nicht pünktlich zu zahlen.
+  - Treu: halber Ärger, wechseln erst unter 10 % Zufriedenheit.
+- **27 Empfehlungen:** Nach pünktlicher Arbeit empfiehlt ein zufriedener Kunde (ab 75 %) den Betrieb
+  weiter: Stammkunde mit 35 %, sonst mit 15 % Chance, Treue ×1,5.
+  - Der nächste unbekannte Nachbar (bis 8 km) kommt ins Adressbuch, Ruf +0,5.
+  - Auf der Karte erscheinen blaue gestrichelte Linien.
+- **28 Strukturwandel** (1. Januar):
+  - Rund 1,5 % der Betriebe geben auf; die Flächen gehen an den nächsten größeren Nachbarn, der
+    Betrieb verschwindet von der Karte.
+  - Rund 3 % haben einen Generationswechsel: neue Ansprechperson (Zufriedenheit 50), mehr oder
+    weniger Eigenmechanisierung.
+  - Rund 0,6 % stellen auf Öko um.
+  - Der Spielstand speichert die Änderungen.
+- **29 Ökobetriebe** (Start rund 8 %, `isOrganic`): kein chemischer Pflanzenschutz.
+  - Dafür Striegeln (20.3.–31.5., 35 €/ha, Annahme) und Hacken (1.5.–30.6., 60 €/ha, Annahme).
+  - Auflage: Die Maschinen werden vor dem Einsatz gereinigt (+20 min).
+  - Geräte: Einböck Aerostar 9 m, Treffler Zinkenstriegel 12 m, Einböck Chopstar mit Kamera.
+- **30 Zuckerfabrik-Kampagnenplanung:** Wer einen eigenen Lkw hat, wird am 10. September von
+  Nordzucker eingeplant: 100 t + 4 t je Zuverlässigkeitspunkt (0–100, Start 50) je Lkw (höchstens
+  drei zählen) und Woche.
+  - Jeden Montag kommt ein Abfuhrfenster von 5 Tagen: Miete → Zuckerfabrik, Fracht je t nach
+    Entfernung.
+  - Pünktlich +3 Punkte, verspätet −8.
+- **macOS-Kompatibilität:**
+  - WKWebView entspricht dem Safari der jeweiligen macOS-Version.
+  - MapLibre braucht WebGL 2, die Simulation Module-Worker; beides gibt es erst ab Safari 15.
+    Mindestversion deshalb jetzt macOS 12 (Monterey).
+  - `src/polyfills.ts` ergänzt `structuredClone` (Safari 15.4), `Array.at` (15.4) und
+    `CanvasRenderingContext2D.roundRect` (16).
+  - Fehlt WebGL 2, erscheint beim Start eine verständliche Meldung statt einer leeren Karte.
+  - Tastenkürzel reagieren nicht mehr zusammen mit Cmd, Strg oder Alt (Cmd+1 usw. gehören dem
+    System).
+  - Das Standard-App-Menü von Tauri 2 unter macOS bleibt aktiv (Kopieren/Einfügen, Beenden).
+  - Kartenprotokoll: `convertFileSrc` erzeugt je System die richtige URL
+    (`mapdata://localhost/` bzw. `http://mapdata.localhost/`).
+  - CI: Der macOS-Job (bei `[mac]`) startet die gebaute Universal-App im Selbsttest mit WKWebView,
+    macht ein Bildschirmfoto und prüft das Ergebnis.
+- **Quellen:**
+  [Landtag Niedersachsen 19/6841](https://www.landtag-niedersachsen.de/drucksachen/drucksachen_19_07500/06501-07000/19-06841.pdf),
+  [Agrarstrukturerhebung Niedersachsen 2023](https://www.statistischebibliothek.de/mir/servlets/MCRFileNodeServlet/NIMonografie_derivate_00001219/Agrarstrukturerhebung-Niedersachsen-2023-Statistisch-gesehen_pdfa.pdf),
+  [Bundestag 20/8577 (Hofnachfolge)](https://dserver.bundestag.de/btd/20/085/2008577.pdf),
+  [Lebensmittel Zeitung: Kampagne 2025/26](https://www.lebensmittelzeitung.net/industrie/nachrichten/kampagne-202526-nordzucker-startet-ruebenernte-186325),
+  [leinetal24: Kampagne Nordstemmen](https://www.leinetal24.de/lokales/nordstemmen/ruebenkampagne-in-nordstemmer-zuckerfabrik-ist-angelaufen-90047674.html),
+  [Landtreff (Striegelkosten)](https://www.landtreff.de/okologische-landwirtschaft-t92385-2550.html),
+  [Khronos WebGL/WebKit](https://wikis.khronos.org/webgl/Implementations/WebKit),
+  [Tauri: Custom-Protokolle](https://github.com/tauri-apps/tauri/commit/ba025588f3559858f43547e8c04424c47a3c445b).
