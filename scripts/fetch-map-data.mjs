@@ -11,7 +11,7 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const REPO = process.env.MAP_DATA_REPO ?? 'waulmurf/agrimanager';
 const { tag } = JSON.parse(readFileSync(join(ROOT, 'data/map-data.json'), 'utf8'));
 const OUT = join(ROOT, 'src-tauri/resources/map');
-const FILES = ['region.json', 'region.pmtiles', 'roadgraph.bin'];
+const FILES = ['region.json', 'region.pmtiles', 'roadgraph.bin', 'fields.bin', 'fields.pmtiles'];
 const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
 let headers = { 'User-Agent': 'lohnbetrieb-fetch', ...(token ? { Authorization: `Bearer ${token}` } : {}) };
 

@@ -1,7 +1,10 @@
 {
   "$comment": "Version der Kartendaten. Zum Neubauen Tag erhöhen; der Workflow map-data erzeugt dann ein neues Release mit diesem Tag.",
-  "tag": "map-data-v2",
-  "center": { "name": "Groß Thondorf (29584 Himbergen)", "query": "Groß Thondorf, Himbergen, Niedersachsen" },
+  "tag": "map-data-v3",
+  "center": {
+    "name": "Groß Thondorf (29584 Himbergen)",
+    "query": "Groß Thondorf, Himbergen, Niedersachsen"
+  },
   "radiusKm": 50,
   "marginKm": 5,
   "pmtilesMaxZoom": 14,
@@ -12,5 +15,26 @@
     "europe/germany/brandenburg",
     "europe/germany/schleswig-holstein",
     "europe/germany/hamburg"
-  ]
+  ],
+  "fieldSources": [
+    {
+      "code": "NI",
+      "name": "Feldblöcke Niedersachsen/Bremen/Hamburg",
+      "url": "https://sla.niedersachsen.de/mapbender_sla/download/FB_NDS.zip",
+      "attribution": "Feldblöcke © ML/SLA Niedersachsen, dl-de/by-2-0 (www.govdata.de/dl-de/by-2-0), Daten bearbeitet"
+    },
+    {
+      "code": "SH",
+      "name": "Feldblöcke Schleswig-Holstein",
+      "url": "https://service.gdi-sh.de/SH_OpenGBD/feeds/Atom_SH_Feldblockfinder_OpenGBD/data/Feldbloecke_2024_GPKG.zip",
+      "attribution": "Feldblöcke © Land Schleswig-Holstein, dl-de/zero-2-0"
+    },
+    {
+      "code": "BB",
+      "name": "Feldblockkataster Brandenburg",
+      "url": "https://data.geobasis-bb.de/geofachdaten/Landwirtschaft/dfbk.zip",
+      "attribution": "Feldblöcke © Land Brandenburg, dl-de/by-2-0 (www.govdata.de/dl-de/by-2-0), Daten bearbeitet"
+    }
+  ],
+  "fieldNote": "Mecklenburg-Vorpommern (Lizenz unklar) und Sachsen-Anhalt (keine offenen Daten): Ackerflächen aus OpenStreetMap"
 }

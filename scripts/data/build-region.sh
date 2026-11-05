@@ -3,8 +3,9 @@
 #   region.json      Mittelpunkt, Radius, BBox
 #   region.pmtiles   Grundkarte (Protomaps-Basemap, Ausschnitt)
 #   roadgraph.bin    Straßengraph für das Routing
+#   fields.bin       Felder (Simulation), fields.pmtiles (Kartendarstellung)
 #   SHA256SUMS
-# Voraussetzungen: curl, jq, osmium-tool, node, pmtiles (go-pmtiles)
+# Voraussetzungen: curl, jq, osmium-tool, gdal-bin, tippecanoe, node, pmtiles (go-pmtiles)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -63,11 +64,43 @@ node "$ROOT/scripts/data/build-roadgraph.mjs" \
   --opl "$WORK/roads.opl" --lat "$LAT" --lon "$LON" --radius-km "$RADIUS_KM" --margin-km "$MARGIN_KM" \
   --out "$OUT/roadgraph.bin"
 
+echo "== Felder: amtliche Feldblöcke (offen lizenziert) und OSM-Ackerflächen"
+OFFICIAL_ARGS=()
+ATTRIB_FIELDS=()
+for i in $(seq 0 $(( $(jq '.fieldSources | length' "$CFG") - 1 ))); do
+  CODE=$(jq -r ".fieldSources[$i].code" "$CFG")
+  URL=$(jq -r ".fieldSources[$i].url" "$CFG")
+  mkdir -p "$WORK/fb-$CODE"
+  if curl -sS -L -A "$UA" --fail -o "$WORK/fb-$CODE.zip" "$URL"; then
+    unzip -o -q "$WORK/fb-$CODE.zip" -d "$WORK/fb-$CODE"
+    SRC=$(find "$WORK/fb-$CODE" -iname '*.shp' -o -iname '*.gpkg' | head -1)
+    echo "   $CODE: $SRC"
+    ogrinfo -so "$SRC" 2>/dev/null | head -20 || true
+    ogr2ogr -f GeoJSONSeq -t_srs EPSG:4326 -spat $WEST $SOUTH $EAST $NORTH -spat_srs EPSG:4326 \
+      -lco RS=NO "$WORK/fb-$CODE.geojsonl" "$SRC"
+    head -c 400 "$WORK/fb-$CODE.geojsonl"; echo
+    OFFICIAL_ARGS+=(--official "$CODE:$WORK/fb-$CODE.geojsonl")
+    ATTRIB_FIELDS+=("$(jq -r ".fieldSources[$i].attribution" "$CFG")")
+  else
+    echo "   WARNUNG: $CODE nicht abrufbar ($URL) – dort OSM-Ackerflächen"
+  fi
+done
+osmium tags-filter --overwrite -o "$WORK/landuse.osm.pbf" "$WORK/region.osm.pbf" wr/landuse=farmland,meadow
+osmium export --overwrite -f geojsonseq --geometry-types=polygon -a type,id -o "$WORK/osm-fields.geojsonl" "$WORK/landuse.osm.pbf"
+node "$ROOT/scripts/data/build-fields.mjs" "${OFFICIAL_ARGS[@]}" --osm "$WORK/osm-fields.geojsonl" \
+  --roadgraph "$OUT/roadgraph.bin" --radius-km "$RADIUS_KM" \
+  --out-bin "$OUT/fields.bin" --out-geojson "$WORK/fields.geojsonl"
+tippecanoe -o "$OUT/fields.pmtiles" --force -l fields -Z10 -z14 --use-attribute-for-id=i \
+  --drop-densest-as-needed --simplify-only-low-zooms --detect-shared-borders \
+  --name "Felder Spielregion" "$WORK/fields.geojsonl"
+pmtiles show "$OUT/fields.pmtiles" | head -15
+FIELD_ATTRIB=$(printf '%s; ' "${ATTRIB_FIELDS[@]}")
+
 jq -n --argjson lat "$LAT" --argjson lon "$LON" --argjson r "$RADIUS_KM" \
   --arg bbox "$BBOX" --arg build "$BUILD" --arg osm "$OSM_TS" --arg name "$(jq -r .center.name "$CFG")" \
-  --arg tag "$(jq -r .tag "$CFG")" \
+  --arg tag "$(jq -r .tag "$CFG")" --arg fattr "$FIELD_ATTRIB" \
   '{tag:$tag, center:{name:$name, lat:$lat, lon:$lon}, radiusKm:$r, bbox:($bbox|split(",")|map(tonumber)),
     protomapsBuild:$build, osmTimestamp:$osm, builtAt:(now|todate),
-    attribution:"© OpenStreetMap-Mitwirkende (ODbL), Protomaps"}' > "$OUT/region.json"
+    attribution:"© OpenStreetMap-Mitwirkende (ODbL), Protomaps", fieldAttribution:$fattr}' > "$OUT/region.json"
 
-(cd "$OUT" && sha256sum region.json region.pmtiles roadgraph.bin > SHA256SUMS && ls -la && cat SHA256SUMS region.json)
+(cd "$OUT" && sha256sum region.json region.pmtiles roadgraph.bin fields.bin fields.pmtiles > SHA256SUMS && ls -la && cat SHA256SUMS region.json)
