@@ -602,6 +602,35 @@ export function NewsTab({ status, game }: { status: GameStatus; game: GameContro
   );
 }
 
+/**
+ * Fahrerwechsel: am Hof sofort, draußen bringt ein dritter Fahrer den Ersatz mit dem
+ * Firmenwagen hin und nimmt den abgelösten Fahrer mit zurück.
+ */
+export function SwapDriver({ status, game, vehicle, atHome, show, current }: { status: GameStatus; game: GameController | null; vehicle: number; atHome: boolean; show: (m: string) => void; current?: number }) {
+  const [driver, setDriver] = useState(0);
+  const [chauffeur, setChauffeur] = useState(0);
+  const drivers = status.company?.drivers ?? [];
+  const free = drivers.filter((x) => !status.business?.driverStatus[x.id] && x.id !== current);
+  const name = (x: Employee) => (x.isPlayer ? 'Chef' : x.name);
+  return (
+    <div className="card-actions">
+      <select value={driver} onChange={(e) => setDriver(Number(e.target.value))} aria-label="Neuer Fahrer" data-testid="swap-driver">
+        <option value={0}>Fahrer wechseln …</option>
+        {free.map((x) => <option key={x.id} value={x.id}>{name(x)}</option>)}
+      </select>
+      {!atHome && (
+        <select value={chauffeur} onChange={(e) => setChauffeur(Number(e.target.value))} aria-label="Bringt ihn hin" data-testid="swap-chauffeur">
+          <option value={0}>… gebracht von</option>
+          {free.filter((x) => x.id !== driver).map((x) => <option key={x.id} value={x.id}>{name(x)} (Firmenwagen)</option>)}
+        </select>
+      )}
+      <button disabled={!driver || (!atHome && !chauffeur)} onClick={async () => show(await game!.command({ kind: 'swapDriver', vehicle, driverId: driver, chauffeurId: atHome ? undefined : chauffeur }))} data-testid="swap-go">
+        {atHome ? 'Am Hof wechseln' : 'Hinbringen'}
+      </button>
+    </div>
+  );
+}
+
 /** Rechtsklick-Menü für Fahrzeuge: Status und Befehle */
 export function VehicleMenu({ status, game }: { status: GameStatus; game: GameController | null }) {
   const fb = useFeedback();
@@ -641,14 +670,7 @@ export function VehicleMenu({ status, game }: { status: GameStatus; game: GameCo
             </button>
             <button onClick={() => game.flyToVehicle(menu.vehicle)}>Hinzoomen</button>
           </div>
-          {unit.orderId !== undefined && unit.busy && (
-            <div className="card-actions">
-              <select defaultValue="" onChange={async (e) => { if (e.target.value) fb.show(await game.command({ kind: 'swapDriver', vehicle: menu.vehicle, driverId: Number(e.target.value) })); }} aria-label="Fahrer wechseln" data-testid="swap-driver">
-                <option value="">Fahrer wechseln …</option>
-                {(status.company?.drivers ?? []).filter((x) => !status.business?.driverStatus[x.id]).map((x) => <option key={x.id} value={x.id}>{x.isPlayer ? 'Chef' : x.name}</option>)}
-              </select>
-            </div>
-          )}
+          {unit.orderId !== undefined && unit.busy && <SwapDriver status={status} game={game} vehicle={menu.vehicle} atHome={unit.atHome} show={fb.show} />}
         </>
       ) : (
         <>

@@ -10,6 +10,7 @@ import type { PlanBar } from '../sim/engine';
 import type { Machine } from '../sim/economy';
 import { fmtDay, fmtTime, type Order, type Request } from '../sim/business';
 import { formatGameTime } from '../game/clock';
+import { SwapDriver } from './Panels';
 
 /** sichtbares Fenster je Tag: 06:00–22:00 */
 const DAY_SPAN = 16 * 60;
@@ -196,13 +197,7 @@ export function PlanningBoard({ status, game, onClose }: { status: GameStatus; g
               <small className="hint">{selected.kind === 'running' ? 'läuft' : selected.kind === 'visit' ? 'Besuch läuft' : 'geplant'} · {fmtDay(selected.start)} {fmtTime(selected.start)} – {fmtDay(selected.end)} {fmtTime(selected.end)}{selected.latest !== undefined ? ` · Termin ${fmtDay(selected.latest)}` : ''}</small>
               {selected.warnings.map((w, i) => <small key={i} className="warn">⚠ {w}</small>)}
               {selected.kind === 'running' && selected.vehicle !== undefined && (
-                <div className="board-form">
-                  <label>Fahrer wechseln
-                    <select value={selected.driverId} onChange={(e) => send({ kind: 'swapDriver', vehicle: selected.vehicle!, driverId: Number(e.target.value) })}>
-                      {c.drivers.map((d) => <option key={d.id} value={d.id} disabled={d.id !== selected.driverId && !!b.driverStatus[d.id]}>{d.isPlayer ? 'Chef' : d.name}{b.driverStatus[d.id] && d.id !== selected.driverId ? ` (${b.driverStatus[d.id]})` : ''}</option>)}
-                    </select>
-                  </label>
-                </div>
+                <SwapDriver status={status} game={game} vehicle={selected.vehicle} current={selected.driverId} atHome={!!b.units.find((u) => u.vehicle === selected.vehicle)?.atHome} show={show} />
               )}
               {selected.kind === 'queued' && selected.queueId !== undefined && (
                 <div className="board-form">

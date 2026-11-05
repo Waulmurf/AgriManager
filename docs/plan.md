@@ -331,12 +331,19 @@ Schritte:
   zum Marktlohn für seine Skills. Provision der Zeitarbeitsfirma nach Einsatzdauer: unter 3
   Monaten zwei Bruttomonatslöhne, 3–6 Monate 1,5, 6–9 Monate 1, 9–12 Monate 0,5, danach frei
   (übliche Staffel, Annahme).
-- **Fahrerwechsel:** Ein laufender Auftrag lässt sich an einen freien Fahrer übergeben, z. B.
-  wenn der Fahrer krank wird oder Feierabend hat.
-  - Weg: Rechtsklick aufs Fahrzeug oder Balken im Planungsboard.
-  - Der Ersatz wird mit dem Firmenwagen hingebracht (KK-03), so lange steht das Gespann. Dauer:
-    Luftlinie × 1,35 bei 60 km/h, plus 5 min.
-  - Tempo und Diesel richten sich ab dann nach dem Skill des neuen Fahrers.
+- **Fahrerwechsel** (präzisiert nach Rückmeldung von Nils): Ein Fahrer kann nur gewechselt
+  werden, wenn das Gespann am Hof steht (Rüsten, Abstellen), oder wenn ein dritter Fahrer
+  den Ersatz mit dem Firmenwagen zum Gespann fährt.
+  - Weg: Rechtsklick aufs Fahrzeug oder Balken im Planungsboard, dann neuen Fahrer und
+    Fahrer für den Firmenwagen wählen.
+  - Der Firmenwagen fährt wirklich hin. Ist das Gespann inzwischen mehr als 1,5 km
+    weitergefahren, fährt er bis zu dreimal hinterher.
+  - Übergabe 5 min, das Gespann steht so lange. Danach nimmt der Wagen den abgelösten Fahrer
+    mit zurück zum Hof.
+  - Arbeitszeit zählt für den Fahrer des Wagens und für den Ersatz während der Hinfahrt. Der
+    Firmenwagen ist in der Zeit belegt, geplante Besuche warten.
+  - Tempo und Diesel richten sich ab dann nach dem Skill des neuen Fahrers. Hatte der alte
+    Fahrer Feierabend, macht der neue sofort weiter.
   - Ist der Fahrer eines laufenden Auftrags krank, steht das Gespann. Am Balken erscheint die
     Warnung „Fahrer wechseln“.
 

@@ -186,7 +186,7 @@ export type Command =
   | { kind: 'rent'; poolId: number; days: number }
   | { kind: 'extendRent'; employeeId: number; days: number }
   | { kind: 'takeOver'; employeeId: number; asKind: 'fest' | 'saison' }
-  | { kind: 'swapDriver'; vehicle: number; driverId: number }
+  | { kind: 'swapDriver'; vehicle: number; driverId: number; chauffeurId?: number }
   | { kind: 'staffAnswer'; requestId: number; accept: boolean }
   | { kind: 'setWage'; employeeId: number; wage: number }
   | { kind: 'plan'; orderId: number; driverId: number; tractorId: number; implementId: number; notBefore?: number }

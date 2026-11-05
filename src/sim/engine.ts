@@ -143,10 +143,16 @@ export interface PlayerUnitInfo {
   hours: number;
   busy: boolean;
   orderId?: number;
+  /** Gespann am Hof (Fahrerwechsel ohne Firmenwagen möglich) */
+  atHome: boolean;
 }
 
 type PlayerTask =
   | { kind: 'visit'; driverId: number; farmId: number; phase: 'to' | 'at' | 'back' }
+  | {
+      /** Fahrerwechsel: driverId fährt den Firmenwagen und bringt passengerId zum Gespann */
+      kind: 'shuttle'; driverId: number; passengerId: number; vehicle: number; phase: 'to' | 'at' | 'back'; tries: number;
+    }
   | {
       kind: 'job';
       driverId: number;
@@ -370,6 +376,12 @@ export class Simulation {
         const f = surchargeFactor(this.time);
         if (f) this.driverSurcharge[d] = (this.driverSurcharge[d] ?? 0) + f;
         this.lastWork[d] = this.time;
+        const tk = v.task;
+        if (tk.kind === 'shuttle' && tk.phase !== 'back') {
+          const p = tk.passengerId;
+          this.driverMinutes[p] = (this.driverMinutes[p] ?? 0) + 1;
+          this.lastWork[p] = this.time;
+        }
       }
     }
     for (const v of this.vehicles) {
@@ -412,7 +424,11 @@ export class Simulation {
       }
       if (v.owner !== 'player' || !v.task || v.task.driverId !== driverId) continue;
       const who = this.driverName(driverId);
+      if (v.task.kind === 'shuttle') return `${who} fährt ${this.driverName(v.task.passengerId)} zum Fahrerwechsel`;
       return v.task.kind === 'visit' ? `${who} ist auf Besuch bei ${this.business.farmName(v.task.farmId)}` : `${who} fährt einen Auftrag`;
+    }
+    for (const v of this.vehicles) {
+      if (v.task?.kind === 'shuttle' && v.task.passengerId === driverId && v.task.phase !== 'back') return `${this.driverName(driverId)} wird zum Fahrerwechsel gebracht`;
     }
     return null;
   }
@@ -621,7 +637,14 @@ export class Simulation {
         cursor[t.driverId] = Math.max(cursor[t.driverId] ?? this.time, end);
       } else {
         const end = this.time + 30;
-        bars.push({ key: `r${v.id}`, driverId: t.driverId, kind: 'visit', farmId: t.farmId, label: `Besuch ${b.farmName(t.farmId)}`, start: this.time, end, warnings: [] });
+        if (t.kind === 'shuttle') {
+          const lbl = `Fahrerwechsel: bringt ${this.driverName(t.passengerId)}`;
+          bars.push({ key: `r${v.id}`, driverId: t.driverId, kind: 'visit', label: lbl, start: this.time, end, warnings: [] });
+          bars.push({ key: `p${v.id}`, driverId: t.passengerId, kind: 'visit', label: 'Fahrt zum Fahrerwechsel', start: this.time, end, warnings: [] });
+          cursor[t.passengerId] = Math.max(cursor[t.passengerId] ?? this.time, end);
+        } else {
+          bars.push({ key: `r${v.id}`, driverId: t.driverId, kind: 'visit', farmId: t.farmId, label: `Besuch ${b.farmName(t.farmId)}`, start: this.time, end, warnings: [] });
+        }
         cursor[t.driverId] = Math.max(cursor[t.driverId] ?? this.time, end);
       }
     }
@@ -679,11 +702,38 @@ export class Simulation {
     return bars;
   }
 
+  /** Gespann steht am Hof (Rüsten oder Abstellen) */
+  private atHome(v: Vehicle): boolean {
+    const t = v.task;
+    if (t?.kind === 'job' && (t.phase === 'prep' || t.phase === 'unhitch')) return true;
+    const [px, py] = this.position(v.id);
+    const dx = px - this.graph.x[this.homeNode], dy = py - this.graph.y[this.homeNode];
+    return dx * dx + dy * dy < 150 * 150;
+  }
+
+  /** Fahrer übernimmt das Gespann (Tempo und Diesel nach seinem Skill) */
+  private takeOverJob(v: Vehicle, driverId: number) {
+    const t = v.task;
+    if (t?.kind !== 'job') return;
+    const old = t.driverId;
+    const skill = this.company.drivers.find((d) => d.id === driverId)?.skills.boden ?? 1;
+    const f = skillSpeed(skill) / skillSpeed(t.skill);
+    t.haPerHour *= f;
+    t.workKmh *= f;
+    t.dieselLHa *= skillDiesel(skill) / skillDiesel(t.skill);
+    t.skill = skill;
+    t.driverId = driverId;
+    v.restUntil = 0; // ausgeruhter Fahrer macht weiter
+    this.business.version++;
+    this.business.info(this.time, `${v.name}: ${this.driverName(driverId)} übernimmt von ${this.driverName(old)}.`);
+  }
+
   /**
-   * Fahrerwechsel bei einem laufenden Auftrag (Ersatz bei Krankheit oder Feierabend): Der neue
-   * Fahrer wird mit dem Firmenwagen hingebracht (KK-03), das Gespann steht so lange.
+   * Fahrerwechsel bei einem laufenden Auftrag (Ersatz bei Krankheit oder Feierabend). Am Hof
+   * sofort; draußen nur, wenn ein dritter Fahrer den Ersatz mit dem Firmenwagen hinbringt und
+   * den abgelösten Fahrer mit zurücknimmt (KK-03).
    */
-  private swapDriver(vehicle: number, driverId: number): string {
+  private swapDriver(vehicle: number, driverId: number, chauffeurId?: number): string {
     const v = this.vehicles[vehicle];
     if (!v || v.owner !== 'player' || v.task?.kind !== 'job') return 'Nur bei laufenden Aufträgen';
     const t = v.task;
@@ -693,21 +743,45 @@ export class Simulation {
     if (busy) return busy;
     const blocked = this.driverBlocked(driverId);
     if (blocked) return `${this.driverName(driverId)} ${blocked}`;
-    const old = t.driverId;
+    if (this.vehicles.some((x) => x.task?.kind === 'shuttle' && x.task.vehicle === vehicle)) return 'Wechsel ist schon unterwegs';
+    if (this.atHome(v)) {
+      this.takeOverJob(v, driverId);
+      return `${this.driverName(driverId)} übernimmt am Hof`;
+    }
+    if (chauffeurId === undefined) return 'Das Gespann ist draußen – jemand muss den Ersatz mit dem Firmenwagen hinbringen';
+    if (chauffeurId === driverId || chauffeurId === t.driverId) return 'Der Ersatz braucht einen anderen Fahrer für den Firmenwagen';
+    if (!this.company.drivers.some((d) => d.id === chauffeurId)) return 'Fahrer für den Firmenwagen unbekannt';
+    const cb = this.driverBusy(chauffeurId) ?? this.driverBlocked(chauffeurId);
+    if (cb) return `${this.driverName(chauffeurId)}: ${cb}`;
+    const car = this.vehicles.find((x) => x.owner === 'player' && x.profile === 'car' && !x.task);
+    if (!car) return 'Kein freier Firmenwagen';
     const [px, py] = this.position(v.id);
-    const dx = px - this.graph.x[this.homeNode], dy = py - this.graph.y[this.homeNode];
-    const travel = Math.round((Math.sqrt(dx * dx + dy * dy) * EST_DETOUR) / EST_CAR_M_MIN) + 5;
-    const skill = this.company.drivers.find((d) => d.id === driverId)?.skills.boden ?? 1;
-    const f = skillSpeed(skill) / skillSpeed(t.skill);
-    t.haPerHour *= f;
-    t.workKmh *= f;
-    t.dieselLHa *= skillDiesel(skill) / skillDiesel(t.skill);
-    t.skill = skill;
-    t.driverId = driverId;
-    v.handoverUntil = this.time + travel;
+    car.task = { kind: 'shuttle', driverId: chauffeurId, passengerId: driverId, vehicle, phase: 'to', tries: 0 };
+    if (!this.driveTo(car, nearestNode(this.graph, px, py))) return 'Gespann nicht erreichbar';
     this.business.version++;
-    this.business.info(this.time, `${v.name}: ${this.driverName(driverId)} übernimmt von ${this.driverName(old)} (Übergabe in etwa ${travel} min).`);
-    return `${this.driverName(driverId)} übernimmt in etwa ${travel} min`;
+    this.business.info(this.time, `${this.driverName(chauffeurId)} bringt ${this.driverName(driverId)} mit dem Firmenwagen zu ${v.name}.`);
+    return `${this.driverName(chauffeurId)} fährt ${this.driverName(driverId)} hin`;
+  }
+
+  /** Firmenwagen beim Fahrerwechsel angekommen: Gespann noch in der Nähe? Dann Übergabe */
+  private shuttleArrive(car: Vehicle) {
+    const t = car.task;
+    if (t?.kind !== 'shuttle') return;
+    const target = this.vehicles[t.vehicle];
+    const [cx, cy] = this.position(car.id);
+    const [px, py] = this.position(t.vehicle);
+    const far = (cx - px) * (cx - px) + (cy - py) * (cy - py) > 1500 * 1500;
+    if (target?.task?.kind === 'job' && far && t.tries < 3) {
+      // Gespann ist inzwischen weitergefahren: hinterher
+      t.tries++;
+      this.driveTo(car, nearestNode(this.graph, px, py));
+      return;
+    }
+    t.phase = 'at';
+    car.state = VehicleState.Waiting;
+    car.waitMin = 5;
+    if (target) target.handoverUntil = this.time + 5;
+    this.business.version++;
   }
 
   /** Auftrag aus dem Board einplanen bzw. umplanen (ersetzt einen bestehenden Eintrag) */
@@ -836,6 +910,7 @@ export class Simulation {
         const t = v.task;
         const b = this.business;
         if (t?.kind === 'visit') status = t.phase === 'to' ? `fährt zu ${b.farmName(t.farmId)}` : t.phase === 'at' ? `Besuch bei ${b.farmName(t.farmId)}` : 'fährt zurück zum Hof';
+        if (t?.kind === 'shuttle') status = t.phase === 'to' ? `bringt ${this.driverName(t.passengerId)} zum Fahrerwechsel` : t.phase === 'at' ? 'Fahrerwechsel' : 'fährt mit dem abgelösten Fahrer zurück';
         if (t?.kind === 'job') {
           const o = b.orders.find((x) => x.id === t.orderId);
           const who = o ? b.farmName(o.farmId) : '';
@@ -856,7 +931,7 @@ export class Simulation {
         const moving = v.route && v.seg < v.route.speed.length && (v.state === VehicleState.Driving || v.state === VehicleState.Working) && v.restUntil <= this.time;
         const kmh = moving ? Math.round(v.route!.speed[v.seg] * 3.6) : 0;
         const m = this.company.machines.find((x) => x.id === v.machineId);
-        return { machineId: v.machineId!, vehicle: v.id, status, kmh: kmh > 200 ? 0 : kmh, hours: m?.hours ?? 0, busy: !!t, orderId: t?.kind === 'job' ? t.orderId : undefined };
+        return { machineId: v.machineId!, vehicle: v.id, status, kmh: kmh > 200 ? 0 : kmh, hours: m?.hours ?? 0, busy: !!t, orderId: t?.kind === 'job' ? t.orderId : undefined, atHome: this.atHome(v) };
       });
   }
 
@@ -905,7 +980,7 @@ export class Simulation {
       case 'takeOver':
         return b.takeOver(cmd.employeeId, cmd.asKind, t);
       case 'swapDriver':
-        return this.swapDriver(cmd.vehicle, cmd.driverId);
+        return this.swapDriver(cmd.vehicle, cmd.driverId, cmd.chauffeurId);
       case 'vacation':
         return b.grantVacation(cmd.employeeId, cmd.fromDay, cmd.days, t);
       case 'staffAnswer':
@@ -1325,6 +1400,11 @@ export class Simulation {
     const b = this.business;
     this.chargeDiesel(v, false);
     if (!t) { v.state = VehicleState.Waiting; return; }
+    if (t.kind === 'shuttle') {
+      if (t.phase === 'to') this.shuttleArrive(v);
+      else { v.task = undefined; v.state = VehicleState.Waiting; b.version++; }
+      return;
+    }
     if (t.kind === 'visit') {
       if (t.phase === 'to') {
         t.phase = 'at';
@@ -1372,6 +1452,14 @@ export class Simulation {
   private playerWaitDone(v: Vehicle) {
     const t = v.task;
     if (!t) return;
+    if (t.kind === 'shuttle' && t.phase === 'at') {
+      const target = this.vehicles[t.vehicle];
+      t.phase = 'back'; // abgelöster Fahrer fährt mit zurück
+      if (target?.task?.kind === 'job' && !this.driverBusy(t.passengerId)) this.takeOverJob(target, t.passengerId);
+      this.driveTo(v, this.homeNode);
+      this.business.version++;
+      return;
+    }
     if (t.kind === 'visit' && t.phase === 'at') {
       this.business.onVisit(t.farmId, this.time);
       t.phase = 'back';

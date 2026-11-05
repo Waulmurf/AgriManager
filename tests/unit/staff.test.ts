@@ -230,6 +230,23 @@ describe('Urlaub, Krankheit, Zufriedenheit, Zuschläge', () => {
 });
 
 describe('Zeitarbeit und Fahrerwechsel', () => {
+  it('Fahrerwechsel am Hof geht sofort', () => {
+    const s = twoOrders(5);
+    runUntil(s, () => s.business.applicants.length > 0, 20 * 1440);
+    s.command({ kind: 'hire', applicantId: s.business.applicants[0].id, asKind: 'fest' });
+    const e = s.company.drivers[1];
+    s.command({ kind: 'buy', offerId: 1 });
+    const g = s.company.machines.find((m) => m.type === 'grubber')!;
+    const o = s.business.orders.find((x) => x.status === 'offen')!;
+    runUntil(s, () => s.time % 1440 > 10 && s.time % 1440 < 60, 1440);
+    s.command({ kind: 'startJob', orderId: o.id, tractorId: 1, implementId: g.id, driverId: 1 });
+    const unit = s.playerUnits().find((u) => u.machineId === 1)!;
+    expect(unit.atHome).toBe(true); // Rüstzeit am Hof
+    expect(s.command({ kind: 'swapDriver', vehicle: unit.vehicle, driverId: e.id })).toMatch(/übernimmt am Hof/);
+    expect(s.driverBusy(1)).toBeNull();
+    expect(s.driverBusy(e.id)).toMatch(/fährt einen Auftrag/);
+  });
+
   it('Leiharbeiter buchen: ab morgen im Einsatz, Kosten nach Stunden, endet nach der Buchung', () => {
     const s = world(5);
     runUntil(s, () => s.business.agencyPool.length > 0, 2 * 1440);
@@ -283,7 +300,16 @@ describe('Zeitarbeit und Fahrerwechsel', () => {
     expect(unit.status).toMatch(/krank/);
     const bar = s.planBoard().find((x) => x.kind === 'running')!;
     expect(bar.warnings.some((w) => w.includes('Fahrer wechseln'))).toBe(true);
-    expect(s.command({ kind: 'swapDriver', vehicle: unit.vehicle, driverId: leih.id })).toMatch(/übernimmt/);
+    // draußen nur mit Firmenwagen und drittem Fahrer
+    expect(s.command({ kind: 'swapDriver', vehicle: unit.vehicle, driverId: leih.id })).toMatch(/Firmenwagen hinbringen/);
+    expect(s.command({ kind: 'swapDriver', vehicle: unit.vehicle, driverId: leih.id, chauffeurId: leih.id })).toMatch(/anderen Fahrer/);
+    expect(s.command({ kind: 'swapDriver', vehicle: unit.vehicle, driverId: leih.id, chauffeurId: 1 })).toMatch(/Chef fährt/);
+    expect(s.driverBusy(1)).toMatch(/Fahrerwechsel/);
+    expect(s.driverBusy(leih.id)).toMatch(/gebracht/);
+    // Gespann wartet, bis der Firmenwagen da ist; dann fährt der Leiharbeiter
+    runUntil(s, () => !s.driverBusy(1), 600);
+    expect(s.driverBusy(1)).toBeNull();
+    expect(s.driverBusy(leih.id)).toMatch(/fährt einen Auftrag/);
     runUntil(s, () => o.status === 'fertig', 4 * 1440);
     expect(o.status).toBe('fertig');
   });
