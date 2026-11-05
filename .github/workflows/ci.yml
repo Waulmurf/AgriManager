@@ -207,12 +207,38 @@ jobs:
       - name: Tauri-Build
         run: npx tauri build --target universal-apple-darwin
       - run: lipo -info src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app/Contents/MacOS/*
-      - name: Selbsttest der fertigen App (macOS, WKWebView)
+      # App-Bundle für den Selbsttest auf einem arm64-Mac (Intel-Runner haben keine Metal-GPU, WebGL fällt dort aus)
+      - name: App-Bundle packen
         run: |
-          app=$(ls -d src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app | head -1)
+          cd src-tauri/target/universal-apple-darwin/release/bundle/macos
+          ditto -c -k --keepParent *.app "$GITHUB_WORKSPACE/app-macos.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-macOS-bundle
+          path: app-macos.zip
+          retention-days: 3
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-macOS Universal
+          path: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          retention-days: 14
+
+  # Selbsttest der Universal-App mit WKWebView auf Apple Silicon (Metal-GPU vorhanden)
+  selftest-macos:
+    name: Selbsttest (macOS arm64, WKWebView)
+    needs: build-macos
+    runs-on: macos-15
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: app-macOS-bundle
+      - name: App starten und Selbsttest auswerten
+        run: |
+          ditto -x -k app-macos.zip .
+          app=$(ls -d *.app | head -1)
           bin="$app/Contents/MacOS/$(ls "$app/Contents/MacOS" | head -1)"
           sw_vers
-          export LOHNBETRIEB_SELFTEST=1 LOHNBETRIEB_SELFTEST_SECONDS=20 LOHNBETRIEB_SELFTEST_MIN_FPS=1 LOHNBETRIEB_SELFTEST_MIN_SPS=5
+          export LOHNBETRIEB_SELFTEST=1 LOHNBETRIEB_SELFTEST_SECONDS=20 LOHNBETRIEB_SELFTEST_MIN_FPS=3 LOHNBETRIEB_SELFTEST_MIN_SPS=10
           export LOHNBETRIEB_SELFTEST_OUT="$PWD/selftest-macos.json"
           "$bin" > app-macos.log 2>&1 &
           pid=$!
@@ -232,9 +258,3 @@ jobs:
             selftest-macos.png
             app-macos.log
           retention-days: 14
-      - uses: actions/upload-artifact@v4
-        with:
-          name: app-macOS Universal
-          path: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
-          retention-days: 14
-

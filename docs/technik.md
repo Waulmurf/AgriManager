@@ -54,9 +54,10 @@ Ergänzt den Abschnitt „Technik und Entwicklungsumgebung“ in [anforderungen.
 
 Zielplattformen sind nur Windows und macOS (kein Linux). Getestet wird vorerst nur unter
 Windows: Unit-Tests, Playwright (Chromium ≙ WebView2) und der Selbsttest der Windows-App. macOS bleibt Zielplattform. CI baut bei jedem Stand weiter
-die Universal-DMG, damit Mac-Inkompatibilitäten sofort auffallen. Die macOS-Tests (WebKit,
-WKWebView-Selbsttest) sind in der Git-Historie vorhanden (Commit 55865c8) und lassen sich
-wieder einschalten.
+die Universal-DMG, wenn `[mac]` in der Commit-Nachricht steht. Danach startet der Job
+`selftest-macos` die gebaute Universal-App auf einem arm64-Runner (`macos-15`, Metal-GPU) im
+Selbsttest mit WKWebView (Bildschirmfoto und Ergebnis als Artefakt). Mindestversion ist macOS 12
+(WebGL 2, Module-Worker). `src/polyfills.ts` ergänzt fehlende Funktionen älterer WebKit-Versionen.
 
 ## Offen
 
