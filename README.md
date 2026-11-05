@@ -48,4 +48,11 @@ In der fertigen App: Umgebungsvariable `LOHNBETRIEB_SELFTEST=1` setzen; die App 
 
 Grundkarte (PMTiles) und Straßengraph werden im Workflow `map-data` aus
 OpenStreetMap erzeugt und als GitHub-Release abgelegt. Den Tag legt `data/map-data.json` fest;
-für einen Neubau den Tag erhöhen. Daten © OpenStreetMap-Mitwirkende (ODbL), Basiskarte Protomaps.
+für einen Neubau den Tag erhöhen.
+
+Quellen der Kartendaten:
+- Straßen, Orte und Grundkarte: © OpenStreetMap-Mitwirkende (ODbL), Basiskarte Protomaps
+- Feldblöcke Niedersachsen/Bremen/Hamburg: © ML/SLA Niedersachsen, dl-de/by-2-0, Daten bearbeitet
+- Feldblöcke Schleswig-Holstein: © Land Schleswig-Holstein, dl-de/zero-2-0
+- Feldblockkataster Brandenburg: © Land Brandenburg, dl-de/by-2-0, Daten bearbeitet
+- Sachsen-Anhalt und Mecklenburg-Vorpommern: Ackerflächen aus OpenStreetMap (amtliche Daten dort nicht offen bzw. Lizenz unklar)

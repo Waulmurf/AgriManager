@@ -6,7 +6,8 @@ import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { parseRoadGraph, project, nearestNode, RoadClass } from '../../src/sim/roadgraph';
 import { PROFILES, Router } from '../../src/sim/astar';
-import { Simulation } from '../../src/sim/engine';
+import { Simulation, SNAPSHOT_STRIDE, VehicleState } from '../../src/sim/engine';
+import { parseFields, fieldId } from '../../src/sim/fields';
 
 const FILE = 'src-tauri/resources/map/roadgraph.bin';
 const has = existsSync(FILE);
@@ -70,5 +71,49 @@ describe.skipIf(!has)('echte Kartendaten', () => {
     console.log(`RECHENKERN ${process.platform}/${process.arch}: 1 Spieltag ${ms.toFixed(0)} ms (${(ms / 1440).toFixed(3)} ms/Schritt)`, JSON.stringify(s.stats()));
     // 100x erlaubt 10 ms pro Schritt
     expect(ms / 1440).toBeLessThan(5);
+  });
+});
+
+const FIELDS = 'src-tauri/resources/map/fields.bin';
+const hasFields = existsSync(FIELDS) && has;
+const loadFields = () => {
+  const b = readFileSync(FIELDS);
+  return parseFields(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength));
+};
+
+describe.skipIf(!hasFields)('echte Felder', () => {
+  it('haben plausible Anzahl, Größe, IDs und Zufahrten', () => {
+    const g = load();
+    const f = loadFields();
+    expect(f.count).toBeGreaterThan(20_000);
+    let ha = 0, maxHa = 0;
+    const ids = new Set<string>();
+    for (let i = 0; i < f.count; i++) {
+      expect(f.access[i]).toBeLessThan(g.nodeCount);
+      expect(f.ptCount[i]).toBeGreaterThanOrEqual(3);
+      expect(Math.hypot(f.cx[i], f.cy[i])).toBeLessThanOrEqual(g.radiusM + 1);
+      // Zufahrt liegt nahe am Feld
+      const s0 = f.ptStart[i];
+      let near = Infinity;
+      for (let k = 0; k < f.ptCount[i]; k++) near = Math.min(near, Math.hypot(f.px[s0 + k] - g.x[f.access[i]], f.py[s0 + k] - g.y[f.access[i]]));
+      expect(near).toBeLessThan(450);
+      ha += f.areaHa[i];
+      maxHa = Math.max(maxHa, f.areaHa[i]);
+      ids.add(fieldId(f, i));
+    }
+    console.log(`Felder: ${f.count}, ${Math.round(ha)} ha, größtes ${maxHa.toFixed(1)} ha, Beispiel-ID ${fieldId(f, 0)}`);
+    expect(ids.size).toBe(f.count); // feste, eindeutige IDs
+    expect(ha).toBeGreaterThan(150_000);
+  });
+
+  it('Fahrzeuge arbeiten auf echten Feldern', () => {
+    const s = new Simulation(load(), { seed: 2, vehicleCount: 30, fields: loadFields() });
+    let working = 0;
+    for (let t = 0; t < 600; t++) {
+      s.step();
+      const snap = s.snapshot();
+      for (let v = 0; v < 30; v++) if (snap[v * SNAPSHOT_STRIDE + 2] === VehicleState.Working) working++;
+    }
+    expect(working).toBeGreaterThan(0);
   });
 });

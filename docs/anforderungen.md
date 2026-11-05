@@ -402,7 +402,7 @@ Bewusst nicht geplant: 3D-Grafik, Fahrsimulation und Mehrspieler. Selbst mitarbe
 - [x] Wetter: historische Wetterjahre (Deutscher Wetterdienst).
 - [x] Startkapital und Startschlepper: festgelegt (siehe Startbedingungen).
 - [x] Kundenbetriebe und Konkurrenten: festgelegt (siehe Betriebe und Konkurrenz im Spielgebiet).
-- [ ] Verfügbarkeit und Lizenz der Feldgeometrien für Niedersachsen, Sachsen-Anhalt und Mecklenburg-Vorpommern prüfen (Claude).
+- [x] Verfügbarkeit und Lizenz der Feldgeometrien prüfen (Claude, 5. Nov. 2026): NI, SH, BB amtliche Feldblöcke (offene Lizenz); ST keine offenen Daten, MV Lizenz unklar → dort OSM-Ackerflächen. Details: README.md, docs/plan.md.
 
 ## Vorgehen und Meilensteine
 

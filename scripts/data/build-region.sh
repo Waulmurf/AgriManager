@@ -77,9 +77,12 @@ for i in $(seq 0 $(( $(jq '.fieldSources | length' "$CFG") - 1 ))); do
     SRC=$(find "$WORK/fb-$CODE" \( -iname '*.shp' -o -iname '*.gpkg' \) | grep -viE '_LE\.|landschaft' | sort | head -1)
     echo "   $CODE: $SRC"
     ogrinfo -so "$SRC" 2>/dev/null | head -20 || true
-    ogr2ogr -f GeoJSONSeq -t_srs EPSG:4326 -spat $WEST $SOUTH $EAST $NORTH -spat_srs EPSG:4326 \
-      -lco RS=NO "$WORK/fb-$CODE.geojsonl" "$SRC"
-    head -c 400 "$WORK/fb-$CODE.geojsonl"; echo
+    # -skipfailures: z. B. Brandenburg-Shapefile mit defektem Index
+    if ! ogr2ogr -f GeoJSONSeq -t_srs EPSG:4326 -spat $WEST $SOUTH $EAST $NORTH -spat_srs EPSG:4326 \
+      -skipfailures -lco RS=NO "$WORK/fb-$CODE.geojsonl" "$SRC"; then
+      echo "   WARNUNG: $CODE nicht lesbar – dort OSM-Ackerflächen"; continue
+    fi
+    head -c 400 "$WORK/fb-$CODE.geojsonl" || true; echo
     OFFICIAL_ARGS+=(--official "$CODE:$WORK/fb-$CODE.geojsonl")
     ATTRIB_FIELDS+=("$(jq -r ".fieldSources[$i].attribution" "$CFG")")
   else
