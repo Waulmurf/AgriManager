@@ -10,7 +10,7 @@ Jeder Schritt endet mit einer spielbaren Windows-Version.
 | Schritt | Inhalt | Stand |
 | --- | --- | --- |
 | 1 | Echte Felder auf der Karte (feste IDs, Fläche, Zufahrt); Fahrzeuge arbeiten im echten Feld | umgesetzt (Kartendaten v3) |
-| 2 | Kunden-Betriebe auf echten Feldern, Hof mit Startschlepper und Startkapital | offen |
+| 2 | Kunden-Betriebe auf echten Feldern, Hof mit Startschlepper und Startkapital | umgesetzt |
 | 3 | Anfrage → Auftrag (zuerst Grubbern), Annehmen/Ablehnen/Verhandeln, Fahrer und Maschine zuweisen, einfache Planungstafel; Anfragen als Liste (Smartphone in Phase 3) | offen |
 | 4 | Fahrt und Arbeit mit LWK-Flächenleistung, Anfahrt, Diesel, Betriebsstunden | offen |
 | 5 | Rechnung, Kontostand, Kundenzufriedenheit; Spielstand in SQLite | offen |
@@ -41,3 +41,16 @@ Jeder Schritt endet mit einer spielbaren Windows-Version.
 
 Ein Feldblock kann mehrere Schläge verschiedener Betriebe umfassen. Im Prototyp gilt ein
 Feldblock als ein Feld; eine Aufteilung in Schläge ist später möglich.
+
+## Kundenbetriebe (Schritt 2, Annahmen)
+
+- Rund 2.000 Betriebe (Festlegung im Doc), Anzahl = Fläche / 105 ha, höchstens 2.000.
+- Felder per gewichteter Voronoi-Teilung um zufällige Startfelder: unterschiedliche Größen.
+- Viehhaltung: Wahrscheinlichkeit 38 % + 50 % × Grünlandanteil (LZ 2020: gut die Hälfte der Betriebe).
+- Kulturen auf dem Acker: Uelzen/Lüneburg Getreide 38 %, Mais 18 %, Kartoffeln 14 %, Rüben 12 %,
+  Raps 10 %, Ackerfutter 8 % (Annahme); Altmark nach LBEG-Steckbrief; Viehbetriebe mehr Mais/Futter.
+- Eigenmechanisierung 0–1 wächst mit der Betriebsgröße; bestimmt ab Schritt 3 den Bedarf an Lohnarbeit.
+- Kontaktvorliebe Anruf oder Nachricht je zur Hälfte (KK-10); alle Betriebe zu Beginn unbekannt (KK-01).
+- Namen erfunden aus häufigen norddeutschen Familiennamen.
+- Startbetrieb: Fendt 720 Vario (Bj. 2014, 9.000 h, Wert nach Startformel 70.208 €), Firmenwagen
+  (Annahme: Bj. 2018, Neupreis 38.000 €), 100.000 € Konto, 150.000 € Kreditrahmen.

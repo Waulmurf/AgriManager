@@ -52,7 +52,9 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
   gebaut. GitHub Actions war wegen Ausgabenlimit gesperrt. Lokal bauen mit `npm run map-data:build`,
   danach `npx vitest run tests/unit/real-map-data.test.ts` (prüft echte Felder) und die App ansehen.
   Ohne `fields.bin` läuft die App mit gedachten Feldern weiter.
-- Nächste Schritte: Phase 2, Schritte 2–5 laut `docs/plan.md` (Kunden/Hof, Anfrage→Auftrag
+- Phase 2, Schritt 2 (Kundenbetriebe, Startbetrieb) umgesetzt: `src/sim/farms.ts`, `src/sim/economy.ts`.
+- Repo ist öffentlich (Actions kostenlos).
+- Nächste Schritte: Phase 2, Schritte 3–5 laut `docs/plan.md` (Kunden/Hof, Anfrage→Auftrag
   mit Grubbern, Fahrt+Arbeit mit LWK-Werten, Rechnung/Konto, SQLite-Spielstand).
 
 ## CI (GitHub Actions)

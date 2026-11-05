@@ -11,6 +11,7 @@ import { parseFields } from './fields';
 import {
   MAX_SNAPSHOTS_PER_SECOND,
   STEPS_PER_SECOND_AT_1X,
+  type FarmSummary,
   type FromWorker,
   type Speed,
   type ToWorker,
@@ -40,6 +41,30 @@ const MAX_STEPS_PER_TICK = 50;
 
 function post(msg: FromWorker, transfer: Transferable[] = []) {
   self.postMessage(msg, transfer);
+}
+
+function farmSummaries(): FarmSummary[] {
+  if (!sim?.farms || !sim.fields) return [];
+  const g = graph!;
+  const f = sim.fields;
+  const fs = sim.farms;
+  return fs.farms.map((farm) => {
+    const cropHa = [0, 0, 0, 0, 0, 0, 0];
+    for (const i of farm.fields) cropHa[fs.fieldCrop[i]] += f.areaHa[i];
+    return {
+      id: farm.id,
+      name: farm.name,
+      home: unproject(g, g.x[farm.homeNode], g.y[farm.homeNode]),
+      areaHa: farm.areaHa,
+      fieldCount: farm.fields.length,
+      livestock: farm.livestock,
+      mechanization: farm.mechanization,
+      contact: farm.contact,
+      known: farm.known,
+      satisfaction: farm.satisfaction,
+      cropHa: cropHa.map((v) => Math.round(v * 10) / 10),
+    };
+  });
 }
 
 function toWire(r: RouteGeom): WireRoute {
@@ -151,6 +176,10 @@ self.onmessage = (ev: MessageEvent<ToWorker>) => {
         nodeCount: graph.nodeCount,
         edgeCount: graph.edgeCount,
         fieldCount: fields?.count ?? 0,
+        company: structuredClone(sim.company),
+        farms: farmSummaries(),
+        fieldFarm: sim.farms ? sim.farms.fieldFarm.slice() : new Int32Array(0),
+        fieldCrop: sim.farms ? sim.farms.fieldCrop.slice() : new Uint8Array(0),
       });
       setSpeed(speed);
     } else if (msg.type === 'speed') {

@@ -9,6 +9,8 @@ import { Rng } from './rng';
 import { PROFILES, Router, type ProfileKey, type VehicleProfile } from './astar';
 import { BRANDS, COMPANY_CAR } from '../data/brands';
 import { fieldPattern, type FieldSet } from './fields';
+import { generateFarms, type FarmSet } from './farms';
+import { startCompany, type Company } from './economy';
 import { appendEdgePoints, nearestNode, RoadClass, type RoadGraph } from './roadgraph';
 
 export const STEP_SECONDS = 60;
@@ -82,6 +84,10 @@ export class Simulation {
   private pending: RouteGeom[] = [];
   private fieldNodes: Uint32Array;
   readonly fields: FieldSet | null;
+  /** Kundenbetriebe auf den echten Feldern (ohne Felddaten: keine) */
+  readonly farms: FarmSet | null;
+  /** Betrieb des Spielers */
+  readonly company: Company;
   readonly homeNode: number;
   /** Spielzeit in Minuten seit Start */
   time = 0;
@@ -92,7 +98,9 @@ export class Simulation {
     this.router = new Router(graph);
     this.homeNode = nearestNode(graph, opts.homeX ?? 0, opts.homeY ?? 0);
     this.fields = opts.fields ?? null;
+    this.farms = this.fields ? generateFarms(graph, this.fields, opts.seed) : null;
     this.fieldNodes = collectFieldNodes(graph);
+    this.company = startCompany(this.homeNode);
     for (let i = 0; i < opts.vehicleCount; i++) {
       const profile: ProfileKey = i % 5 === 4 ? 'car' : 'tractor';
       const brand = profile === 'car' ? COMPANY_CAR.name : BRANDS[i % BRANDS.length].name;

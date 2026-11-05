@@ -11,7 +11,9 @@ import { assetBase, mapDataUrl } from '../platform';
 import { addFallbackImages, BASEMAP_SOURCE, buildStyle, circlePolygon } from '../map/style';
 import { addVehicleIcons, vehicleIconId } from '../map/icons';
 import { VehicleInterpolator, type VehicleSample } from '../map/interpolator';
-import type { FromWorker, Speed, ToWorker, WorkerStats } from '../sim/protocol';
+import type { FarmSummary, FromWorker, Speed, ToWorker, WorkerStats } from '../sim/protocol';
+import type { Company } from '../sim/economy';
+import { CROP_NAMES } from '../sim/farms';
 import type { VehicleInfo } from '../sim/engine';
 import { FieldSource, fieldId, parseFields, type FieldSet } from '../sim/fields';
 
@@ -41,6 +43,9 @@ export interface GameStatus {
   graph: { nodes: number; edges: number } | null;
   /** Anzahl Felder (0 = keine Felddaten) */
   fieldCount: number;
+  company: Company | null;
+  farmCount: number;
+  knownFarms: number;
   tilesLoaded: boolean;
   tileErrors: number;
 }
@@ -66,9 +71,12 @@ export class GameController {
   private tileTimer: ReturnType<typeof setInterval> | undefined;
   private fields: FieldSet | null = null;
   private activeFields = new Set<number>();
+  private farms: FarmSummary[] = [];
+  private fieldFarm: Int32Array = new Int32Array(0);
+  private fieldCrop: Uint8Array = new Uint8Array(0);
   status: GameStatus = {
     phase: 'loading', speed: 0, time: 0, simTime: 0, vehicles: 0, stats: null, fps: 0, frameP95: 0, updateMs: 0,
-    region: null, graph: null, fieldCount: 0, tilesLoaded: false, tileErrors: 0,
+    region: null, graph: null, fieldCount: 0, company: null, farmCount: 0, knownFarms: 0, tilesLoaded: false, tileErrors: 0,
   };
 
   subscribe(fn: (s: GameStatus) => void): () => void {
@@ -222,7 +230,19 @@ export class GameController {
       (this.map!.getSource('home') as GeoJSONSource).setData({
         type: 'Feature', properties: { name: 'Hof' }, geometry: { type: 'Point', coordinates: msg.home },
       });
-      this.emit({ phase: 'running', vehicles: msg.vehicles.length, graph: { nodes: msg.nodeCount, edges: msg.edgeCount }, fieldCount: msg.fieldCount });
+      this.farms = msg.farms;
+      this.fieldFarm = msg.fieldFarm;
+      this.fieldCrop = msg.fieldCrop;
+      this.setFarmData();
+      this.emit({
+        phase: 'running',
+        vehicles: msg.vehicles.length,
+        graph: { nodes: msg.nodeCount, edges: msg.edgeCount },
+        fieldCount: msg.fieldCount,
+        company: msg.company,
+        farmCount: msg.farms.length,
+        knownFarms: msg.farms.filter((f) => f.known).length,
+      });
     } else if (msg.type === 'tick') {
       this.interp.addTick(msg.time, msg.speed, msg.positions, msg.routes, performance.now());
       this.status.stats = msg.stats;
@@ -285,15 +305,53 @@ export class GameController {
   }
 
   /** Feld-Infos für die Anzeige (Klick auf ein Feld). */
-  fieldInfo(i: number): { id: string; ha: number; kind: string; source: string } | null {
+  fieldInfo(i: number): { id: string; ha: number; kind: string; source: string; crop: string; farm: string } | null {
     const f = this.fields;
     if (!f || i < 0 || i >= f.count) return null;
+    const farm = this.farms[this.fieldFarm[i]];
     return {
       id: fieldId(f, i),
       ha: Math.round(f.areaHa[i] * 100) / 100,
       kind: f.kind[i] === 2 ? 'Grünland' : 'Acker',
       source: FieldSource[f.src[i] as keyof typeof FieldSource] ?? '–',
+      crop: this.fieldCrop.length ? CROP_NAMES[this.fieldCrop[i]] : '–',
+      farm: farm ? farm.name : '–',
     };
+  }
+
+  /** Kundenbetriebe (für Tests und Oberfläche). */
+  farmList(): FarmSummary[] {
+    return this.farms;
+  }
+
+  private setFarmData() {
+    const map = this.map!;
+    (map.getSource('farms') as GeoJSONSource | undefined)?.setData({
+      type: 'FeatureCollection',
+      features: this.farms.map((f) => ({
+        type: 'Feature',
+        id: f.id,
+        properties: { id: f.id, name: f.name, known: f.known, ha: f.areaHa },
+        geometry: { type: 'Point', coordinates: f.home },
+      })),
+    });
+  }
+
+  private farmPopupHtml(f: FarmSummary): string {
+    const crops = f.cropHa
+      .map((ha, c) => ({ ha, c }))
+      .filter((x) => x.ha > 0)
+      .sort((a, b) => b.ha - a.ha)
+      .map((x) => `${CROP_NAMES[x.c]} ${Math.round(x.ha).toLocaleString('de-DE')} ha`)
+      .join(', ');
+    const esc = (t: string) => t.replace(/[&<>]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[m]!);
+    return (
+      `<strong>${esc(f.name)}</strong><br>` +
+      `${f.areaHa.toLocaleString('de-DE', { maximumFractionDigits: 0 })} ha auf ${f.fieldCount} ${f.fieldCount === 1 ? 'Feld' : 'Feldern'}` +
+      `${f.livestock ? ', mit Viehhaltung' : ', reiner Ackerbau'}<br>` +
+      `<small>${crops}</small><br>` +
+      `<small>${f.known ? `Zufriedenheit ${f.satisfaction} %` : 'Noch nicht besucht – erst nach einem Besuch im Adressbuch'}</small>`
+    );
   }
 
   private addFieldLayers(region: RegionInfo) {
@@ -333,6 +391,8 @@ export class GameController {
       },
     }, before);
     map.on('click', 'fields-fill', (e) => {
+      if (e.defaultPrevented) return;
+      if (map.queryRenderedFeatures(e.point, { layers: ['farms-dot'] }).length) return;
       const feat = e.features?.[0];
       if (!feat || feat.id === undefined) return;
       const info = this.fieldInfo(Number(feat.id) - 1);
@@ -340,8 +400,8 @@ export class GameController {
       new maplibregl.Popup({ closeButton: true, maxWidth: '260px' })
         .setLngLat(e.lngLat)
         .setHTML(
-          `<strong>Feld ${info.id}</strong><br>${info.kind}, ${info.ha.toLocaleString('de-DE')} ha<br>` +
-            `<small>Quelle: ${info.source}</small>`,
+          `<strong>Feld ${info.id}</strong><br>${info.kind}: ${info.crop}, ${info.ha.toLocaleString('de-DE')} ha<br>` +
+            `Bewirtschaftet von ${info.farm}<br><small>Feldgrenze: ${info.source}</small>`,
         )
         .addTo(map);
     });
@@ -380,6 +440,43 @@ export class GameController {
       },
       paint: { 'text-color': '#7a2f12', 'text-halo-color': '#fff', 'text-halo-width': 1.5 },
     });
+    map.addSource('farms', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    map.addLayer({
+      id: 'farms-dot',
+      type: 'circle',
+      source: 'farms',
+      minzoom: 10,
+      paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 2.5, 14, 6],
+        'circle-color': ['case', ['get', 'known'], '#2f6f2a', '#8a8a7a'],
+        'circle-stroke-color': '#ffffff',
+        'circle-stroke-width': 1.2,
+      },
+    });
+    map.addLayer({
+      id: 'farms-label',
+      type: 'symbol',
+      source: 'farms',
+      minzoom: 12.5,
+      layout: {
+        'text-field': ['get', 'name'],
+        'text-font': ['Noto Sans Regular'],
+        'text-size': 11,
+        'text-offset': [0, 1],
+        'text-anchor': 'top',
+        'text-optional': true,
+      },
+      paint: { 'text-color': '#4a4a3c', 'text-halo-color': '#ffffff', 'text-halo-width': 1.2 },
+    });
+    map.on('click', 'farms-dot', (e) => {
+      const id = e.features?.[0]?.properties?.id;
+      const farm = id === undefined ? undefined : this.farms[Number(id)];
+      if (!farm) return;
+      e.preventDefault();
+      new maplibregl.Popup({ maxWidth: '280px' }).setLngLat(farm.home).setHTML(this.farmPopupHtml(farm)).addTo(map);
+    });
+    map.on('mouseenter', 'farms-dot', () => (map.getCanvas().style.cursor = 'pointer'));
+    map.on('mouseleave', 'farms-dot', () => (map.getCanvas().style.cursor = ''));
     map.addSource('vehicles', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
     map.addLayer({
       id: 'vehicles',

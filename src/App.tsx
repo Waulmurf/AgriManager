@@ -4,6 +4,9 @@ import { formatGameTime } from './game/clock';
 import { runSelftest } from './game/selftest';
 import { forwardLogsToHost, platformName, selftestConfig } from './platform';
 import type { Speed } from './sim/protocol';
+import { machineValue } from './sim/economy';
+
+const eur = (v: number) => v.toLocaleString('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
 
 const SPEEDS: { value: Speed; label: string; key: string }[] = [
   { value: 0, label: 'Pause', key: 'Leertaste' },
@@ -101,7 +104,35 @@ export function App() {
         )}
 
         <aside className="panel" data-testid="panel">
-          <h2>Fuhrpark</h2>
+          <h2>Mein Betrieb</h2>
+          {status?.company ? (
+            <>
+              <dl data-testid="company">
+                <dt>Konto</dt><dd data-testid="cash">{eur(status.company.cash)}</dd>
+                <dt>Kreditrahmen</dt><dd>{eur(status.company.creditLimit - status.company.loan)} frei</dd>
+                <dt>Standort</dt><dd>Groß Thondorf</dd>
+                <dt>Fahrer</dt><dd>{status.company.drivers.length} (nur du)</dd>
+              </dl>
+              <ul className="machines">
+                {status.company.machines.map((m) => (
+                  <li key={m.id}>
+                    <span>{[m.brand, m.model].filter(Boolean).join(' ')}{m.power ? `, ${m.power} PS` : ''}</span>
+                    <small>Bj. {m.year} · {m.hours.toLocaleString('de-DE')} h · Zustand {m.condition} % · Wert {eur(machineValue(m))}</small>
+                  </li>
+                ))}
+              </ul>
+              <p className="hint">{status.company.site}</p>
+            </>
+          ) : (
+            <p className="hint">–</p>
+          )}
+          <h2>Kunden</h2>
+          <dl>
+            <dt>Betriebe im Gebiet</dt><dd data-testid="farm-count">{status?.farmCount ? status.farmCount.toLocaleString('de-DE') : '–'}</dd>
+            <dt>im Adressbuch</dt><dd>{status?.knownFarms ?? 0}</dd>
+          </dl>
+          {status?.farmCount ? <p className="hint">Hofstellen anklicken für Details. Erst ein Besuch bringt einen Betrieb ins Adressbuch.</p> : null}
+          <h2>Testfahrzeuge</h2>
           <dl>
             <dt>Fahrzeuge</dt><dd data-testid="vehicle-count">{status?.vehicles ?? 0}</dd>
             <dt>unterwegs</dt><dd>{st?.driving ?? 0}</dd>

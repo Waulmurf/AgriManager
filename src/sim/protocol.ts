@@ -1,5 +1,7 @@
 /** Nachrichten zwischen Oberfläche und Simulations-Worker. */
 import type { VehicleInfo } from './engine';
+import type { Company } from './economy';
+import type { ContactPreference } from './farms';
 
 /** Spielminuten pro Sekunde Echtzeit bei 1x. 10x/100x vervielfachen die Schrittzahl. */
 export const STEPS_PER_SECOND_AT_1X = 1;
@@ -20,6 +22,23 @@ export interface WireRoute {
   coords: Float64Array;
   /** kumulierte Distanz je Punkt (m) */
   cum: Float64Array;
+}
+
+/** Kurzfassung eines Kundenbetriebs für die Oberfläche */
+export interface FarmSummary {
+  id: number;
+  name: string;
+  /** Hofstelle [lon, lat] */
+  home: [number, number];
+  areaHa: number;
+  fieldCount: number;
+  livestock: boolean;
+  mechanization: number;
+  contact: ContactPreference;
+  known: boolean;
+  satisfaction: number;
+  /** Fläche je Kultur (Index = Crop) in ha */
+  cropHa: number[];
 }
 
 export interface WorkerStats {
@@ -45,6 +64,12 @@ export type FromWorker =
       nodeCount: number;
       edgeCount: number;
       fieldCount: number;
+      company: Company;
+      farms: FarmSummary[];
+      /** je Feld: Betrieb oder -1 (leer ohne Felddaten) */
+      fieldFarm: Int32Array;
+      /** je Feld: Kultur */
+      fieldCrop: Uint8Array;
     }
   | {
       type: 'tick';
