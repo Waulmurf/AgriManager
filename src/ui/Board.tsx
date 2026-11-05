@@ -8,7 +8,7 @@ import { useState, type DragEvent } from 'react';
 import type { GameController, GameStatus } from '../game/controller';
 import type { PlanBar } from '../sim/engine';
 import { roleName, type Machine } from '../sim/economy';
-import { SERVICE_IMPLEMENT, SERVICE_NAMES, fmtDay, fmtTime, type Order, type Request, type Service } from '../sim/business';
+import { isHarvest, SERVICE_IMPLEMENT, SERVICE_NAMES, fmtDay, fmtTime, type Order, type Request, type Service } from '../sim/business';
 import { formatGameTime } from '../game/clock';
 import { SwapDriver } from './Panels';
 
@@ -75,10 +75,10 @@ export function PlanningBoard({ status, game, onClose }: { status: GameStatus; g
     const notBefore = dayStart <= b.time ? undefined : dayStart;
     if (data.kind === 'order') {
       const o = b.orders.find((x) => x.id === data.orderId);
-      if (o?.service === 'haeckseln') {
-        if (o.chain === 'komplett') { show('Komplettkette (mehrere Fahrer) bitte im Reiter Aufträge einteilen'); return; }
-        const hv = c.machines.find((m) => m.type === 'feldhaecksler');
-        if (!hv) { show('Kein Feldhäcksler im Fuhrpark'); return; }
+      if (o && isHarvest(o.service)) {
+        if (o.chain === 'komplett') { show('Kette mit Abfahrern (mehrere Fahrer) bitte im Reiter Aufträge einteilen'); return; }
+        const hv = c.machines.find((m) => m.type === SERVICE_IMPLEMENT[o.service]);
+        if (!hv) { show(`Keine passende Erntemaschine (${SERVICE_NAMES[o.service]}) im Fuhrpark`); return; }
         void send({ kind: 'plan', orderId: data.orderId, driverId, tractorId: hv.id, implementId: hv.id, notBefore });
         return;
       }

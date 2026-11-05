@@ -94,6 +94,18 @@ export const CATALOG: CatalogModel[] = [
   // Häckselwagen (Abfahrer, Annahme): Silomais etwa 300 kg/m³
   { key: 'krampe-bigbody650', type: 'haeckselwagen', brand: 'Krampe', model: 'Big Body 650 S (36 m³)', payloadT: 11, powerNeed: 150, newPrice: 62_000, deliveryWeeks: 8 },
   { key: 'fliegl-asw391', type: 'haeckselwagen', brand: 'Fliegl', model: 'Gigant ASW 391 (45 m³)', payloadT: 14, powerNeed: 200, newPrice: 95_000, deliveryWeeks: 10 },
+  // Mähdrescher mit Schneidwerk (Annahme, Neupreise Größenordnung Händlerlisten; Korntank 9.500–14.000 l,
+  // Weizen ≈ 0,78 t/m³). Flächenleistung Weizen (Annahme): 6 m 1,9 ha/h, 9 m 3,0 ha/h, 10,7 m 3,4–3,5 ha/h
+  { key: 'deutz-c7206', type: 'maehdrescher', brand: 'Deutz-Fahr', model: 'C7206 TS + 6,3 m', power: 306, width: 6.3, haPerHour: 1.9, workKmh: 6, dieselLHa: 16, payloadT: 7, newPrice: 310_000, deliveryWeeks: 14 },
+  { key: 'claas-lexion6800', type: 'maehdrescher', brand: 'Claas', model: 'Lexion 6800 + Vario 930', power: 435, width: 9.3, haPerHour: 3.0, workKmh: 6, dieselLHa: 18, payloadT: 9, newPrice: 520_000, deliveryWeeks: 16 },
+  { key: 'nh-cr890', type: 'maehdrescher', brand: 'New Holland', model: 'CR 8.90 + Varifeed 10,7 m', power: 449, width: 10.7, haPerHour: 3.4, workKmh: 6, dieselLHa: 19, payloadT: 11, newPrice: 580_000, deliveryWeeks: 16 },
+  { key: 'jd-s785', type: 'maehdrescher', brand: 'John Deere', model: 'S785i + 735X (10,7 m)', power: 473, width: 10.7, haPerHour: 3.5, workKmh: 6, dieselLHa: 19, payloadT: 11, newPrice: 610_000, deliveryWeeks: 16 },
+  // Kipper zum Abfahren von Korn (Annahme)
+  { key: 'krampe-hp20', type: 'kipper', brand: 'Krampe', model: 'Halfpipe HP 20 (18 t)', payloadT: 18, powerNeed: 160, newPrice: 52_000, deliveryWeeks: 8 },
+  { key: 'fliegl-tdk302', type: 'kipper', brand: 'Fliegl', model: 'TDK 302 Tridem-Kipper (22 t)', payloadT: 22, powerNeed: 200, newPrice: 66_000, deliveryWeeks: 8 },
+  // Rübenroder-Selbstfahrer 6-reihig, Bunker ≈ 30 t (docs/ablaeufe.md); Flächenleistung 1,6–1,8 ha/h (Annahme)
+  { key: 'grimme-rexor6300', type: 'ruebenroder', brand: 'Grimme', model: 'Rexor 6300 Platinum', power: 627, width: 2.7, haPerHour: 1.6, workKmh: 6, dieselLHa: 32, payloadT: 30, newPrice: 690_000, deliveryWeeks: 20 },
+  { key: 'ropa-tiger6s', type: 'ruebenroder', brand: 'Ropa', model: 'Tiger 6S', power: 796, width: 2.7, haPerHour: 1.8, workKmh: 6, dieselLHa: 34, payloadT: 33, newPrice: 760_000, deliveryWeeks: 20 },
   // Radlader zum Verteilen und Walzen am Silo (Annahme): Walzleistung ≈ Betriebsgewicht × 4 t Frischmasse je Stunde
   { key: 'jcb-437', type: 'radlader', brand: 'JCB', model: '437 HT Agri', weightT: 13, power: 200, newPrice: 150_000, deliveryWeeks: 8 },
   { key: 'liebherr-l526', type: 'radlader', brand: 'Liebherr', model: 'L 526', weightT: 12, power: 160, newPrice: 170_000, deliveryWeeks: 10 },
@@ -118,7 +130,7 @@ export interface Dealer {
 /** Fiktive Händler an echten Orten (docs/maschinen.md, „Händler im Spiel“) */
 export const DEALERS: Dealer[] = [
   { id: 1, name: 'Landtechnik Uelzen', town: 'Uelzen', lonLat: [10.5627, 52.9645], tractorBrands: ['Fendt', 'Massey Ferguson', 'Valtra'], implementBrands: ['Amazone', 'Lemken', 'Pöttinger'] },
-  { id: 2, name: 'Kartoffel- und Rübentechnik Uelzen', town: 'Uelzen', lonLat: [10.5530, 52.9790], tractorBrands: [], implementBrands: ['Grimme'] },
+  { id: 2, name: 'Kartoffel- und Rübentechnik Uelzen', town: 'Uelzen', lonLat: [10.5530, 52.9790], tractorBrands: [], implementBrands: ['Grimme', 'Ropa'] },
   { id: 3, name: 'Agrartechnik Lüneburg', town: 'Lüneburg', lonLat: [10.4140, 53.2490], tractorBrands: ['John Deere'], implementBrands: ['Kverneland', 'Krone'] },
   { id: 4, name: 'Landmaschinen Suhlendorf', town: 'Suhlendorf', lonLat: [10.7660, 52.9370], tractorBrands: ['Claas'], implementBrands: ['Horsch', 'Kotte', 'Zunhammer'] },
   { id: 5, name: 'Landtechnik Altmark', town: 'Salzwedel', lonLat: [11.1500, 52.8500], tractorBrands: ['Case IH', 'New Holland'], implementBrands: ['Kverneland', 'Joskin', 'Krampe', 'Fliegl'] },

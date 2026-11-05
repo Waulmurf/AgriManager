@@ -45,8 +45,8 @@ const NAMES = [
 ];
 
 const SERVICES: Record<Competitor['size'], Service[]> = {
-  gross: ['grubbern', 'stoppel', 'guelle', 'haeckseln'],
-  mittel: ['grubbern', 'stoppel', 'guelle'],
+  gross: ['grubbern', 'stoppel', 'guelle', 'haeckseln', 'drusch', 'roden'],
+  mittel: ['grubbern', 'stoppel', 'guelle', 'drusch'],
   klein: ['grubbern', 'stoppel'],
 };
 

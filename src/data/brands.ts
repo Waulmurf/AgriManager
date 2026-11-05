@@ -23,6 +23,9 @@ export const BRANDS: BrandColors[] = [
   { name: 'JCB', main: '#F2B705', accent: '#1A1A1A' },
   { name: 'Liebherr', main: '#F5C400', accent: '#3A3A3A' },
   { name: 'Volvo', main: '#F0B323', accent: '#2B2B2B' },
+  // Rübenroder (Annahme, Lacknäherung)
+  { name: 'Grimme', main: '#C4161C', accent: '#3A3A3A' },
+  { name: 'Ropa', main: '#4C8C2B', accent: '#F2F2F2' },
 ];
 
 /** Firmenwagen ohne Marke (Kombi) */

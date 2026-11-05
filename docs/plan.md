@@ -769,7 +769,7 @@ Nils wählt aus, was umgesetzt wird. Empfehlung für den nächsten Block: 4, 1, 
    Frost und Niederschlag).
 3. **Kommunale Arbeiten:** Böschungs- und Grabenmähen, Heckenschnitt, Wegebau. Ausschreibungen
    der Gemeinden und Kreise.
-4. **Weitere Ackerdienste:** Mähdrusch, Rübenroden und Kartoffelroden als eigene Ketten mit
+4. **Weitere Ackerdienste** (Mähdrusch und Rübenroden umgesetzt, siehe unten): Mähdrusch, Rübenroden und Kartoffelroden als eigene Ketten mit
    Abfahrern, Rübenmiete und Verladung (siehe docs/ablaeufe.md). Dazu Saat, Pflanzenschutz
    (Sachkunde nötig) und Ballenpressen. Eigener Ackerbau kann diese Arbeitsgänge dann selbst fahren.
 
@@ -827,3 +827,29 @@ Nils wählt aus, was umgesetzt wird. Empfehlung für den nächsten Block: 4, 1, 
     - Form: Quelle als Markdown in `docs/handbuch/` mit Bildschirmfotos aus Playwright.
       Im Spiel als Reiter „Hilfe“ und zusätzlich als PDF für Windows und macOS.
     - Kontexthilfe: Ein „?“ an Reitern und Fenstern springt zum passenden Kapitel.
+
+## Umsetzung Vorschlag 4: Mähdrusch und Rübenroden (5. Nov. 2026)
+
+- **Maschinen (`src/data/catalog.ts`):**
+  - Mähdrescher: Deutz-Fahr C7206 TS (6,3 m, 1,9 ha/h, Korntank 7 t, 310.000 €), Claas Lexion 6800
+    (9,3 m, 3,0 ha/h, 9 t, 520.000 €), New Holland CR 8.90 (10,7 m, 3,4 ha/h, 11 t, 580.000 €),
+    John Deere S785i (10,7 m, 3,5 ha/h, 11 t, 610.000 €).
+  - Kipper zum Kornabfahren: Krampe HP 20 (18 t), Fliegl TDK 302 (22 t).
+  - Rübenroder 6-reihig: Grimme Rexor 6300 (1,6 ha/h, Bunker 30 t, 690.000 €), Ropa Tiger 6S
+    (1,8 ha/h, 33 t, 760.000 €). Händler: Kartoffel- und Rübentechnik Uelzen.
+  - Fahrer brauchen Drescher bzw. Roder ab Stufe 2.
+- **Mähdrusch:** Raps 10.7.–5.8., Getreide 20.7.–30.8.
+  - „Nur Drusch“ 150 €/ha: Der Kunde stellt zwei Anhänger am Feldrand.
+  - „Mit Abfuhr“ 195 €/ha: eigene Kipper fahren das Korn zum Hof des Kunden (Annahme Gosse 150 t/h).
+  - Der Drescher füllt den Korntank und steht erst, wenn er voll ist und kein Wagen da ist.
+  - Wetter: Drusch erst ab etwa 9 Uhr (Tau), nicht im Regen, nach über 2 mm Regen am Vortag erst
+    ab Mittag.
+  - Erträge für die Logistik: Weizen 7,5 t/ha, Raps 3,8 t/ha.
+- **Rübenroden:** 15.9.–30.11. (Kampagne Nordzucker Uelzen), 280 €/ha. Der Roder bunkert und
+  entleert in die Feldrandmiete (etwa 4 min je Bunker). Abfahrer sind nicht nötig; Verladung und
+  Abfuhr übernimmt die Zuckerfabrik. Ertrag 80 t/ha.
+- **Konkurrenz:** große Anbieter dreschen und roden, mittlere dreschen.
+- **Eigener Ackerbau:** Mit eigenem Drescher bzw. Roder wird die Ernte zum Eigenauftrag (das Korn
+  holt der Landhandel am Feldrand ab), sonst bleibt sie Fremdleistung.
+- **Später:** Überladewagen, Kartoffelroden, Rübenmaus und Lkw-Abfuhr (Vorschlag 1),
+  Schneidwerkswagen und Straßenfahrt mit Überbreite.

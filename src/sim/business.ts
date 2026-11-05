@@ -10,7 +10,7 @@ import { Crop, SURNAMES, type FarmSet } from './farms';
 import type { FieldSet } from './fields';
 import {
   EMPLOYER_SV, MIN_WAGE, MONTH_HOURS, ROLES, SKILLS, VACATION_DAYS, marketWage, agencyRate, takeOverFee, AGENCY_MIN_HOURS, XP_MINUTES_PER_LEVEL, baseSkills, gameDate, marketValue,
-  serviceInterval, START_OFFERS, START_YEAR, type Company, type Loan, type MachineType, type Site, type Employee, type Machine, type MarketOffer, type Repair, type Skill,
+  serviceInterval, SELF_PROPELLED, START_OFFERS, START_YEAR, type Company, type Loan, type MachineType, type Site, type Employee, type Machine, type MarketOffer, type Repair, type Skill,
 } from './economy';
 import { CATALOG, DEALERS, dealersFor, type CatalogModel } from '../data/catalog';
 import { BUILDINGS, PERMIT, SITE_OFFERS, type BuildingKey } from '../data/sites';
@@ -76,13 +76,29 @@ export const TRIAL_MAX_HA = 10;
 export const REPAIR_TRACTOR_EUR_H = 8;
 export const WEAR_GRUBBER_EUR_HA = 3;
 
-export type Service = 'grubbern' | 'stoppel' | 'guelle' | 'haeckseln';
-export const SERVICE_NAMES: Record<Service, string> = { grubbern: 'Grubbern', stoppel: 'Stoppelbearbeitung', guelle: 'Gülle ausbringen', haeckseln: 'Maishäckseln' };
+export type Service = 'grubbern' | 'stoppel' | 'guelle' | 'haeckseln' | 'drusch' | 'roden';
+export const SERVICE_NAMES: Record<Service, string> = { grubbern: 'Grubbern', stoppel: 'Stoppelbearbeitung', guelle: 'Gülle ausbringen', haeckseln: 'Maishäckseln', drusch: 'Mähdrusch', roden: 'Rübenroden' };
 /** Gerät je Dienstleistung und Tätigkeitswort für die Anzeige */
-export const SERVICE_IMPLEMENT: Record<Service, MachineType> = { grubbern: 'grubber', stoppel: 'kurzscheibenegge', guelle: 'guellefass', haeckseln: 'feldhaecksler' };
-export const SERVICE_VERB: Record<Service, string> = { grubbern: 'grubbert', stoppel: 'bearbeitet Stoppeln', guelle: 'bringt Gülle aus', haeckseln: 'häckselt' };
+export const SERVICE_IMPLEMENT: Record<Service, MachineType> = { grubbern: 'grubber', stoppel: 'kurzscheibenegge', guelle: 'guellefass', haeckseln: 'feldhaecksler', drusch: 'maehdrescher', roden: 'ruebenroder' };
+export const SERVICE_VERB: Record<Service, string> = { grubbern: 'grubbert', stoppel: 'bearbeitet Stoppeln', guelle: 'bringt Gülle aus', haeckseln: 'häckselt', drusch: 'drischt', roden: 'rodet Rüben' };
 /** Tätigkeit des Fahrers je Dienstleistung (Skill) */
-export const SERVICE_SKILL: Record<Service, Skill> = { grubbern: 'boden', stoppel: 'boden', guelle: 'guelle', haeckseln: 'haecksler' };
+export const SERVICE_SKILL: Record<Service, Skill> = { grubbern: 'boden', stoppel: 'boden', guelle: 'guelle', haeckseln: 'haecksler', drusch: 'drescher', roden: 'roder' };
+/** Erntedienste: selbstfahrende Hauptmaschine (Fahrzeug und Gerät zugleich), Abfahrer-Wagen (falls nötig) */
+export const HARVEST_SERVICES: Service[] = ['haeckseln', 'drusch', 'roden'];
+export const HAULER_TYPE: Partial<Record<Service, MachineType>> = { haeckseln: 'haeckselwagen', drusch: 'kipper' };
+export function isHarvest(s: Service): boolean {
+  return s === 'haeckseln' || s === 'drusch' || s === 'roden';
+}
+/** Erträge für die Erntelogistik (t/ha, Annahme Niedersachsen): Weizen/Getreide, Raps, Zuckerrüben */
+export const GRAIN_YIELD_T_HA = 7.5;
+export const RAPE_YIELD_T_HA = 3.8;
+export const BEET_YIELD_T_HA = 80;
+/** Name der Kettenart je Dienst („haecksler“ = nur Hauptmaschine) */
+export function chainName(s: Service, chain?: 'haecksler' | 'komplett'): string {
+  if (!chain) return '';
+  if (chain === 'komplett') return s === 'drusch' ? 'mit Abfuhr' : 'Komplettkette';
+  return s === 'drusch' ? 'nur Drusch' : 'nur Häcksler';
+}
 /** Silomais: Ertrag Frischmasse (t/ha, Annahme Niedersachsen 40–45) */
 export const SILAGE_YIELD_T_HA = 42;
 /**
@@ -91,6 +107,8 @@ export const SILAGE_YIELD_T_HA = 42;
  * Walzschlepper 110 €/h laut Bayerischem Wochenblatt, siehe docs/ablaeufe.md).
  */
 export const CHOP_PRICE_HA: Record<'haecksler' | 'komplett', number> = { haecksler: 230, komplett: 430 };
+/** Mähdrusch je ha (Annahme LWK-Größenordnung): nur Drusch bzw. mit Abfuhr zum Hof des Kunden */
+export const THRESH_PRICE_HA: Record<'haecksler' | 'komplett', number> = { haecksler: 150, komplett: 195 };
 /** Fremdwalze, wenn bei der Komplettkette kein eigener Radlader am Silo ist (€/h) */
 export const HIRED_ROLLER_EUR_H = 110;
 /**
@@ -98,7 +116,7 @@ export const HIRED_ROLLER_EUR_H = 110;
  * Grubbern. Gülle wird je m³ abgerechnet: 4 €/m³ (Spanne für Lohnausbringung 2,50–8 €/m³ je nach
  * Entfernung und System laut LK Niederösterreich); priceHa = €/m³ × Gabe.
  */
-export const SERVICE_BASE_PRICE: Record<Service, number> = { grubbern: 55, stoppel: 38, guelle: 4, haeckseln: 230 };
+export const SERVICE_BASE_PRICE: Record<Service, number> = { grubbern: 55, stoppel: 38, guelle: 4, haeckseln: 230, drusch: 150, roden: 280 };
 
 /**
  * Jahreslauf (AK-04): welche Dienstleistung wann gefragt ist, für welche Kulturen, und wie stark.
@@ -122,6 +140,11 @@ export function seasonServices(time: number): { service: Service; crops: Crop[];
   if (md >= 801 && md <= 920) out.push({ service: 'guelle', crops: [Crop.Raps, Crop.Getreide], weight: 0.4 });
   // Silomais häckseln: Mitte September bis Mitte Oktober (Reife ~32 % TS), eilig
   if (md >= 910 && md <= 1020) out.push({ service: 'haeckseln', crops: [Crop.Mais], weight: md >= 920 && md <= 1010 ? 1.4 : 0.8 });
+  // Mähdrusch: Raps ab Mitte Juli, Getreide Ende Juli bis Ende August (nur Betriebe ohne eigenen Drescher)
+  if (md >= 710 && md <= 805) out.push({ service: 'drusch', crops: [Crop.Raps], weight: 1.2 });
+  if (md >= 720 && md <= 830) out.push({ service: 'drusch', crops: [Crop.Getreide], weight: md >= 801 && md <= 820 ? 1.5 : 1 });
+  // Rübenroden: Kampagne Nordzucker Uelzen ab Mitte September, Roden bis Ende November
+  if (md >= 915 && md <= 1130) out.push({ service: 'roden', crops: [Crop.Zuckerrueben], weight: md >= 1001 && md <= 1115 ? 1.3 : 0.8 });
   return out;
 }
 
@@ -791,11 +814,14 @@ export class Business {
       for (const st of l.steps) {
         const sd = def.steps.find((x) => x.key === st.key)!;
         if (st.status === 'geplant' && time >= st.from) {
-          if (sd.service) {
+          // Ernte mit eigenem Drescher/Roder, sonst Fremdleistung (Häckseln immer mit eigener Kette)
+          const own = sd.service && (sd.service === 'haeckseln' || !isHarvest(sd.service) || this.company.machines.some((m) => m.type === SERVICE_IMPLEMENT[sd.service!]));
+          if (sd.service && own) {
             const o: Order = {
               id: this.nextId++, requestId: 0, farmId: -1, service: sd.service, fields: l.fields.slice(), doneFields: [],
               areaHa: l.areaHa, priceHa: 0, earliest: st.from, latest: st.to, status: 'offen', dieselL: 0, dieselCost: 0, tractorHours: 0,
-              ownLeaseId: l.id, chain: sd.service === 'haeckseln' ? 'komplett' : undefined, doneT: sd.service === 'haeckseln' ? 0 : undefined,
+              // eigenes Korn holt der Landhandel am Feldrand ab (wie „nur Drusch“)
+              ownLeaseId: l.id, chain: sd.service === 'haeckseln' ? 'komplett' : sd.service === 'drusch' ? 'haecksler' : undefined, doneT: isHarvest(sd.service) ? 0 : undefined,
               sourceNode: sd.service === 'haeckseln' ? this.biogasNode() : undefined,
             };
             this.orders.push(o);
@@ -1206,7 +1232,7 @@ export class Business {
   /** Marktpreis je ha für eine Dienstleistung (ohne Konkurrenzaufschlag) */
   private marketPriceHa(service: Service, gabe?: number, chain?: 'haecksler' | 'komplett'): number {
     if (gabe) return SERVICE_BASE_PRICE.guelle * gabe;
-    if (chain) return CHOP_PRICE_HA[chain];
+    if (chain) return service === 'drusch' ? THRESH_PRICE_HA[chain] : CHOP_PRICE_HA[chain];
     return SERVICE_BASE_PRICE[service];
   }
 
@@ -1366,11 +1392,13 @@ export class Business {
     // Gülle: Gabe 20 m³/ha zu Getreide/Raps, 25 m³/ha vor Mais/Rüben (Annahme, etwa 80–100 kg N/ha)
     const gabe = sv.service === 'guelle' ? (sv.crops.includes(Crop.Mais) ? 25 : 20) : undefined;
     // Häckseln: Viehbetriebe mit eigener Technik geben oft nur den Häcksler in Auftrag
-    const chain = sv.service === 'haeckseln' ? (this.rng.next() < 0.3 + 0.5 * farm.mechanization ? 'haecksler' : 'komplett') : undefined;
+    // Drusch: die meisten Betriebe fahren das Korn selbst ab
+    const chain = sv.service === 'haeckseln' ? (this.rng.next() < 0.3 + 0.5 * farm.mechanization ? 'haecksler' : 'komplett')
+      : sv.service === 'drusch' ? (this.rng.next() < 0.55 + 0.35 * farm.mechanization ? 'haecksler' : 'komplett') : undefined;
     const priceHa = gabe
       ? Math.round(SERVICE_BASE_PRICE.guelle * (0.9 + this.rng.next() * 0.25) * 10) / 10 * gabe
       : chain
-        ? Math.round((CHOP_PRICE_HA[chain] * (0.92 + this.rng.next() * 0.16)) / 5) * 5
+        ? Math.round(((sv.service === 'drusch' ? THRESH_PRICE_HA : CHOP_PRICE_HA)[chain] * (0.92 + this.rng.next() * 0.16)) / 5) * 5
         : Math.round(SERVICE_BASE_PRICE[sv.service] * (0.92 + this.rng.next() * 0.16) * 2) / 2;
     // Kunde kennt das Angebot der Konkurrenz und bietet höchstens etwas darüber (Stammkunden mehr)
     const comp = this.competitorOffer(farmId, sv.service, time, gabe, chain);
@@ -1511,7 +1539,7 @@ export class Business {
       gabe: r.gabe,
       doneM3: r.gabe ? 0 : undefined,
       chain: r.chain,
-      doneT: r.chain ? 0 : undefined,
+      doneT: isHarvest(r.service) ? 0 : undefined,
       earliest: r.earliest,
       latest: r.latest,
       status: 'offen',
@@ -1943,7 +1971,7 @@ export class Business {
   service(m: Machine, time: number, home: [number, number], ownWorkshop = false): string {
     if (ownWorkshop) {
       // eigene Werkstatt am Standort mit Mechaniker: halber Preis, 4 Stunden (Werkstatt-Gebäude)
-      const tractorW = m.type === 'schlepper' || m.type === 'firmenwagen' || m.type === 'feldhaecksler' || m.type === 'radlader';
+      const tractorW = SELF_PROPELLED.includes(m.type) || m.type === 'firmenwagen';
       const costW = Math.round(((tractorW ? 400 + 0.004 * m.newPrice : 150 + 0.003 * m.newPrice) * 0.5) / 10) * 10;
       m.downUntil = time + 4 * 60;
       m.downReason = 'Wartung in der eigenen Werkstatt';
@@ -2148,9 +2176,11 @@ export class Business {
       }
       if (o.ownLeaseId !== undefined) { this.ownStepDone(o, time); return; }
       if (o.biogasPriceT !== undefined) {
-        const t = Math.min(Math.round(o.doneT ?? 0), this.siloRoom());
+        // Erntemenge aus Fläche × Ertrag (Wagen können noch unterwegs zum Silo sein)
+        const harvested = Math.round(o.areaHa * SILAGE_YIELD_T_HA);
+        const t = Math.min(harvested, this.siloRoom());
         if (this.biogas) this.biogas.stock.mais += t;
-        this.book(time, `Mais auf dem Halm von ${this.farmName(o.farmId)}: ${Math.round(o.doneT ?? 0).toLocaleString('de-DE')} t à ${fmtEur(o.biogasPriceT)}`, -Math.round((o.doneT ?? 0) * o.biogasPriceT), 'Biogas');
+        this.book(time, `Mais auf dem Halm von ${this.farmName(o.farmId)}: ${harvested.toLocaleString('de-DE')} t à ${fmtEur(o.biogasPriceT)}`, -Math.round(harvested * o.biogasPriceT), 'Biogas');
         this.satisfy(o.farmId, 2, time);
         return;
       }
@@ -2212,7 +2242,7 @@ export class Business {
       orderId: o.id,
       farmId: o.farmId,
       text: o.chain
-        ? `${SERVICE_NAMES[o.service]} (${o.chain === 'komplett' ? 'Komplettkette' : 'nur Häcksler'}) ${fmtHa(o.areaHa)} à ${fmtEur(o.priceHa)}/ha, ${Math.round(o.doneT ?? 0)} t`
+        ? `${SERVICE_NAMES[o.service]} (${chainName(o.service, o.chain)}) ${fmtHa(o.areaHa)} à ${fmtEur(o.priceHa)}/ha, ${Math.round(o.doneT ?? 0)} t`
         : o.gabe
         ? `${SERVICE_NAMES[o.service]} ${fmtM3(o.areaHa * o.gabe)} à ${fmtEur(o.priceHa / o.gabe)}/m³ (${fmtHa(o.areaHa)})`
         : `${SERVICE_NAMES[o.service]} ${fmtHa(o.areaHa)} à ${fmtEur(o.priceHa)}/ha`,

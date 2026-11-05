@@ -9,11 +9,11 @@ import { Rng } from './rng';
 import { PROFILES, Router, curveSpeed, edgeSpeeds, type ProfileKey, type VehicleProfile } from './astar';
 import { BRANDS, CAR_COLORS, COMPANY_CAR } from '../data/brands';
 import { fieldPattern, type FieldSet } from './fields';
-import { generateFarms, type FarmSet } from './farms';
+import { Crop, generateFarms, type FarmSet } from './farms';
 import { MACHINE_SKILL, MECHANIC_MIN, SELF_PROPELLED, START_OFFERS, normalizeDrivers, skillDiesel, skillSpeed, startCompany, type CarKind, type Company, type Machine } from './economy';
 import { DEALERS } from '../data/catalog';
 import { SITE_OFFERS } from '../data/sites';
-import { Business, HIRED_ROLLER_EUR_H, REMIND_CALL_MINUTES, SERVICE_IMPLEMENT, SILAGE_YIELD_T_HA, SERVICE_NAMES, SERVICE_SKILL, SERVICE_VERB, type Order, VISIT_MINUTES, WEAR_GRUBBER_EUR_HA, type Service, fmtDay, fmtHa, fmtTime, type Command, type QueueCommand, type QueueItem } from './business';
+import { Business, BEET_YIELD_T_HA, GRAIN_YIELD_T_HA, HAULER_TYPE, RAPE_YIELD_T_HA, isHarvest, HIRED_ROLLER_EUR_H, REMIND_CALL_MINUTES, SERVICE_IMPLEMENT, SILAGE_YIELD_T_HA, SERVICE_NAMES, SERVICE_SKILL, SERVICE_VERB, type Order, VISIT_MINUTES, WEAR_GRUBBER_EUR_HA, type Service, fmtDay, fmtHa, fmtTime, type Command, type QueueCommand, type QueueItem } from './business';
 import { appendEdgePoints, nearestNode, project, RoadClass, unproject, type RoadGraph } from './roadgraph';
 import { surchargeFactor } from './calendar';
 import { Weather } from './weather';
@@ -169,6 +169,12 @@ interface ChopState {
   rollerMinutes: number;
   /** geerntete Menge im aktuellen Feld (ha) */
   fieldHa: number;
+  /** Korntank bzw. Bunker der Hauptmaschine (t); Häcksler hat keinen */
+  bunker?: { cap: number; load: number };
+  /** Rübenroder: Bunker wird in die Feldrandmiete entleert (zählt als geerntet) */
+  miete?: boolean;
+  /** Abbunkern am Vorgewende bis Spielminute */
+  pauseUntil?: number;
 }
 
 type PlayerTask =
@@ -353,7 +359,13 @@ export class Simulation {
   /** Gespann wartet auf dem Feld auf besseres Wetter (zählt nicht als Arbeitszeit) */
   private weatherHold(v: Vehicle): boolean {
     const t = v.task;
-    return t?.kind === 'job' && (t.phase === 'setup' || t.phase === 'work') && this.weather.fieldBlocked(this.time) !== null;
+    return t?.kind === 'job' && (t.phase === 'setup' || t.phase === 'work') && this.weatherFor(t.orderId) !== null;
+  }
+
+  /** Wettersperre für einen Auftrag: Mähdrusch braucht trockenes Korn, sonst zählt der Boden */
+  private weatherFor(orderId: number): string | null {
+    const o = this.business.orders.find((x) => x.id === orderId);
+    return o?.service === 'drusch' ? this.weather.threshBlocked(this.time) : this.weather.fieldBlocked(this.time);
   }
 
   /** Fahrbare Maschine des Spielers als Fahrzeug auf die Karte bringen (Schlepper, Firmenwagen) */
@@ -583,7 +595,7 @@ export class Simulation {
       tried.add(d);
       if (this.driverBusy(d) || this.driverBlocked(d)) continue;
       if ((item.notBefore ?? 0) > this.time) continue; // geplanter Starttermin noch nicht erreicht
-      if (item.cmd.kind === 'startJob' && this.weather.fieldBlocked(this.time)) continue; // Wetter
+      if (item.cmd.kind === 'startJob' && this.weatherFor(item.cmd.orderId)) continue; // Wetter
       const err = this.checkQueueCommand(item.cmd, item.id);
       if (!err && this.machineInUse(item.cmd)) continue; // wartet auf die Maschine
       this.queue.splice(k, 1);
@@ -1112,20 +1124,26 @@ export class Simulation {
     if (!o || o.status !== 'offen') return 'Auftrag nicht startbar';
     const sk = SERVICE_SKILL[o.service];
     if ((driver.skills[sk] ?? 0) < 1) return `${this.driverName(driver.id)} ist für ${SERVICE_NAMES[o.service]} nicht qualifiziert`;
-    const chopping = o.service === 'haeckseln';
-    const tractor = this.company.machines.find((m) => m.id === cmd.tractorId && m.type === (chopping ? 'feldhaecksler' : 'schlepper'));
+    const chopping = isHarvest(o.service);
+    const harvType = SERVICE_IMPLEMENT[o.service];
+    const tractor = this.company.machines.find((m) => m.id === cmd.tractorId && m.type === (chopping ? harvType : 'schlepper'));
     const impl = this.company.machines.find((m) => m.id === cmd.implementId);
-    if (!tractor || !impl) return chopping ? 'Feldhäcksler wählen' : 'Maschine fehlt';
+    const harvName = ({ feldhaecksler: 'Feldhäcksler', maehdrescher: 'Mähdrescher', ruebenroder: 'Rübenroder' } as Record<string, string>)[harvType] ?? harvType;
+    if (!tractor || !impl) return chopping ? `${harvName} wählen` : 'Maschine fehlt';
     if (chopping) {
-      if ((driver.skills.haecksler ?? 0) < 2) return `${this.driverName(driver.id)} braucht Häcksler ab Stufe 2`;
-      if (o.chain === 'komplett' && !(cmd.haulers ?? []).length) return 'Komplettkette: mindestens ein Abfahrer (Fahrer, Schlepper, Häckselwagen)';
+      const sk = MACHINE_SKILL[harvType]!;
+      if ((driver.skills[sk.skill] ?? 0) < sk.min) return `${this.driverName(driver.id)} braucht ${harvName} ab Stufe ${sk.min}`;
+      const wagonType = HAULER_TYPE[o.service];
+      if (!wagonType && (cmd.haulers ?? []).length) return 'Der Rübenroder legt eine Feldrandmiete an – Abfahrer sind nicht nötig';
+      if (cmd.roller && o.service !== 'haeckseln') return 'Radlader am Silo gibt es nur beim Häckseln';
+      if (o.chain === 'komplett' && !(cmd.haulers ?? []).length) return `${o.service === 'drusch' ? 'Drusch mit Abfuhr' : 'Komplettkette'}: mindestens ein Abfahrer (Fahrer, Schlepper, ${o.service === 'drusch' ? 'Kipper' : 'Häckselwagen'})`;
       const used = new Set<number>([driver.id]);
       const machines = new Set<number>([tractor.id]);
       for (const h of cmd.haulers ?? []) {
         const d = this.company.drivers.find((x) => x.id === h.driverId);
         const t = this.company.machines.find((x) => x.id === h.tractorId && x.type === 'schlepper');
-        const w = this.company.machines.find((x) => x.id === h.implementId && x.type === 'haeckselwagen');
-        if (!d || !t || !w) return 'Abfahrer: Fahrer, Schlepper und Häckselwagen wählen';
+        const w = this.company.machines.find((x) => x.id === h.implementId && x.type === wagonType);
+        if (!d || !t || !w) return `Abfahrer: Fahrer, Schlepper und ${wagonType === 'kipper' ? 'Kipper' : 'Häckselwagen'} wählen`;
         if (used.has(d.id) || machines.has(t.id) || machines.has(w.id)) return 'Jeder Abfahrer braucht eigenen Fahrer, Schlepper und Wagen';
         if ((d.skills.boden ?? 0) < 1) return `${this.driverName(d.id)} ist nicht als Traktorfahrer qualifiziert`;
         if ((w.powerNeed ?? 0) > (t.power ?? 0)) return 'Abfahrer: Schlepper zu schwach für den Wagen';
@@ -1178,7 +1196,7 @@ export class Simulation {
     const busy = this.driverBusy(d);
     const blocked = this.driverBlocked(d);
     const tired = !!blocked;
-    const weather = cmd.kind === 'startJob' ? this.weather.fieldBlocked(this.time) : null;
+    const weather = cmd.kind === 'startJob' ? this.weatherFor(cmd.orderId) : null;
     const inUse = this.machineInUse(cmd) ?? weather;
     const mine = this.queue.filter((q) => q.driverId === d);
     if (busy || tired || inUse || mine.length) {
@@ -1220,20 +1238,28 @@ export class Simulation {
       workKmh: (impl.workKmh ?? 10) * skillSpeed(skill),
       dieselLHa: (impl.dieselLHa ?? 9) * skillDiesel(skill),
     };
-    if (o.service === 'haeckseln') {
+    if (isHarvest(o.service)) {
       const farm = this.farms?.farms[o.farmId];
       const silo = o.sourceNode ?? farm?.homeNode ?? this.homeNode;
+      const svc = o.service;
+      const raps = this.farms ? this.farms.fieldCrop[queue[0]] === Crop.Raps : false;
+      const yieldT = svc === 'drusch' ? (raps ? RAPE_YIELD_T_HA : GRAIN_YIELD_T_HA) : svc === 'roden' ? BEET_YIELD_T_HA : SILAGE_YIELD_T_HA;
       const access = this.fields!.access[queue[0]];
       // Wagen des Kunden (nur Häcksler): 3 Gespanne à 12 t, Umlauf = Hin- und Rückfahrt + Abkippen
       const cycle = Math.round((2 * this.nodeDist(silo, access)) / EST_TRACTOR_M_MIN + 8);
       const roller = cmd.roller ? this.company.machines.find((m) => m.id === cmd.roller!.machineId) : undefined;
       unit.task.chop = {
-        yieldT: SILAGE_YIELD_T_HA, silo, attached: null,
-        virtual: o.chain === 'haecksler' ? [0, 0, 0] : [], virtualCap: 12, virtualCycle: cycle,
+        yieldT, silo, attached: null,
+        // Wagen des Kunden (nur Häcksler / nur Drusch: Anhänger am Feldrand); Rübenroder: Feldrandmiete
+        virtual: o.chain === 'haecksler' ? (svc === 'drusch' ? [0, 0] : [0, 0, 0]) : [], virtualCap: svc === 'drusch' ? 14 : 12, virtualCycle: cycle,
         siloBacklog: 0,
-        // Annahme am Silo: Kunde walzt (nur Häcksler) 120 t/h, eigener Radlader Betriebsgewicht × 4, Fremdwalze 100 t/h
-        siloTph: o.chain === 'haecksler' ? 120 : roller ? (roller.weightT ?? 12) * 4 : 100,
-        hiredRoller: o.chain === 'komplett' && !roller, rollerMinutes: 0, fieldHa: 0,
+        // Annahme am Silo: Kunde walzt (nur Häcksler) 120 t/h, eigener Radlader Betriebsgewicht × 4, Fremdwalze 100 t/h;
+        // Korn am Hof des Kunden: Gosse 150 t/h
+        siloTph: svc === 'drusch' ? 150 : o.chain === 'haecksler' ? 120 : roller ? (roller.weightT ?? 12) * 4 : 100,
+        hiredRoller: svc === 'haeckseln' && o.chain === 'komplett' && !roller, rollerMinutes: 0, fieldHa: 0,
+        // Korntank bzw. Rübenbunker (t)
+        bunker: svc === 'haeckseln' ? undefined : { cap: impl.payloadT ?? (svc === 'roden' ? 30 : 9), load: 0 },
+        miete: svc === 'roden',
       };
       unit.task.dieselLHa = impl.dieselLHa ?? 30;
       for (const h of cmd.haulers ?? []) {
@@ -1324,7 +1350,7 @@ export class Simulation {
         }
         if (v.restUntil > this.time) status = `Feierabend (Arbeitszeit erreicht), weiter um 06:00 – ${status}`;
         if ((v.handoverUntil ?? 0) > this.time) status = `Fahrerwechsel – ${status}`;
-        if (this.weatherHold(v)) status = `wartet auf Wetter (${this.weather.fieldBlocked(this.time)}) – ${status}`;
+        if (this.weatherHold(v) && t?.kind === 'job') status = `wartet auf Wetter (${this.weatherFor(t.orderId)}) – ${status}`;
         if (t && this.business.absence(t.driverId, this.time)) status = `Fahrer krank, Gespann wartet – ${status}`;
         if (t) status = `${this.driverName(t.driverId)}: ${status}`;
         const moving = v.route && v.seg < v.route.speed.length && (v.state === VehicleState.Driving || v.state === VehicleState.Working) && v.restUntil <= this.time;
@@ -1797,7 +1823,7 @@ export class Simulation {
     const t = v.task;
     if (t && this.business.absence(t.driverId, this.time)) return; // Fahrer krank: Gespann wartet
     if ((v.handoverUntil ?? 0) > this.time) return; // Fahrerwechsel
-    if (t?.kind === 'job' && (t.phase === 'setup' || t.phase === 'work') && this.weather.fieldBlocked(this.time)) return; // Wetter: Feldarbeit ruht
+    if (t?.kind === 'job' && (t.phase === 'setup' || t.phase === 'work') && this.weatherFor(t.orderId)) return; // Wetter: Feldarbeit ruht
     if (t?.kind === 'job' && (t.phase === 'to' || t.phase === 'setup' || t.phase === 'work') && this.minutesOf(t.driverId) >= CHEF_MAX_MINUTES) {
       v.restUntil = Math.max(this.time + (1440 - (this.time % 1440)), this.time + 11 * 60);
       this.business.warn(this.time, `${v.name}: Feierabend – Höchstarbeitszeit (${this.driverName(t.driverId)}) erreicht, weiter morgen um 06:00.`);
@@ -2144,7 +2170,8 @@ export class Simulation {
     // Silo: Radlader bzw. Walze verteilt laufend
     c.siloBacklog = Math.max(0, c.siloBacklog - c.siloTph / 60);
     if (c.hiredRoller) c.rollerMinutes++;
-    if (!c.attached) {
+    if (c.pauseUntil !== undefined && this.time < c.pauseUntil) return; // bunkert am Vorgewende ab
+    if (!c.attached && !c.miete) {
       const node = this.fields!.access[t.queue[t.current]];
       const wagon = this.vehicles.find((x) => x.task?.kind === 'haul' && x.task.harvester === v.id && x.task.phase === 'wait' && x.node === node);
       if (wagon && wagon.task?.kind === 'haul') {
@@ -2154,8 +2181,17 @@ export class Simulation {
         const i = c.virtual.findIndex((at) => at <= this.time);
         if (i >= 0) { c.virtual[i] = Number.MAX_SAFE_INTEGER; c.attached = { veh: -1 - i, load: 0, cap: c.virtualCap }; }
       }
-      if (!c.attached) return; // ohne Abfahrer steht der Häcksler
-      this.business.version++;
+      if (c.attached) {
+        // Korntank zuerst überladen
+        if (c.bunker && c.bunker.load > 0) { c.attached.load += c.bunker.load; c.bunker.load = 0; }
+        this.business.version++;
+      } else if (!c.bunker || c.bunker.load >= c.bunker.cap) return; // ohne Abfahrer steht der Häcksler, Drescher bei vollem Tank
+    }
+    if (c.miete && c.bunker && c.bunker.load >= c.bunker.cap) {
+      // Rübenroder: Bunker in die Feldrandmiete (Fahrt zum Vorgewende und Abbunkern ≈ 4 min)
+      this.dumpBunker(v, c);
+      c.pauseUntil = this.time + 4;
+      return;
     }
     // fahren (Feldroute läuft nur mit Abfahrer weiter)
     const before = v.dist;
@@ -2166,6 +2202,7 @@ export class Simulation {
     const moved = Math.max(0, v.dist - before);
     const ha = r.total > 0 ? (moved / r.total) * area : 0;
     c.fieldHa += ha;
+    if (!c.attached) { c.bunker!.load += ha * c.yieldT; if (budget > 0 || v.dist >= r.total) this.playerArrive(v); return; }
     c.attached.load += ha * c.yieldT;
     // Abfahrer fährt sichtbar nebenher (gleiche Position)
     if (c.attached.veh >= 0) {
@@ -2175,6 +2212,15 @@ export class Simulation {
     }
     if (c.attached.load >= c.attached.cap) this.detachWagon(v, c);
     if (budget > 0 || v.dist >= r.total) this.playerArrive(v);
+  }
+
+  /** Bunker leeren (Miete am Feldrand bzw. Anhänger am Feldrand): zählt als abgefahren */
+  private dumpBunker(v: Vehicle, c: ChopState) {
+    if (!c.bunker || c.bunker.load <= 0) return;
+    const o = v.task?.kind === 'job' ? this.business.orders.find((x) => x.id === (v.task as { orderId: number }).orderId) : undefined;
+    if (o) o.doneT = Math.round(((o.doneT ?? 0) + c.bunker.load) * 10) / 10;
+    c.bunker.load = 0;
+    this.business.version++;
   }
 
   /** Voller Wagen: zum Silo bzw. Kundenwagen auf den Umlauf schicken */
@@ -2205,9 +2251,13 @@ export class Simulation {
     const c = t.chop!;
     const fi = t.queue[t.current];
     const area = this.fields!.areaHa[fi];
-    // Rest (Rundung der Strecke) dem Wagen zuschlagen
-    if (c.attached) c.attached.load += Math.max(0, area - c.fieldHa) * c.yieldT;
+    // Rest (Rundung der Strecke) dem Wagen bzw. dem Bunker zuschlagen
+    const rest = Math.max(0, area - c.fieldHa) * c.yieldT;
+    if (c.attached) c.attached.load += rest;
+    else if (c.bunker) c.bunker.load += rest;
     c.fieldHa = 0;
+    // letztes Feld: Bunker am Feldrand leeren (Miete bzw. Anhänger)
+    if (t.current + 1 >= t.queue.length || c.miete) this.dumpBunker(v, c);
     if (o) {
       b.fieldDone(o, fi, this.time);
       b.chargeDiesel(area * t.dieselLHa, o, this.time);
@@ -2217,7 +2267,7 @@ export class Simulation {
     const hm = this.company.machines.find((x) => x.id === v.machineId);
     if (hm) { hm.hours = Math.round((hm.hours + hours) * 10) / 10; b.wear(hm, hours); }
     if (o) o.tractorHours = Math.round((o.tractorHours + hours) * 100) / 100;
-    b.addExperience(t.driverId, 'haecksler', Math.round((area / t.haPerHour) * 60), this.time);
+    b.addExperience(t.driverId, o ? SERVICE_SKILL[o.service] : 'haecksler', Math.round((area / t.haPerHour) * 60), this.time);
     // angehängten Wagen abgeben (zum Silo, wenn etwas drin ist)
     this.detachWagon(v, c);
     t.current++;

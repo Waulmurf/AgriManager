@@ -17,7 +17,7 @@ export interface CropStep {
   /** Fenster als Monat*100+Tag (von, bis); bis < von = über den Jahreswechsel */
   from: number;
   to: number;
-  /** Kosten je ha bei Fremdleistung inkl. Betriebsmittel (Saatgut, Dünger, Pflanzenschutz) */
+  /** Kosten je ha bei Fremdleistung inkl. Betriebsmittel (Saatgut, Dünger, Pflanzenschutz); Ernte: ohne eigene Maschine */
   costHa: number;
   /** ohne diesen Schritt sinkt der Ertrag (verpasst: −10 %) */
   required: boolean;
@@ -48,7 +48,7 @@ export const CROPS: CropDef[] = [
       { key: 'grubbern', name: 'Grubbern', service: 'grubbern', from: 901, to: 1005, costHa: 0, required: true },
       { key: 'saat', name: 'Saat (Fremdleistung inkl. Saatgut)', from: 925, to: 1025, costHa: 45 + 95, required: true },
       { key: 'pflege', name: 'Düngung und Pflanzenschutz (Fremdleistung inkl. Mittel)', from: 301, to: 531, costHa: 30 + 380, required: true },
-      { key: 'drusch', name: 'Mähdrusch (Fremdleistung)', from: 720, to: 820, costHa: 155, required: true, harvest: true },
+      { key: 'drusch', name: 'Mähdrusch (eigener Drescher, sonst Fremdleistung)', service: 'drusch', from: 720, to: 820, costHa: 155, required: true, harvest: true },
     ],
   },
   {
@@ -57,7 +57,7 @@ export const CROPS: CropDef[] = [
       { key: 'stoppel', name: 'Stoppelbearbeitung', service: 'stoppel', from: 720, to: 815, costHa: 0, required: false },
       { key: 'saat', name: 'Saat (Fremdleistung inkl. Saatgut)', from: 815, to: 910, costHa: 50 + 85, required: true },
       { key: 'pflege', name: 'Düngung und Pflanzenschutz (Fremdleistung inkl. Mittel)', from: 301, to: 430, costHa: 30 + 450, required: true },
-      { key: 'drusch', name: 'Mähdrusch (Fremdleistung)', from: 710, to: 805, costHa: 155, required: true, harvest: true },
+      { key: 'drusch', name: 'Mähdrusch (eigener Drescher, sonst Fremdleistung)', service: 'drusch', from: 710, to: 805, costHa: 155, required: true, harvest: true },
     ],
   },
   {
@@ -77,7 +77,7 @@ export const CROPS: CropDef[] = [
       { key: 'grubbern', name: 'Grubbern', service: 'grubbern', from: 301, to: 410, costHa: 0, required: true },
       { key: 'saat', name: 'Rübensaat (Fremdleistung inkl. Saatgut)', from: 320, to: 420, costHa: 60 + 270, required: true },
       { key: 'pflege', name: 'Düngung und Pflanzenschutz (Fremdleistung inkl. Mittel)', from: 501, to: 731, costHa: 40 + 450, required: true },
-      { key: 'roden', name: 'Roden und Mietenladen (Fremdleistung)', from: 1001, to: 1130, costHa: 260, required: true, harvest: true },
+      { key: 'roden', name: 'Roden (eigener Roder, sonst Fremdleistung)', service: 'roden', from: 1001, to: 1130, costHa: 260, required: true, harvest: true },
     ],
   },
   {

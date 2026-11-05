@@ -128,6 +128,19 @@ describe('Pacht und eigener Ackerbau', () => {
     expect(b.invoices.some((i) => i.orderId === o.id)).toBe(false);
   });
 
+  it('mit eigenem Mähdrescher wird der Drusch zum Eigenauftrag statt Fremdleistung', () => {
+    const s = world(4);
+    const b = s.business;
+    s.company.cash = 1_000_000;
+    const l = winLease(s);
+    s.company.machines.push({ id: 900, type: 'maehdrescher', brand: 'Claas', model: 'Lexion', year: 2022, hours: 0, condition: 95, newPrice: 500000, purchasePrice: 500000, afaYears: 10, boughtAt: 0, power: 435, width: 9.3, haPerHour: 3, payloadT: 9 });
+    s.command({ kind: 'setCrop', leaseId: l.id, crop: 'raps' });
+    runUntil(s, () => b.orders.some((o) => o.ownLeaseId === l.id && o.service === 'drusch'), 520 * 1440);
+    const o = b.orders.find((x) => x.ownLeaseId === l.id && x.service === 'drusch')!;
+    expect(o.chain).toBe('haecksler');
+    expect(b.ledger.some((x) => x.text.startsWith('Mähdrusch'))).toBe(false);
+  });
+
   it('Spielstand mit Pachtflächen läuft bitgleich weiter', () => {
     const a = world(4);
     const l = winLease(a);

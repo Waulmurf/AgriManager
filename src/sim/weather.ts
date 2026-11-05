@@ -89,6 +89,21 @@ export class Weather {
     return null;
   }
 
+  /**
+   * Mähdrusch zur Spielminute möglich? Korn muss trocken sein: nicht im Regen, nicht vor etwa
+   * 9 Uhr (Tau), nach Regen über 2 mm am Vortag erst ab Mittag. Der Boden spielt kaum eine Rolle.
+   */
+  threshBlocked(time: number): string | null {
+    const idx = Math.floor(time / 1440);
+    const w = this.day(idx);
+    const minute = time - idx * 1440;
+    if (w.rain >= 0.5 && w.rainFrom >= 0 && minute >= w.rainFrom) return 'Regen – Korn zu feucht';
+    if (minute < 3 * 60) return 'Tau – Drusch ab etwa 9 Uhr';
+    if (idx > 0 && this.day(idx - 1).rain >= 2 && minute < 6 * 60) return 'Bestand nass vom Regen, Drusch ab Mittag';
+    if (w.soil > SOIL_MAX - 2) return 'Boden aufgeweicht';
+    return null;
+  }
+
   /** Ganzer Arbeitstag gesperrt (für Planung und Schätzung)? */
   dayBlocked(index: number): boolean {
     const w = this.day(index);

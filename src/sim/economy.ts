@@ -19,9 +19,9 @@ export function marketValue(newPrice: number, ageYears: number, hours: number): 
 
 export type MachineType =
   | 'schlepper' | 'firmenwagen' | 'grubber' | 'kurzscheibenegge' | 'guellefass' | 'zubringer'
-  | 'feldhaecksler' | 'haeckselwagen' | 'radlader';
+  | 'feldhaecksler' | 'haeckselwagen' | 'radlader' | 'maehdrescher' | 'kipper' | 'ruebenroder';
 /** Selbstfahrende Maschinen erscheinen wie Schlepper als Fahrzeug auf der Karte */
-export const SELF_PROPELLED: MachineType[] = ['schlepper', 'feldhaecksler', 'radlader'];
+export const SELF_PROPELLED: MachineType[] = ['schlepper', 'feldhaecksler', 'radlader', 'maehdrescher', 'ruebenroder'];
 
 export interface Machine {
   id: number;
@@ -143,7 +143,7 @@ export const CAR_KINDS: Record<CarKind, string> = { kombi: 'Kombi', kleinbus: 'K
 
 /** Wartungsintervall (Betriebsstunden): Schlepper 500 h, Geräte 250 h (Annahme) */
 export function serviceInterval(m: Pick<Machine, 'type'>): number {
-  return m.type === 'schlepper' || m.type === 'firmenwagen' || m.type === 'feldhaecksler' || m.type === 'radlader' ? 500 : 250;
+  return SELF_PROPELLED.includes(m.type) || m.type === 'firmenwagen' ? 500 : 250;
 }
 
 export interface MarketOffer {
@@ -246,6 +246,8 @@ export const MACHINE_SKILL: Partial<Record<MachineType, { skill: Skill; min: num
   schlepper: { skill: 'boden', min: 1 },
   guellefass: { skill: 'guelle', min: 1 },
   feldhaecksler: { skill: 'haecksler', min: 2 },
+  maehdrescher: { skill: 'drescher', min: 2 },
+  ruebenroder: { skill: 'roder', min: 2 },
   radlader: { skill: 'radlader', min: 1 },
 };
 /** Eigene Reparatur mit dem Werkstattwagen: ab Stufe 2 */

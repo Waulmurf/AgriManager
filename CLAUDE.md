@@ -96,7 +96,10 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
   `askLand`/`setCrop`/`farmingDaily`/Ernte in `business.ts`, Eigenaufträge (`Order.ownLeaseId`, farmId −1), Reiter Ackerbau.
 - Biogasanlage fertig: `src/sim/biogas.ts` (Größen, Ration mit Maisdeckel, Gärrest), Bau/Ausschreibung/Substrat/
   Gülleverträge/Gärrest/`biogasDaily` in `business.ts`, `Order.sourceNode` (Silo/Lager der Anlage), Reiter Biogas.
-- Weitere Schichten (Standorte, Pacht, Ackerbau, Biogas) damit komplett. Vorschläge für die nächsten Schichten
+- Weitere Schichten (Standorte, Pacht, Ackerbau, Biogas) damit komplett.
+- Vorschlag 4 fertig: Mähdrusch (`drusch`, Korntank, nur Drusch/mit Abfuhr per Kipper, `Weather.threshBlocked`) und
+  Rübenroden (`roden`, Bunker, Feldrandmiete) als Erntedienste (`isHarvest`, `HAULER_TYPE`, `ChopState.bunker/miete`).
+  Nils hat „Mache weiter mit dem Plan“ gesagt: Reihenfolge laut Empfehlung 4 → 1 → 13 → 5. Vorschläge für die nächsten Schichten
   (Nr. 1–19) stehen am Ende von docs/plan.md und warten auf Nils' Auswahl.
 
 ## CI (GitHub Actions)
