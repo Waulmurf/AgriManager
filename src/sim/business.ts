@@ -10,9 +10,10 @@ import { Crop, SURNAMES, type FarmSet } from './farms';
 import type { FieldSet } from './fields';
 import {
   EMPLOYER_SV, MIN_WAGE, MONTH_HOURS, ROLES, SKILLS, VACATION_DAYS, marketWage, agencyRate, takeOverFee, AGENCY_MIN_HOURS, XP_MINUTES_PER_LEVEL, baseSkills, gameDate, marketValue,
-  serviceInterval, START_OFFERS, START_YEAR, type Company, type Loan, type MachineType, type Employee, type Machine, type MarketOffer, type Repair, type Skill,
+  serviceInterval, START_OFFERS, START_YEAR, type Company, type Loan, type MachineType, type Site, type Employee, type Machine, type MarketOffer, type Repair, type Skill,
 } from './economy';
 import { CATALOG, DEALERS, dealersFor, type CatalogModel } from '../data/catalog';
+import { BUILDINGS, PERMIT, SITE_OFFERS, type BuildingKey } from '../data/sites';
 import { COMPETITOR_RANGE_KM, PRICE_WAR_KM, generateCompetitors, kmBetween, type Competitor } from './market';
 import {
   DIESEL_MEAN, DIESEL_START, LEASE_BASE_RATE, LIABILITY_PER_YEAR, OVERDRAFT_RATE, RATING_SURCHARGE,
@@ -206,7 +207,7 @@ export interface Invoice {
 
 export type LedgerCategory =
   | 'Rechnung' | 'Diesel' | 'Maschinenkauf' | 'Personal' | 'Werkstatt'
-  | 'Kredit' | 'Tilgung' | 'Zinsen' | 'Leasing' | 'Versicherung' | 'Steuern' | 'Sonstiges';
+  | 'Kredit' | 'Tilgung' | 'Zinsen' | 'Leasing' | 'Versicherung' | 'Steuern' | 'Gebäude' | 'Bau' | 'Sonstiges';
 
 /** Jahresabschluss (WF-08) */
 export interface YearResult {
@@ -277,6 +278,10 @@ export type Command =
   | { kind: 'swapDriver'; vehicle: number; driverId: number; chauffeurId?: number }
   | { kind: 'repair'; machineId: number; mode: 'dealer' | 'own'; mechanicId?: number }
   | { kind: 'buyParts'; amount: number }
+  | { kind: 'build'; siteId: number; building: BuildingKey }
+  | { kind: 'buySite'; offerKey: string }
+  | { kind: 'sellSite'; siteId: number }
+  | { kind: 'transfer'; machineId: number; siteId: number; driverId: number; implementId?: number }
   | { kind: 'takeLoan'; amount: number; years: number }
   | { kind: 'repayLoan'; loanId: number; amount: number }
   | { kind: 'leaseBuyout'; machineId: number; buyout: boolean }
@@ -461,6 +466,111 @@ export class Business {
       for (const r of this.requests) if (r.farmId === farmId && r.status === 'offen') r.status = 'abgelaufen';
       this.emit(time, 'warnung', `${farm.name} ist unzufrieden und arbeitet ab jetzt mit einem anderen Lohnunternehmen. In einigen Wochen kann man es mit kleinen Aufträgen wieder versuchen.`, farmId);
     }
+  }
+
+  // ---------- Standorte und Gebäude ----------
+
+  site(id?: number): Site | undefined {
+    const sites = this.company.sites ?? [];
+    return sites.find((x) => x.id === (id ?? 1)) ?? sites[0];
+  }
+
+  /** Gebäude fertig an einem Standort (ohne Angabe: irgendwo) */
+  hasBuilding(key: BuildingKey, siteId?: number): boolean {
+    const list = siteId === undefined ? this.company.sites ?? [] : [this.site(siteId)].filter(Boolean) as Site[];
+    return list.some((x) => x.buildings[key]?.done);
+  }
+
+  /** Bauen (ST-03, ST-05): ggf. erst Genehmigung, dann Bauzeit; bezahlt wird bei Baubeginn */
+  build(siteId: number, key: BuildingKey, time: number): string {
+    const st = this.site(siteId);
+    const def = BUILDINGS.find((b) => b.key === key);
+    if (!st || !def) return 'Unbekannt';
+    if (st.buildings[key]) return st.buildings[key]!.done ? 'Steht schon' : 'Ist schon beantragt bzw. im Bau';
+    if (def.requires && !st.buildings[def.requires]) return `Zuerst ${BUILDINGS.find((b) => b.key === def.requires)!.name}`;
+    const fee = def.permit ? PERMIT[st.kind].fee : 0;
+    if (!this.canPay(def.cost + fee)) return 'Nicht genug Geld (auch nicht mit Kontokorrent) – Darlehen?';
+    if (fee) this.book(time, `Baugenehmigung ${def.name} (${st.name})`, -fee, 'Gebäude');
+    this.book(time, `Bau ${def.name} (${st.name})`, -def.cost, 'Bau');
+    const permitUntil = def.permit ? time + PERMIT[st.kind].weeks * 7 * 1440 : undefined;
+    const readyAt = (permitUntil ?? time) + def.weeks * 7 * 1440;
+    st.buildings[key] = { done: false, permitUntil, readyAt };
+    this.version++;
+    this.emit(time, 'info', `${def.name} in ${st.name}: ${def.permit ? `Genehmigung bis etwa ${fmtDay(permitUntil!)}, ` : ''}fertig etwa ${fmtDay(readyAt)}.`);
+    return `beauftragt, fertig etwa ${fmtDay(readyAt)}`;
+  }
+
+  /** Neuen Standort kaufen oder pachten (ST-01) */
+  buySite(offerKey: string, time: number, node: number): string {
+    const o = SITE_OFFERS.find((x) => x.key === offerKey);
+    if (!o) return 'Angebot unbekannt';
+    const sites = (this.company.sites ??= []);
+    if (sites.some((x) => x.name === o.name)) return 'Gehört schon zum Betrieb';
+    if (o.price && !this.canPay(o.price)) return 'Nicht genug Geld – Darlehen?';
+    const id = sites.reduce((a, x) => Math.max(a, x.id), 0) + 1;
+    const buildings: Site['buildings'] = {};
+    for (const b of o.buildings) buildings[b] = { done: true };
+    sites.push({ id, name: o.name, kind: o.kind, node, lonLat: o.lonLat, rentPerMonth: o.rentPerMonth, buildings, purchasePrice: o.price || undefined });
+    if (o.price) this.book(time, `Kauf ${o.name}`, -o.price, 'Bau');
+    this.version++;
+    this.emit(time, 'info', `${o.name} gehört jetzt zum Betrieb${o.rentPerMonth ? ` (Pacht ${fmtEur(o.rentPerMonth)} im Monat)` : ''}. Maschinen lassen sich im Reiter Standorte dorthin überführen.`);
+    return o.rentPerMonth ? 'gepachtet' : 'gekauft';
+  }
+
+  /** Standort aufgeben (ST-04): Verkauf zu 80 % des Grundstücks plus 50 % der Gebäude, Maschinen gehen zum Stammhof */
+  sellSite(siteId: number, time: number): string {
+    const sites = this.company.sites ?? [];
+    const st = sites.find((x) => x.id === siteId);
+    if (!st || st.id === 1) return 'Der Stammhof bleibt';
+    let price = Math.round((st.purchasePrice ?? 0) * 0.8);
+    for (const [k, b] of Object.entries(st.buildings)) if (b?.done) price += Math.round((BUILDINGS.find((x) => x.key === k)?.cost ?? 0) * 0.5);
+    for (const m of this.company.machines) if (m.siteId === siteId) m.siteId = undefined;
+    sites.splice(sites.indexOf(st), 1);
+    if (price) this.book(time, `Verkauf ${st.name}`, price, 'Bau');
+    this.version++;
+    this.emit(time, 'info', `${st.name} aufgegeben${price ? `, Erlös ${fmtEur(price)}` : ''}. Maschinen zählen jetzt zum Stammhof.`);
+    return 'aufgegeben';
+  }
+
+  /** Täglich: Genehmigungen, Bauende; monatlich laufende Kosten und Pacht */
+  private sitesDaily(time: number) {
+    for (const st of this.company.sites ?? []) {
+      for (const [k, b] of Object.entries(st.buildings)) {
+        if (!b || b.done) continue;
+        const def = BUILDINGS.find((x) => x.key === k)!;
+        if (b.permitUntil !== undefined && time >= b.permitUntil && time - 1440 < b.permitUntil) {
+          this.emit(time, 'info', `Baugenehmigung erteilt: ${def.name} in ${st.name}. Der Bau beginnt.`);
+        }
+        if (time >= (b.readyAt ?? 0)) {
+          b.done = true;
+          this.version++;
+          this.emit(time, 'info', `Fertig: ${def.name} in ${st.name}. ${def.effect}.`);
+        }
+      }
+    }
+    if (gameDate(time).day === 1) {
+      let running = 0, rent = 0;
+      for (const st of this.company.sites ?? []) {
+        rent += st.rentPerMonth ?? 0;
+        for (const [k, b] of Object.entries(st.buildings)) if (b?.done) running += (BUILDINGS.find((x) => x.key === k)?.runningPerYear ?? 0) / 12;
+      }
+      if (running > 0) this.book(time, 'Gebäude: Strom, Grundsteuer, Versicherung, Instandhaltung', -running, 'Gebäude');
+      if (rent > 0) this.book(time, 'Pacht Standorte', -rent, 'Gebäude');
+    }
+  }
+
+  /** AfA auf Gebäude (33 Jahre) für einen Zeitraum */
+  private buildingAfa(from: number, to: number): number {
+    let afa = 0;
+    for (const st of this.company.sites ?? []) {
+      for (const [k, b] of Object.entries(st.buildings)) {
+        if (!b?.done || b.readyAt === undefined) continue;
+        const cost = BUILDINGS.find((x) => x.key === k)?.cost ?? 0;
+        const months = Math.max(0, Math.floor((to - Math.max(from, b.readyAt)) / (30 * 1440)));
+        afa += (cost / (33 * 12)) * months;
+      }
+    }
+    return Math.round(afa);
   }
 
   // ---------- Markt (Phase 5) ----------
@@ -706,6 +816,7 @@ export class Business {
     this.partsDaily(time);
     this.financeDaily(time);
     this.marketDaily(time);
+    this.sitesDaily(time);
     // Auftrag steht wegen Panne: Kunde wartet und wird unzufriedener (MZ-07)
     for (const o of this.orders) {
       if (o.status !== 'läuft') continue;
@@ -981,9 +1092,9 @@ export class Business {
     for (const l of this.ledger) {
       if (l.time < from || l.time >= to) continue;
       if (l.category === 'Rechnung') revenue += l.amount;
-      else if (l.category === 'Diesel' || l.category === 'Personal' || l.category === 'Werkstatt' || l.category === 'Zinsen' || l.category === 'Leasing' || l.category === 'Versicherung' || l.category === 'Sonstiges') expenses -= l.amount;
+      else if (l.category === 'Diesel' || l.category === 'Personal' || l.category === 'Werkstatt' || l.category === 'Zinsen' || l.category === 'Leasing' || l.category === 'Versicherung' || l.category === 'Gebäude' || l.category === 'Sonstiges') expenses -= l.amount;
     }
-    let afa = this.yearAfaSold;
+    let afa = this.yearAfaSold + this.buildingAfa(from, to);
     for (const m of this.company.machines) afa += bookValue(m, Math.max(from, m.boughtAt ?? 0)) - bookValue(m, to);
     return { revenue: Math.round(revenue), expenses: Math.round(expenses), afa: Math.round(afa) };
   }
@@ -1209,7 +1320,20 @@ export class Business {
   }
 
   /** Wartung beim Händler (MZ-05): Maschine einen Arbeitstag weg, Zustand +3, Intervall neu */
-  service(m: Machine, time: number, home: [number, number]): string {
+  service(m: Machine, time: number, home: [number, number], ownWorkshop = false): string {
+    if (ownWorkshop) {
+      // eigene Werkstatt am Standort mit Mechaniker: halber Preis, 4 Stunden (Werkstatt-Gebäude)
+      const tractorW = m.type === 'schlepper' || m.type === 'firmenwagen' || m.type === 'feldhaecksler' || m.type === 'radlader';
+      const costW = Math.round(((tractorW ? 400 + 0.004 * m.newPrice : 150 + 0.003 * m.newPrice) * 0.5) / 10) * 10;
+      m.downUntil = time + 4 * 60;
+      m.downReason = 'Wartung in der eigenen Werkstatt';
+      m.serviceAtH = m.hours + serviceInterval(m);
+      m.condition = Math.min(100, m.condition + 3);
+      const mo = gameDate(time).month;
+      if (mo >= 11 || mo <= 2) m.winterCheckAt = time;
+      this.payWorkshop(time, costW, `Wartung (eigene Werkstatt) ${m.brand} ${m.model}`, m);
+      return `Wartung in der eigenen Werkstatt (${fmtEur(costW)}), fertig in 4 Stunden`;
+    }
     const d = this.dealerKm(m.brand, home);
     const tractor = m.type === 'schlepper' || m.type === 'firmenwagen';
     // Wintercheck (MZ-05): November bis Februar 20 % günstiger, senkt das Pannenrisiko bis zum Herbst
@@ -1370,6 +1494,9 @@ export class Business {
   wear(m: Machine, hours: number): void {
     let rate = m.type === 'schlepper' || m.type === 'firmenwagen' ? 0.006 : 0.02;
     if (m.serviceAtH !== undefined && m.hours > m.serviceAtH) rate *= 2;
+    // Maschinenhalle am Standort (25 % weniger), Waschplatz (10 % weniger)
+    if (this.hasBuilding('halle', m.siteId ?? 1)) rate *= 0.75;
+    if (this.hasBuilding('tank')) rate *= 0.9;
     m.condition = Math.max(0, Math.round((m.condition - rate * hours) * 100) / 100);
   }
 
@@ -1409,7 +1536,8 @@ export class Business {
   /** Diesel tanken/abrechnen: Kosten sofort vom Konto, beim Auftrag mitgeschrieben */
   chargeDiesel(liters: number, order: Order | undefined, _time: number) {
     if (liters <= 0) return;
-    const cost = liters * this.dieselPrice;
+    // eigener Dieseltank: 6 ct/l günstiger (Großabnahme)
+    const cost = liters * (this.dieselPrice - (this.hasBuilding('tank') ? 0.06 : 0));
     this.company.cash = Math.round((this.company.cash - cost) * 100) / 100;
     this.dieselTotalL += liters;
     this.dieselTodayL += liters;
@@ -1837,6 +1965,7 @@ export class Business {
       const mw = marketWage(e);
       let target = 70 + 150 * (e.wage / mw - 1) - ((e.overtime30 ?? 0) / 60) * (1.3 - res) - (fleetCond < 50 ? 10 : 0) - (e.grudge ?? 0);
       if (e.kind === 'fest' && (e.vacationLeft ?? 0) > 20 && gameDate(time).month >= 10) target -= 5; // Urlaub verfällt bald
+      if (this.hasBuilding('buero')) target += 5; // Büro und Sozialräume
       target = Math.max(0, Math.min(100, target));
       const sat = e.satisfaction ?? 70;
       e.satisfaction = Math.round((sat + (target - sat) * 0.02) * 10) / 10;

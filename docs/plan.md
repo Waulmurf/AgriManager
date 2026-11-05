@@ -655,3 +655,37 @@ Schritte:
 - **Später:** Konkurrenten mit echtem Fuhrpark und Auslastung (in der Ernte ausgebucht),
   Abwerben von Personal durch bestimmte Konkurrenten, Übernahme kleiner Anbieter.
 
+## Weitere Schichten: Standorte, Pacht, Ackerbau, Biogas (ab 5. Nov. 2026)
+
+Schritte: 1. Standorte und Gebäude (umgesetzt), 2. Pacht und eigener Ackerbau, 3. Biogasanlage.
+
+### Schritt 1: Standorte und Gebäude (Annahmen)
+
+- **Stammhof Groß Thondorf** ist Standort 1 (Matschplatz). Gebäude (`src/data/sites.ts`):
+
+  | Gebäude | Kosten | Bauzeit | Wirkung |
+  | --- | --- | --- | --- |
+  | Befestigter Platz | 45.000 € | 3 Wochen | ohne ihn bei nassem Boden +10 min Rangieren beim Rüsten |
+  | Maschinenhalle 600 m² | 150.000 € | 8 Wochen + Genehmigung | 25 % weniger Verschleiß für Maschinen am Standort |
+  | Werkstatt mit Grube | 220.000 € | 10 Wochen + Genehmigung | Wartung am Hof durch eigene Mechaniker: halber Preis, 4 h |
+  | Dieseltank und Waschplatz | 40.000 € | 3 Wochen + Genehmigung | Diesel 6 ct/l günstiger, 10 % weniger Verschleiß |
+  | Büro und Sozialräume | 85.000 € | 6 Wochen + Genehmigung | Zufriedenheit der Mitarbeiter +5 |
+  | Fahrsilo 3.000 t | 120.000 € | 6 Wochen + Genehmigung | Lager für eigene Silage (Ackerbau, Biogas) |
+
+  - Hallenkosten etwa 250 €/m² (Hausjournal: Leimbinderhalle 20 × 15 m bis etwa 80.000 €).
+  - Laufende Kosten je Gebäude 500–3.000 € im Jahr (Strom, Grundsteuer, Versicherung,
+    Instandhaltung), monatlich gebucht.
+  - Gebäude werden über 33 Jahre abgeschrieben.
+- **Genehmigung (ST-03, vereinfacht):** Außenbereich 16 Wochen und 3.000 € (ein Lohnunternehmen
+  ist nicht privilegiert), Resthof 10 Wochen und 2.000 €, Gewerbegebiet 6 Wochen und 1.500 €.
+- **Weitere Standorte (ST-01, ST-04):**
+  - zu kaufen: Gewerbegrundstücke in Uelzen (225.000 €), Dannenberg (125.000 €) und Salzwedel
+    (100.000 €) sowie ein Resthof bei Bad Bevensen mit Platz und Halle (380.000 €)
+  - zu pachten: Resthof Neuhaus rechts der Elbe (1.400 €/Monat)
+  - Aufgeben bringt 80 % des Grundstückspreises und 50 % der Gebäude.
+- **Zuordnung (ST-07):** Jede Maschine steht an einem Standort, dort starten und enden ihre
+  Fahrten. Überführung mit Fahrer, Geräte fahren am Schlepper mit. Der Pendelweg der Fahrer ist
+  noch nicht eingerechnet.
+- **Später:** Stellplatzgrenzen, Disponent im Büro (ST-08), Übernahme ganzer Lohnunternehmen
+  (ST-02), Lager für Dünger und Saatgut, Gülle- und Gärrestlager.
+

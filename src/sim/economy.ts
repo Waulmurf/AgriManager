@@ -76,11 +76,27 @@ export interface Machine {
   dealerId?: number;
   /** Wintercheck gemacht am (MZ-05) */
   winterCheckAt?: number;
+  /** Standort, an dem die Maschine steht (ST-07); ohne = Stammhof */
+  siteId?: number;
   /** Anschaffungskosten und Nutzungsdauer für die AfA (WF-03) */
   purchasePrice?: number;
   afaYears?: number;
   /** Leasing (WF-02): Monatsrate, Ende, Restwert; buyout = am Ende übernehmen */
   lease?: { monthly: number; endsAt: number; residual: number; buyout?: boolean };
+}
+
+/** Standort mit Gebäuden (ST-01 bis ST-09) */
+export interface Site {
+  id: number;
+  name: string;
+  kind: 'hof' | 'gewerbe' | 'resthof';
+  node: number;
+  lonLat: [number, number];
+  /** gekauft oder gepachtet (Pacht je Monat) */
+  rentPerMonth?: number;
+  /** Gebäude: fertig (true) oder im Bau/Genehmigung (Fertigstellung, Genehmigung bis) */
+  buildings: Partial<Record<'platz' | 'halle' | 'werkstatt' | 'tank' | 'buero' | 'fahrsilo', { done: boolean; permitUntil?: number; readyAt?: number }>>;
+  purchasePrice?: number;
 }
 
 /** Darlehen (WF-01): Annuität, monatlich gebucht */
@@ -388,6 +404,8 @@ export interface Company {
   machines: Machine[];
   /** Mitarbeiter; zu Beginn nur der Chef selbst (Nr. 1) */
   drivers: Employee[];
+  /** Standorte (Phase „Standorte“): Stammhof Nr. 1 und weitere */
+  sites?: Site[];
   /** Verschleißteillager am Hof (Warenwert €): Schare, Zinken, Filter, Riemen, Schläuche … */
   partsStock?: number;
   /** nachgekaufte Verschleißteile, Lieferung am Morgen */

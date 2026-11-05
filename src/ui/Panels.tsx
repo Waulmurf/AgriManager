@@ -7,6 +7,7 @@ import type { JobEstimate } from '../sim/engine';
 import { MECHANIC_MIN, SKILLS, roleName, employerHourCost, employerMonthCost, machineValue, marketWage, takeOverFee, type Employee, type Machine } from '../sim/economy';
 import { SERVICE_IMPLEMENT, SERVICE_NAMES, fmtDay, fmtTime, partsText, CHECK_COST, type Invoice, type Request, type Order } from '../sim/business';
 import { CATALOG, DEALERS } from '../data/catalog';
+import { BUILDINGS, SITE_OFFERS } from '../data/sites';
 import { leaseRate } from '../sim/finance';
 import { formatGameTime } from '../game/clock';
 
@@ -809,6 +810,85 @@ export function CompetitionTab({ status, game }: { status: GameStatus; game: Gam
         </tbody>
       </table>
       <p className="hint">Preise relativ zum Marktpreis. Große Anbieter häckseln auch, mittlere fahren Gülle, kleine nur Bodenbearbeitung. Im Preiskampf vergleichen Kunden im Umkreis von 25 km genauer; unzufriedene Kunden wechseln dann eher.</p>
+    </>
+  );
+}
+
+/** Standorte und Gebäude (ST-01 bis ST-09) */
+export function SitesTab({ status, game }: { status: GameStatus; game: GameController | null }) {
+  const b = status.business;
+  const c = status.company;
+  const fb = useFeedback();
+  const [mv, setMv] = useState(0);
+  const [imp, setImp] = useState(0);
+  const [drv, setDrv] = useState(1);
+  const [target, setTarget] = useState(1);
+  if (!b || !c) return <p className="hint">–</p>;
+  const sites = c.sites ?? [];
+  const send = async (cmd: Parameters<GameController['command']>[0]) => fb.show(await game!.command(cmd));
+  const owned = new Set(sites.map((x) => x.name));
+  const movable = c.machines.filter((m) => ['schlepper', 'feldhaecksler', 'radlader', 'firmenwagen'].includes(m.type));
+  const implementsList = c.machines.filter((m) => !['schlepper', 'feldhaecksler', 'radlader', 'firmenwagen'].includes(m.type));
+  const siteName = (id?: number) => sites.find((x) => x.id === (id ?? 1))?.name ?? 'Stammhof';
+  return (
+    <>
+      {sites.map((st) => (
+        <div key={st.id}>
+          <h2>{st.name}</h2>
+          <small className="hint">{st.kind === 'hof' ? 'Hofstelle im Außenbereich' : st.kind === 'gewerbe' ? 'Gewerbegebiet' : 'Resthof'}{st.rentPerMonth ? ` · Pacht ${eur(st.rentPerMonth)}/Monat` : ''} · {c.machines.filter((m) => (m.siteId ?? 1) === st.id).length} Maschinen</small>
+          <ul className="cards" data-testid="buildings">
+            {BUILDINGS.map((d) => {
+              const bl = st.buildings[d.key];
+              const state = !bl ? null : bl.done ? 'fertig' : bl.permitUntil !== undefined && b.time < bl.permitUntil ? `Genehmigung bis ${fmtDay(bl.permitUntil)}` : `im Bau bis ${fmtDay(bl.readyAt ?? b.time)}`;
+              const blocked = d.requires && !st.buildings[d.requires];
+              return (
+                <li key={d.key} className="card">
+                  <div className="card-head"><strong>{d.name}</strong><small>{state ?? `${eur(d.cost)} · ${d.weeks} Wochen${d.permit ? ' + Genehmigung' : ''}`}</small></div>
+                  <small className="hint">{d.effect} · laufend {eur(d.runningPerYear)}/Jahr</small>
+                  {!bl && (
+                    <div className="card-actions">
+                      <button onClick={() => send({ kind: 'build', siteId: st.id, building: d.key })} disabled={!!blocked} data-testid={`build-${d.key}`}>
+                        {blocked ? `erst ${BUILDINGS.find((x) => x.key === d.requires)!.name.split(' (')[0]}` : 'Bauen'}
+                      </button>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+          {st.id !== 1 && <button onClick={() => send({ kind: 'sellSite', siteId: st.id })}>{st.rentPerMonth ? 'Pacht kündigen' : 'Standort verkaufen'}</button>}
+        </div>
+      ))}
+      <h2>Maschinen überführen</h2>
+      <div className="card-actions">
+        <select value={mv} onChange={(e) => setMv(Number(e.target.value))} aria-label="Maschine">
+          <option value={0}>Maschine …</option>
+          {movable.map((m) => <option key={m.id} value={m.id}>{machineName(m)} ({siteName(m.siteId)})</option>)}
+        </select>
+        <select value={imp} onChange={(e) => setImp(Number(e.target.value))} aria-label="Gerät mitnehmen">
+          <option value={0}>ohne Gerät</option>
+          {implementsList.map((m) => <option key={m.id} value={m.id}>{machineName(m)} ({siteName(m.siteId)})</option>)}
+        </select>
+        <select value={drv} onChange={(e) => setDrv(Number(e.target.value))} aria-label="Fahrer">
+          {c.drivers.map((d) => <option key={d.id} value={d.id}>{d.isPlayer ? 'Chef' : d.name}</option>)}
+        </select>
+        <select value={target} onChange={(e) => setTarget(Number(e.target.value))} aria-label="nach">
+          {sites.map((x) => <option key={x.id} value={x.id}>nach {x.name}</option>)}
+        </select>
+        <button onClick={() => send({ kind: 'transfer', machineId: mv, siteId: target, driverId: drv, implementId: imp || undefined })} disabled={!mv}>Überführen</button>
+      </div>
+      <p className="hint">Fahrten starten und enden am Standort der Maschine. Geräte fahren mit einem Schlepper mit.</p>
+      <h2>Grundstücke und Hofstellen</h2>
+      <ul className="cards">
+        {SITE_OFFERS.filter((o) => !owned.has(o.name)).map((o) => (
+          <li key={o.key} className="card">
+            <div className="card-head"><strong>{o.name}</strong><strong>{o.rentPerMonth ? `${eur(o.rentPerMonth)}/Monat` : eur(o.price)}</strong></div>
+            <small className="hint">{o.note}{o.buildings.length ? ` · vorhanden: ${o.buildings.map((k) => BUILDINGS.find((x) => x.key === k)!.name.split(' (')[0]).join(', ')}` : ''} · Genehmigungen: {o.kind === 'gewerbe' ? '6' : '10'} Wochen</small>
+            <div className="card-actions"><button onClick={() => send({ kind: 'buySite', offerKey: o.key })}>{o.rentPerMonth ? 'Pachten' : 'Kaufen'}</button></div>
+          </li>
+        ))}
+      </ul>
+      {fb.msg && <p className="feedback">{fb.msg}</p>}
     </>
   );
 }

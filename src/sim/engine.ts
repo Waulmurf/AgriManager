@@ -12,6 +12,7 @@ import { fieldPattern, type FieldSet } from './fields';
 import { generateFarms, type FarmSet } from './farms';
 import { MACHINE_SKILL, MECHANIC_MIN, SELF_PROPELLED, START_OFFERS, normalizeDrivers, skillDiesel, skillSpeed, startCompany, type CarKind, type Company, type Machine } from './economy';
 import { DEALERS } from '../data/catalog';
+import { SITE_OFFERS } from '../data/sites';
 import { Business, HIRED_ROLLER_EUR_H, REMIND_CALL_MINUTES, SERVICE_IMPLEMENT, SILAGE_YIELD_T_HA, SERVICE_NAMES, SERVICE_SKILL, SERVICE_VERB, type Order, VISIT_MINUTES, WEAR_GRUBBER_EUR_HA, type Service, fmtDay, fmtHa, fmtTime, type Command, type QueueCommand, type QueueItem } from './business';
 import { appendEdgePoints, nearestNode, project, RoadClass, unproject, type RoadGraph } from './roadgraph';
 import { surchargeFactor } from './calendar';
@@ -205,6 +206,10 @@ type PlayerTask =
       phase: 'prep' | 'toField' | 'wait' | 'load' | 'toSilo' | 'waitSilo' | 'unload' | 'back' | 'unhitch';
     }
   | {
+      /** Überführung zu einem anderen Standort (ggf. mit angehängtem Gerät) */
+      kind: 'transfer'; driverId: number; siteId: number; implementId?: number;
+    }
+  | {
       /** Radlader am Silo: verteilt und walzt, bestimmt die Annahmeleistung */
       kind: 'silo'; driverId: number; orderId: number; harvester: number; phase: 'to' | 'work' | 'back';
     }
@@ -332,6 +337,7 @@ export class Simulation {
     this.business = new Business(opts.seed, this.company, this.farms, this.fields);
     this.weather = new Weather(opts.seed);
     this.business.nodeLonLat = (node) => unproject(this.graph, this.graph.x[node], this.graph.y[node]);
+    this.ensureSites();
     // Abgestellt am Hof: Route aus einem Punkt, damit jedes Fahrzeug eine Position hat
     for (const v of this.vehicles) {
       v.route = this.makeRoute([graph.x[this.homeNode]], [graph.y[this.homeNode]], [], 'road');
@@ -354,6 +360,7 @@ export class Simulation {
     if (!SELF_PROPELLED.includes(m.type) && m.type !== 'firmenwagen') return;
     if (this.vehicles.some((v) => v.owner === 'player' && v.machineId === m.id)) return;
     const profile: ProfileKey = m.type === 'firmenwagen' ? 'car' : 'tractor';
+    const startNode = (this.company.sites ?? []).find((x) => x.id === (m.siteId ?? 1))?.node ?? this.homeNode;
     this.vehicles.push({
       id: this.vehicles.length,
       name: [m.brand, m.model].filter(Boolean).join(' '),
@@ -361,7 +368,7 @@ export class Simulation {
       profile,
       prof: PROFILES[profile],
       state: VehicleState.Waiting,
-      node: this.homeNode,
+      node: startNode,
       route: null,
       seg: 0,
       segOff: 0,
@@ -379,7 +386,7 @@ export class Simulation {
     if (!park) return; // im Konstruktor bekommen alle Fahrzeuge gemeinsam ihre Parkposition
     // Parkposition am Hof (Ein-Punkt-Route), damit das Fahrzeug sofort sichtbar ist
     const v = this.vehicles[this.vehicles.length - 1];
-    v.route = this.makeRoute([this.graph.x[this.homeNode]], [this.graph.y[this.homeNode]], [], 'road');
+    v.route = this.makeRoute([this.graph.x[startNode]], [this.graph.y[startNode]], [], 'road');
     this.pending.push(v.route);
   }
 
@@ -402,6 +409,19 @@ export class Simulation {
       this.vehiclesVersion++;
     }
     for (const m of this.company.machines) this.addPlayerVehicle(m);
+  }
+
+  /** Stammhof als Standort Nr. 1 anlegen (auch für ältere Spielstände) */
+  private ensureSites() {
+    if (this.company.sites?.length) return;
+    this.company.sites = [{ id: 1, name: 'Stammhof Groß Thondorf', kind: 'hof', node: this.homeNode, lonLat: this.homeLonLat, buildings: {} }];
+  }
+
+  /** Standort-Knoten des Fahrzeugs (Stammhof oder zugeordneter Standort, ST-07) */
+  homeOf(v: Vehicle): number {
+    const m = this.company.machines.find((x) => x.id === v.machineId);
+    const st = (this.company.sites ?? []).find((x) => x.id === (m?.siteId ?? 1));
+    return st?.node ?? this.homeNode;
   }
 
   /** Hof als [lon, lat] (Entfernung zu Händlern) */
@@ -489,6 +509,7 @@ export class Simulation {
       if (v.task.kind === 'repair') return `${who} repariert mit dem Werkstattwagen`;
       if (v.task.kind === 'feeder') return `${who} fährt Zubringer`;
       if (v.task.kind === 'haul') return `${who} fährt Abfahrer`;
+      if (v.task.kind === 'transfer') return `${who} überführt eine Maschine`;
       if (v.task.kind === 'silo') return `${who} walzt am Silo`;
       return v.task.kind === 'visit' ? `${who} ist auf Besuch bei ${this.business.farmName(v.task.farmId)}` : `${who} fährt einen Auftrag`;
     }
@@ -758,6 +779,10 @@ export class Simulation {
         cursor[t.driverId] = Math.max(cursor[t.driverId] ?? this.time, end);
       } else {
         const end = this.time + 30;
+        if (t.kind === 'transfer') {
+          bars.push({ key: `r${v.id}`, driverId: t.driverId, kind: 'visit', label: 'Überführung', start: this.time, end: this.time + 60, warnings: [] });
+          continue;
+        }
         if (t.kind === 'haul' || t.kind === 'silo') {
           const o = b.orders.find((x) => x.id === t.orderId);
           bars.push({ key: `r${v.id}`, driverId: t.driverId, kind: 'running', vehicle: v.id, orderId: t.orderId, farmId: o?.farmId, label: `${t.kind === 'haul' ? 'Abfahrer' : 'Radlader'} ${o ? b.farmName(o.farmId) : ''}`, start: o?.startedAt ?? this.time, end: this.time + 240, tractorId: v.machineId, warnings: [] });
@@ -917,7 +942,7 @@ export class Simulation {
     if (target && target !== van) {
       const [px, py] = this.position(target.id);
       this.driveTo(van, nearestNode(this.graph, px, py));
-    } else this.driveTo(van, this.homeNode);
+    } else this.driveTo(van, this.homeOf(van));
   }
 
   /** Jede Minute: offene Pannen (Händler nach 1 h automatisch, eigene Reparatur starten, Händler fertig) */
@@ -937,12 +962,34 @@ export class Simulation {
     }
   }
 
+  /** Maschine (mit Fahrer, ggf. Gerät) zu einem anderen Standort überführen (ST-07) */
+  private transferMachine(machineId: number, siteId: number, driverId: number, implementId?: number): string {
+    const st = (this.company.sites ?? []).find((x) => x.id === siteId);
+    const m = this.company.machines.find((x) => x.id === machineId);
+    if (!st || !m) return 'Unbekannt';
+    if ((m.siteId ?? 1) === siteId) return 'Steht schon dort';
+    const v = this.vehicles.find((x) => x.owner === 'player' && x.machineId === machineId);
+    if (!v) {
+      // Gerät ohne eigenen Antrieb: nur zusammen mit einem Schlepper
+      return 'Geräte werden mit einem Schlepper überführt (Schlepper wählen und Gerät mitnehmen)';
+    }
+    if (v.task || this.machineBusy(machineId)) return 'Maschine ist im Einsatz';
+    if (implementId !== undefined && this.machineBusy(implementId)) return 'Gerät ist im Einsatz';
+    const blocked = this.driverBusy(driverId) ?? this.driverBlocked(driverId);
+    if (blocked) return `${this.driverName(driverId)}: ${blocked}`;
+    v.task = { kind: 'transfer', driverId, siteId, implementId };
+    if (!this.driveTo(v, st.node)) return 'Standort nicht erreichbar';
+    this.business.version++;
+    return `${this.driverName(driverId)} überführt ${[m.brand, m.model].filter(Boolean).join(' ')} nach ${st.name}`;
+  }
+
   /** Gespann steht am Hof (Rüsten oder Abstellen) */
   private atHome(v: Vehicle): boolean {
     const t = v.task;
     if (t?.kind === 'job' && (t.phase === 'prep' || t.phase === 'unhitch')) return true;
     const [px, py] = this.position(v.id);
-    const dx = px - this.graph.x[this.homeNode], dy = py - this.graph.y[this.homeNode];
+    const hn = this.homeOf(v);
+    const dx = px - this.graph.x[hn], dy = py - this.graph.y[hn];
     return dx * dx + dy * dy < 150 * 150;
   }
 
@@ -1207,6 +1254,8 @@ export class Simulation {
     }
     unit.state = VehicleState.Waiting;
     unit.waitMin = RUEST_HOF_MIN;
+    // Matschplatz (ohne befestigten Platz): bei nassem Boden 10 min Rangieren
+    if (!b.hasBuilding('platz', tractor.siteId ?? 1) && this.weather.day(Math.floor(t / 1440)).soil > 25) unit.waitMin += 10;
     if (cmd.feeder && unit.task.slurry) {
       const fu = this.vehicles.find((v) => v.owner === 'player' && v.machineId === cmd.feeder!.tractorId)!;
       const fz = this.company.machines.find((m) => m.id === cmd.feeder!.implementId)!;
@@ -1238,6 +1287,7 @@ export class Simulation {
             waitSilo: 'wartet am Silo (Walze kommt nicht nach)', unload: 'kippt am Silo ab', back: 'fährt zurück zum Hof', unhitch: 'stellt den Wagen ab',
           } as Record<string, string>)[t.phase];
         }
+        if (t?.kind === 'transfer') status = `wird überführt nach ${(this.company.sites ?? []).find((x) => x.id === t.siteId)?.name ?? ''}`;
         if (t?.kind === 'silo') status = t.phase === 'work' ? 'verteilt und walzt am Silo' : t.phase === 'to' ? 'fährt zum Silo' : 'fährt zurück zum Hof';
         if (t?.kind === 'feeder') {
           const o = b.orders.find((x) => x.id === t.orderId);
@@ -1323,7 +1373,9 @@ export class Simulation {
         if (!m) return 'Maschine unbekannt';
         if (this.machineBusy(m.id)) return 'Maschine ist im Einsatz';
         if ((m.downUntil ?? 0) > t) return `Schon in der Werkstatt (${m.downReason})`;
-        return b.service(m, t, this.homeLonLat);
+        // eigene Werkstatt am Standort der Maschine und ein freier Mechaniker
+        const own = b.hasBuilding('werkstatt', m.siteId ?? 1) && this.company.drivers.some((d) => (d.skills.werkstatt ?? 0) >= MECHANIC_MIN && !this.driverBusy(d.id) && !this.driverBlocked(d.id));
+        return b.service(m, t, this.homeLonLat, own);
       }
       case 'hire':
         return b.hire(cmd.applicantId, cmd.asKind, t);
@@ -1337,6 +1389,22 @@ export class Simulation {
         return this.repairCommand(cmd);
       case 'buyParts':
         return b.buyParts(cmd.amount, t);
+      case 'build':
+        return b.build(cmd.siteId, cmd.building, t);
+      case 'buySite': {
+        const o = SITE_OFFERS.find((x) => x.key === cmd.offerKey);
+        if (!o) return 'Angebot unbekannt';
+        const [x, y] = project(this.graph, o.lonLat[0], o.lonLat[1]);
+        return b.buySite(cmd.offerKey, t, nearestNode(this.graph, x, y));
+      }
+      case 'sellSite': {
+        if (this.company.machines.some((m) => m.siteId === cmd.siteId && this.machineBusy(m.id))) return 'Maschinen des Standorts sind im Einsatz';
+        const r = b.sellSite(cmd.siteId, t);
+        // Fahrzeuge des aufgegebenen Standorts fahren nicht automatisch heim: sie gelten ab jetzt als am Stammhof
+        return r;
+      }
+      case 'transfer':
+        return this.transferMachine(cmd.machineId, cmd.siteId, cmd.driverId, cmd.implementId);
       case 'swapDriver':
         return this.swapDriver(cmd.vehicle, cmd.driverId, cmd.chauffeurId);
       case 'vacation':
@@ -1413,6 +1481,14 @@ export class Simulation {
           if (task.phase === 'prep') { v.task = undefined; v.state = VehicleState.Waiting; b.version++; return 'Abgebrochen, Schlepper bleibt am Hof'; }
           if (task.phase === 'back' || task.phase === 'unhitch') return 'Fahrzeug ist schon auf dem Rückweg';
           task.phase = 'back';
+        } else if (task.kind === 'transfer') {
+          // Überführung abbrechen: zurück zum bisherigen Standort
+          const m = this.company.machines.find((x) => x.id === v.machineId);
+          task.siteId = m?.siteId ?? 1;
+          task.implementId = undefined;
+          this.driveFromHere(v, this.homeOf(v));
+          b.version++;
+          return 'Überführung abgebrochen, fährt zurück';
         } else {
           if (task.phase === 'back') return 'Fahrzeug ist schon auf dem Rückweg';
           if (task.kind === 'haul' || task.kind === 'silo') {
@@ -1434,7 +1510,7 @@ export class Simulation {
           }
           task.phase = 'back';
         }
-        this.driveFromHere(v, this.homeNode);
+        this.driveFromHere(v, this.homeOf(v));
         b.version++;
         return `${v.name} fährt zurück zum Hof`;
       }
@@ -1487,6 +1563,7 @@ export class Simulation {
     this.rng.setState(s.rng);
     Object.assign(this.company, structuredClone(s.company));
     normalizeDrivers(this.company);
+    this.ensureSites();
     this.business.restore(s.business);
     if (s.weather) this.weather.restore(s.weather);
     if (this.farms) s.farms.forEach(([known, sat, rival, count], i) => {
@@ -1818,6 +1895,17 @@ export class Simulation {
       b.version++;
       return;
     }
+    if (t.kind === 'transfer') {
+      const m = this.company.machines.find((x) => x.id === v.machineId);
+      if (m) m.siteId = t.siteId === 1 ? undefined : t.siteId;
+      const imp = t.implementId !== undefined ? this.company.machines.find((x) => x.id === t.implementId) : undefined;
+      if (imp) imp.siteId = t.siteId === 1 ? undefined : t.siteId;
+      v.task = undefined;
+      v.state = VehicleState.Waiting;
+      const st = (this.company.sites ?? []).find((x) => x.id === t.siteId);
+      b.info(this.time, `${v.name} steht jetzt in ${st?.name ?? 'Standort'}.`);
+      return;
+    }
     if (t.kind === 'haul') {
       if (t.phase === 'toField') { t.phase = 'wait'; v.state = VehicleState.Waiting; }
       else if (t.phase === 'toSilo') { t.phase = 'waitSilo'; v.state = VehicleState.Waiting; }
@@ -1878,7 +1966,7 @@ export class Simulation {
         this.driveTo(v, this.fields!.access[t.queue[t.current]]);
       } else {
         t.phase = 'back';
-        this.driveTo(v, this.homeNode);
+        this.driveTo(v, this.homeOf(v));
       }
     } else if (t.phase === 'back') {
       t.phase = 'unhitch';
@@ -1897,7 +1985,7 @@ export class Simulation {
         const m = this.company.machines.find((x) => x.id === t.machineId);
         if (m) this.business.finishOwnRepair(m, this.time, this.driverName(t.driverId));
         t.phase = 'back';
-        this.driveTo(v, this.homeNode);
+        this.driveTo(v, this.homeOf(v));
       }
       this.business.version++;
       return;
@@ -1906,14 +1994,14 @@ export class Simulation {
       const target = this.vehicles[t.vehicle];
       t.phase = 'back'; // abgelöster Fahrer fährt mit zurück
       if (target?.task?.kind === 'job' && !this.driverBusy(t.passengerId)) this.takeOverJob(target, t.passengerId);
-      this.driveTo(v, this.homeNode);
+      this.driveTo(v, this.homeOf(v));
       this.business.version++;
       return;
     }
     if (t.kind === 'visit' && t.phase === 'at') {
       this.business.onVisit(t.farmId, this.time);
       t.phase = 'back';
-      this.driveTo(v, this.homeNode);
+      this.driveTo(v, this.homeOf(v));
     } else if (t.kind === 'haul') {
       if (t.phase === 'prep') { t.phase = 'toField'; this.driveTo(v, this.harvesterNode(t)); }
       else if (t.phase === 'unload') {
@@ -1922,7 +2010,7 @@ export class Simulation {
         t.load = 0;
         const h = this.vehicles[t.harvester]?.task;
         if (h?.kind === 'job' && h.orderId === t.orderId && h.phase !== 'back' && h.phase !== 'unhitch') { t.phase = 'toField'; this.driveTo(v, this.harvesterNode(t)); }
-        else { t.phase = 'back'; this.driveTo(v, this.homeNode); }
+        else { t.phase = 'back'; this.driveTo(v, this.homeOf(v)); }
       } else if (t.phase === 'unhitch') v.task = undefined;
       this.business.version++;
     } else if (t.kind === 'feeder') {
@@ -2126,7 +2214,7 @@ export class Simulation {
       for (const w of this.vehicles) if (w.task?.kind === 'haul' && w.task.harvester === v.id && w.task.phase === 'wait') { w.task.phase = 'toField'; this.driveTo(w, this.fields!.access[t.queue[t.current]]); }
     } else {
       t.phase = 'back';
-      this.driveTo(v, this.homeNode);
+      this.driveTo(v, this.homeOf(v));
       if (c.hiredRoller && o) {
         const cost = Math.round((c.rollerMinutes / 60) * HIRED_ROLLER_EUR_H);
         b.bookExternal(this.time, `Fremdwalze am Silo (${Math.round(c.rollerMinutes / 60)} h)`, cost, o);
@@ -2134,7 +2222,7 @@ export class Simulation {
       for (const w of this.vehicles) {
         if (w.task?.kind === 'haul' && w.task.harvester === v.id && w.task.phase === 'wait') {
           if (w.task.load > 0.5) { w.task.phase = 'toSilo'; this.driveTo(w, w.task.silo); }
-          else { w.task.phase = 'back'; this.driveTo(w, this.homeNode); }
+          else { w.task.phase = 'back'; this.driveTo(w, this.homeOf(w)); }
         }
       }
     }
@@ -2164,7 +2252,7 @@ export class Simulation {
     const backlog = h?.kind === 'job' && h.chop ? h.chop.siloBacklog : 0;
     if (running || wagons || backlog > 0.5) return;
     t.phase = 'back';
-    this.driveTo(v, this.homeNode);
+    this.driveTo(v, this.homeOf(v));
     this.business.version++;
   }
 
@@ -2199,7 +2287,7 @@ export class Simulation {
     if (st?.kind !== 'job' || st.orderId !== t.orderId || !st.slurry) {
       // Auftrag fertig oder abgebrochen: Rest zurück
       t.phase = 'back';
-      this.driveTo(v, this.homeNode);
+      this.driveTo(v, this.homeOf(v));
       this.business.version++;
       return;
     }
@@ -2207,7 +2295,7 @@ export class Simulation {
     if (node !== v.node) { t.phase = 'toField'; this.driveTo(v, node); return; }
     if (t.load < 0.5) {
       if (this.slurryStillNeeded(t.orderId) > 0.5) { t.phase = 'toFill'; this.driveTo(v, t.source); }
-      else { t.phase = 'back'; this.driveTo(v, this.homeNode); }
+      else { t.phase = 'back'; this.driveTo(v, this.homeOf(v)); }
       this.business.version++;
       return;
     }
@@ -2291,7 +2379,7 @@ export class Simulation {
       if (o) b.fieldDone(o, fi, this.time);
       t.current++;
       sl.progress = 0;
-      if (t.current >= t.queue.length) { t.phase = 'back'; this.driveTo(v, this.homeNode); return; }
+      if (t.current >= t.queue.length) { t.phase = 'back'; this.driveTo(v, this.homeOf(v)); return; }
     }
     const feeder = sl.feeder !== undefined;
     if (sl.load >= 0.5) {

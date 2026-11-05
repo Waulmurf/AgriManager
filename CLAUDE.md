@@ -90,7 +90,9 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
 - Phase 4 damit komplett.
 - Phase 5 Markt fertig: `src/sim/market.ts` (Konkurrenten), Konkurrenzangebot je Anfrage, Stammkunden
   (`Farm.orderCount`, `isLoyal`), Preiskampf, Ruf (`Business.reputation`, `marketDaily`), Reiter Wettbewerb.
-- Nächste Schichten laut Anforderungen: Standorte, Pacht, Ackerbau, Biogas; später Transport, Winterdienst.
+- Standorte fertig: `src/data/sites.ts` (Gebäude, Angebote), `Company.sites`, `Machine.siteId`, Bau/Kauf/Verkauf in
+  `business.ts` (`sitesDaily`), Überführung (`transfer`), `homeOf(v)` in `engine.ts`, Reiter Standorte.
+- Als Nächstes: Pacht und eigener Ackerbau, dann Biogas (docs/plan.md).
 
 ## CI (GitHub Actions)
 

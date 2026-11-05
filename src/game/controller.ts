@@ -299,6 +299,17 @@ export class GameController {
         if (f.known !== k || f.satisfaction !== sat) { f.known = k; f.satisfaction = sat; changed = true; }
       }
       if (changed) this.setFarmData();
+      // eigene Standorte auf der Karte (ST-09)
+      const siteKey = (st.company.sites ?? []).map((x) => `${x.id}:${Object.values(x.buildings).filter((y) => y?.done).length}`).join(',');
+      if (siteKey !== this.siteKey && this.map?.getSource('sites')) {
+        this.siteKey = siteKey;
+        (this.map.getSource('sites') as GeoJSONSource).setData({
+          type: 'FeatureCollection',
+          features: (st.company.sites ?? []).filter((x) => x.id !== 1).map((x) => ({
+            type: 'Feature', properties: { name: x.name }, geometry: { type: 'Point', coordinates: x.lonLat },
+          })),
+        });
+      }
       // Konkurrenten auf der Karte aktualisieren (nur bei Änderung)
       const compKey = st.market.competitors.map((c) => `${c.id}:${c.warUntil > st.time ? 1 : 0}`).join(',');
       if (compKey !== this.competitorKey && this.map?.getSource('competitors')) {
@@ -405,6 +416,7 @@ export class GameController {
 
   /** Spielstand speichern (Name; Standard: Autosave) */
   private competitorKey = '';
+  private siteKey = '';
 
   /** Spielzeit des zuletzt gespeicherten Stands (Selbsttest) */
   lastSavedTime = -1;
@@ -653,6 +665,14 @@ export class GameController {
       const brands = [...d.tractorBrands, ...d.implementBrands].join(', ');
       new maplibregl.Popup({ maxWidth: '260px' }).setLngLat(d.lonLat)
         .setHTML(`<strong>${d.name}</strong><br><small>${d.town} · ${brands}</small><br><small>Kauf, Bestellung und Werkstatt – Reiter Markt bzw. Fuhrpark</small>`).addTo(map);
+    });
+    // weitere eigene Standorte (wie der Hof)
+    map.addSource('sites', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    map.addLayer({ id: 'sites-dot', type: 'circle', source: 'sites', paint: { 'circle-radius': 6, 'circle-color': '#b5512b', 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } });
+    map.addLayer({
+      id: 'sites-label', type: 'symbol', source: 'sites',
+      layout: { 'text-field': ['get', 'name'], 'text-font': ['Noto Sans Medium'], 'text-size': 12, 'text-offset': [0, 1.2], 'text-anchor': 'top' },
+      paint: { 'text-color': '#7a2f12', 'text-halo-color': '#fff', 'text-halo-width': 1.5 },
     });
     // Konkurrenten (Phase 5): Standorte, rot im Preiskampf
     map.addSource('competitors', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
