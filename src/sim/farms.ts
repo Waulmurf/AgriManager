@@ -43,6 +43,8 @@ export interface Farm {
   known: boolean;
   /** Zufriedenheit 0–100 (AK-08) */
   satisfaction: number;
+  /** bei der Konkurrenz bis Spielminute (0 = Kunde ist frei); danach nur kleine Probeaufträge */
+  rivalUntil: number;
 }
 
 export interface FarmSet {
@@ -214,6 +216,7 @@ export function generateFarms(g: RoadGraph, f: FieldSet, seed: number): FarmSet 
       contact,
       known: false,
       satisfaction: 50,
+      rivalUntil: 0,
     });
   }
   return { farms, fieldFarm, fieldCrop };

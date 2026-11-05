@@ -3,6 +3,7 @@
  */
 import { useState } from 'react';
 import type { GameController, GameStatus } from '../game/controller';
+import type { JobEstimate } from '../sim/engine';
 import { machineValue, type Machine } from '../sim/economy';
 import { SERVICE_NAMES, fmtDay, type Invoice, type Request, type Order } from '../sim/business';
 import { formatGameTime } from '../game/clock';
@@ -18,6 +19,24 @@ function useFeedback() {
     setTimeout(() => setMsg((cur) => (cur === m ? null : cur)), 4000);
   };
   return { msg, show };
+}
+
+/** „ca. 7,5 h (1 Arbeitstag)“ */
+function fmtDuration(min: number): string {
+  const h = min / 60;
+  const days = Math.max(1, Math.ceil(min / 600));
+  return `ca. ${h.toLocaleString('de-DE', { maximumFractionDigits: h < 10 ? 1 : 0 })} h (${days} ${days === 1 ? 'Arbeitstag' : 'Arbeitstage'})`;
+}
+
+/** Schätzung mit Ampel gegen den Termin */
+function EstimateLine({ e, latest }: { e?: JobEstimate; latest: number }) {
+  if (!e) return null;
+  const ok = e.finishAt <= latest;
+  return (
+    <small className={ok ? 'hint' : 'warn'} data-testid="estimate">
+      Dauer {fmtDuration(e.minutes)} · fertig etwa {fmtDay(e.finishAt)} {ok ? '✓ schaffbar' : `⚠ Termin ${fmtDay(latest)} wird knapp – lieber ablehnen oder umplanen`}
+    </small>
+  );
 }
 
 export function BusinessTab({ status, game }: { status: GameStatus; game: GameController | null }) {
@@ -61,7 +80,7 @@ export function BusinessTab({ status, game }: { status: GameStatus; game: GameCo
         <dt>im Adressbuch</dt><dd data-testid="known-count">{status.knownFarms}</dd>
       </dl>
       {status.farmCount ? (
-        <p className="hint">Hofstelle auf der Karte anklicken und „Besuchen“ wählen. Erst ein Besuch bringt einen Betrieb ins Adressbuch; danach melden sich Kunden auch per Anruf oder Nachricht.</p>
+        <p className="hint">Hofstelle auf der Karte anklicken und „Besuchen“ wählen. Erst ein Besuch bringt einen Betrieb ins Adressbuch; danach melden sich Kunden auch per Anruf oder Nachricht. Unbeantwortete Anfragen und verspätete Aufträge kosten Zufriedenheit – unter 20 % wechselt der Kunde zur Konkurrenz. Was nicht zu schaffen ist, lieber gleich ablehnen.</p>
       ) : (
         <p className="hint">Keine Felddaten geladen – Kunden gibt es erst mit Kartendaten v3.</p>
       )}
@@ -72,7 +91,10 @@ export function BusinessTab({ status, game }: { status: GameStatus; game: GameCo
             return f ? (
               <li key={id}>
                 <button className="link" onClick={() => game?.flyToFarm(id)}>{f.name}</button>
-                <small>{ha(f.areaHa)} · Zufriedenheit {f.satisfaction} %</small>
+                <small className={b.rivalFarms.includes(id) ? 'warn' : 'hint'}>
+                  {ha(f.areaHa)} · Zufriedenheit {f.satisfaction} %
+                  {b.rivalFarms.includes(id) ? ' · bei der Konkurrenz' : b.trialFarms.includes(id) ? ' · Probephase: nur kleine Aufträge' : ''}
+                </small>
               </li>
             ) : null;
           })}
@@ -82,7 +104,7 @@ export function BusinessTab({ status, game }: { status: GameStatus; game: GameCo
   );
 }
 
-function RequestItem({ r, game, time }: { r: Request; game: GameController | null; time: number }) {
+function RequestItem({ r, game, time, estimate }: { r: Request; game: GameController | null; time: number; estimate?: JobEstimate }) {
   const [price, setPrice] = useState(String(r.priceHa));
   const fb = useFeedback();
   const farm = game?.farmById(r.farmId);
@@ -103,6 +125,7 @@ function RequestItem({ r, game, time }: { r: Request; game: GameController | nul
       <div>
         Angebot Kunde: <strong>{r.priceHa.toLocaleString('de-DE')} €/ha</strong> = {eur(r.priceHa * r.areaHa)}
       </div>
+      {r.status === 'offen' && <EstimateLine e={estimate} latest={r.latest} />}
       {r.status === 'offen' ? (
         <>
           <small className="hint">Antwort erwartet in {hoursLeft} h</small>
@@ -153,6 +176,7 @@ function OrderItem({ o, game, status }: { o: Order; game: GameController | null;
         {late ? ' · verspätet!' : ''}
         {o.dieselL > 0 ? ` · Diesel ${o.dieselL.toLocaleString('de-DE')} l (${eur(o.dieselCost)})` : ''}
       </small>
+      {o.status !== 'fertig' && <EstimateLine e={status.business?.estimates[o.id]} latest={o.latest} />}
       {o.status === 'offen' && (
         <div className="card-actions">
           <select value={tractor} onChange={(e) => setTractor(Number(e.target.value))} aria-label="Schlepper">
@@ -213,7 +237,7 @@ export function OrdersTab({ status, game }: { status: GameStatus; game: GameCont
     <>
       <h2>Anfragen ({open.length})</h2>
       {open.length ? (
-        <ul className="cards">{open.map((r) => <RequestItem key={r.id} r={r} game={game} time={b.time} />)}</ul>
+        <ul className="cards">{open.map((r) => <RequestItem key={r.id} r={r} game={game} time={b.time} estimate={b.estimates[r.id]} />)}</ul>
       ) : (
         <p className="hint">Keine offenen Anfragen. Kunden besuchen oder auf Anrufe warten.</p>
       )}

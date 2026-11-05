@@ -336,6 +336,101 @@ describe('Warteschlange des Chefs', () => {
   });
 });
 
+describe('Kundenbindung', () => {
+  it('unzufriedener Kunde wechselt zur Konkurrenz und kommt später mit kleinen Aufträgen zurück', () => {
+    const s = world(5);
+    // ein bekannter Betrieb mit Ackerflächen
+    const farm = s.farms!.farms.find((f) => f.fields.length >= 3)!;
+    farm.known = true;
+    farm.satisfaction = 22;
+    const b = s.business as unknown as { satisfy(id: number, d: number, t: number): void };
+    b.satisfy(farm.id, -5, s.time); // z. B. Anfrage nicht beantwortet
+    expect(s.business.isRival(farm.id, s.time)).toBe(true);
+    expect(s.business.drainEvents().some((e) => e.kind === 'warnung' && e.text.includes('anderen Lohnunternehmen'))).toBe(true);
+    // in der Zeit bei der Konkurrenz: keine Anfragen
+    const until = farm.rivalUntil;
+    expect(until - s.time).toBeGreaterThanOrEqual(60 * 1440);
+    runUntil(s, () => s.time >= until - 1440, 130 * 1440);
+    expect(s.business.requests.filter((r) => r.farmId === farm.id).length).toBe(0);
+    // danach Probephase: nur ein Feld, höchstens 10 ha
+    runUntil(s, () => s.time > until + 1440, 3 * 1440);
+    expect(s.business.isRival(farm.id, s.time)).toBe(false);
+    expect(s.business.isTrial(farm.id, s.time)).toBe(true);
+    expect(farm.satisfaction).toBe(25);
+    for (let k = 0; k < 200; k++) {
+      runUntil(s, () => s.business.requests.some((r) => r.farmId === farm.id), 1440);
+      if (s.business.requests.some((r) => r.farmId === farm.id)) break;
+    }
+    const req = s.business.requests.find((r) => r.farmId === farm.id);
+    if (req) {
+      expect(req.fields.length).toBe(1);
+      expect(req.areaHa).toBeLessThanOrEqual(10);
+    }
+    // Vertrauen zurück ab 40 %
+    farm.satisfaction = 40;
+    expect(s.business.isTrial(farm.id, s.time)).toBe(false);
+  });
+
+  it('Ablehnen kostet weniger Zufriedenheit als Nichtantworten', () => {
+    const s = world(5);
+    for (const farm of s.farms!.farms) {
+      s.command({ kind: 'visit', farmId: farm.id });
+      runUntil(s, () => !s.chefBusy);
+      if (s.business.requests.some((r) => r.status === 'offen')) break;
+    }
+    const req = s.business.requests.find((r) => r.status === 'offen')!;
+    const farm = s.farms!.farms[req.farmId];
+    const sat = farm.satisfaction;
+    s.command({ kind: 'respond', requestId: req.id, action: 'reject' });
+    expect(farm.satisfaction).toBe(sat - 2);
+  });
+});
+
+describe('Zeitschätzung', () => {
+  it('schätzt Dauer und Fertigtermin für offene Anfragen', () => {
+    const s = world(5);
+    for (const farm of s.farms!.farms) {
+      s.command({ kind: 'visit', farmId: farm.id });
+      runUntil(s, () => !s.chefBusy);
+      if (s.business.requests.some((r) => r.status === 'offen')) break;
+    }
+    const req = s.business.requests.find((r) => r.status === 'offen')!;
+    const e = s.planEstimates()[req.id];
+    expect(e).toBeDefined();
+    // Feldarbeit nach Flächenleistung des Grubbers aus dem Markt (1,7 ha/h)
+    expect(e.workMinutes).toBeCloseTo((req.areaHa / 1.7) * 60, -1);
+    expect(e.minutes).toBeGreaterThan(e.workMinutes + 25);
+    expect(e.finishAt).toBeGreaterThan(s.time);
+    // Schätzung gegen die echte Fahrt prüfen
+    s.command({ kind: 'respond', requestId: req.id, action: 'accept' });
+    s.command({ kind: 'buy', offerId: 1 });
+    const order = s.business.orders[0];
+    const est = s.planEstimates()[order.id].minutes;
+    const grubber = s.company.machines.find((m) => m.type === 'grubber')!;
+    runUntil(s, () => s.time % 1440 > 10 && s.time % 1440 < 60, 1440);
+    s.command({ kind: 'startJob', orderId: order.id, tractorId: 1, implementId: grubber.id });
+    // tatsächliche Arbeitszeit des Chefs über alle Tage
+    let worked = 0;
+    let prev = s.chefMinutes;
+    runUntil(s, () => {
+      worked += s.chefMinutes >= prev ? s.chefMinutes - prev : s.chefMinutes;
+      prev = s.chefMinutes;
+      return !s.chefBusy;
+    }, 5 * 1440);
+    expect(order.status).toBe('fertig');
+    expect(Math.abs(worked - est) / est).toBeLessThan(0.25);
+  });
+
+  it('schätzt größere Aufträge länger', () => {
+    const s = world(5);
+    const f = s.farms!.farms.find((x) => x.fields.length >= 3)!;
+    const one = s.estimateJobMinutes(f.fields.slice(0, 1));
+    const three = s.estimateJobMinutes(f.fields.slice(0, 3));
+    expect(three.minutes).toBeGreaterThan(one.minutes);
+    expect(three.workMinutes).toBeGreaterThan(one.workMinutes);
+  });
+});
+
 describe('Zahlungsmoral', () => {
   it('zahlt innerhalb von 30 Tagen an einem beliebigen Tag oder wird überfällig', () => {
     const days = new Set<number>();

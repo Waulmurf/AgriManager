@@ -87,7 +87,15 @@ function sendBusiness(force = false) {
   sentBusinessVersion = b.version;
   const known: number[] = [];
   const satisfaction: Record<number, number> = {};
-  for (const f of sim.farms?.farms ?? []) if (f.known) { known.push(f.id); satisfaction[f.id] = f.satisfaction; }
+  const rivalFarms: number[] = [];
+  const trialFarms: number[] = [];
+  for (const f of sim.farms?.farms ?? []) {
+    if (!f.known) continue;
+    known.push(f.id);
+    satisfaction[f.id] = f.satisfaction;
+    if (b.isRival(f.id, sim.time)) rivalFarms.push(f.id);
+    else if (b.isTrial(f.id, sim.time)) trialFarms.push(f.id);
+  }
   const state: BusinessState = {
     time: sim.time,
     company: structuredClone(sim.company),
@@ -100,6 +108,9 @@ function sendBusiness(force = false) {
     dieselTotalL: Math.round(b.dieselTotalL),
     chefBusy: sim.chefBusy,
     queue: sim.queue.map((q) => ({ ...q, cmd: { ...q.cmd } })),
+    estimates: sim.planEstimates(),
+    rivalFarms,
+    trialFarms,
     knownFarms: known,
     satisfaction,
     events: b.drainEvents(),

@@ -61,6 +61,8 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
 - Zahlungsregeln nach Rückmeldung: Zahlungsziel 30 Tage, Warnung bei Überfälligkeit, Anruf/Besuch
   binnen 14 Tagen, sonst verfällt die Rechnung.
 - Warteschlange für den Chef (`Simulation.queue`, Befehle dequeue/queueMove), im Spielstand gespeichert.
+- Kundenbindung: unter 20 % Zufriedenheit Wechsel zur Konkurrenz (`Farm.rivalUntil`), danach Probephase;
+  Zeitschätzung `Simulation.planEstimates()`. Planungsboard ist für Phase 3 geplant (docs/plan.md).
 
 ## CI (GitHub Actions)
 

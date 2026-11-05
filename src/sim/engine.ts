@@ -10,7 +10,7 @@ import { PROFILES, Router, curveSpeed, edgeSpeeds, type ProfileKey, type Vehicle
 import { BRANDS, COMPANY_CAR } from '../data/brands';
 import { fieldPattern, type FieldSet } from './fields';
 import { generateFarms, type FarmSet } from './farms';
-import { startCompany, type Company } from './economy';
+import { START_OFFERS, startCompany, type Company } from './economy';
 import { Business, REMIND_CALL_MINUTES, VISIT_MINUTES, fmtHa, type Command, type QueueCommand, type QueueItem } from './business';
 import { appendEdgePoints, nearestNode, RoadClass, type RoadGraph } from './roadgraph';
 
@@ -78,8 +78,8 @@ export interface SaveState {
   rng: [number, number, number, number];
   company: Company;
   business: ReturnType<Business['serialize']>;
-  /** je Betrieb [bekannt 0/1, Zufriedenheit] */
-  farms: [number, number][];
+  /** je Betrieb [bekannt 0/1, Zufriedenheit, bei der Konkurrenz bis] */
+  farms: [number, number, number?][];
   vehicles: {
     state: VehicleState; node: number; seg: number; segOff: number; dist: number; waitMin: number;
     next: 'field' | 'home' | 'leave-field'; fieldNode: number; trips: number; restUntil: number; chargedRoute: number;
@@ -90,6 +90,21 @@ export interface SaveState {
   queue?: QueueItem[];
   nextQueueId?: number;
 }
+
+/** Grobe Zeitschätzung für die Planung (nicht Teil des Spielzustands) */
+export interface JobEstimate {
+  /** Arbeitszeit des Chefs inkl. Fahrten und Rüsten (min) */
+  minutes: number;
+  /** davon Feldarbeit (min) */
+  workMinutes: number;
+  /** voraussichtlich fertig (Spielminute), wenn er hinter allen geplanten Aufgaben drankommt */
+  finishAt: number;
+}
+
+/** Schätzwerte: mittleres Straßentempo des Schleppers inkl. Orte und Kurven, Umweg gegenüber Luftlinie */
+const EST_TRACTOR_M_MIN = 28000 / 60;
+const EST_CAR_M_MIN = 60000 / 60;
+const EST_DETOUR = 1.35;
 
 export interface PlayerUnitInfo {
   machineId: number;
@@ -277,6 +292,105 @@ export class Simulation {
     }
   }
 
+  // ---------- Zeitschätzung für die Planung ----------
+
+  private nodeDist(a: number, b: number): number {
+    const dx = this.graph.x[a] - this.graph.x[b], dy = this.graph.y[a] - this.graph.y[b];
+    return Math.sqrt(dx * dx + dy * dy) * EST_DETOUR;
+  }
+
+  /** Arbeitsbreite/Flächenleistung: bester eigener Grubber, sonst der günstigste im Markt */
+  private estimateHaPerHour(): number {
+    let best = 0;
+    for (const m of this.company.machines) if (m.type === 'grubber') best = Math.max(best, m.haPerHour ?? 0);
+    if (best) return best;
+    return START_OFFERS.find((o) => o.machine.type === 'grubber')?.machine.haPerHour ?? 1.5;
+  }
+
+  /** Dauer eines Grubberauftrags: Rüsten, Fahrten (nächstes Feld zuerst), Feldarbeit */
+  estimateJobMinutes(fields: number[], haPerHour = this.estimateHaPerHour()): { minutes: number; workMinutes: number } {
+    if (!this.fields || !fields.length) return { minutes: 0, workMinutes: 0 };
+    let at = this.homeNode;
+    let drive = 0, work = 0;
+    const rest = fields.slice();
+    while (rest.length) {
+      let bi = 0, bd = Infinity;
+      rest.forEach((f, i) => { const d = this.nodeDist(at, this.fields!.access[f]); if (d < bd) { bd = d; bi = i; } });
+      const f = rest.splice(bi, 1)[0];
+      drive += bd;
+      at = this.fields.access[f];
+      work += (this.fields.areaHa[f] / haPerHour) * 60;
+    }
+    drive += this.nodeDist(at, this.homeNode);
+    const minutes = RUEST_HOF_MIN + RUEST_ABBAU_MIN + fields.length * RUEST_FELD_MIN + drive / EST_TRACTOR_M_MIN + work;
+    return { minutes: Math.round(minutes), workMinutes: Math.round(work) };
+  }
+
+  private estimateQueueItem(cmd: QueueCommand): number {
+    if (cmd.kind === 'visit') {
+      const farm = this.farms?.farms[cmd.farmId];
+      return farm ? Math.round((2 * this.nodeDist(this.homeNode, farm.homeNode)) / EST_CAR_M_MIN + VISIT_MINUTES) : VISIT_MINUTES;
+    }
+    const o = this.business.orders.find((x) => x.id === cmd.orderId);
+    return o ? this.estimateJobMinutes(o.fields.filter((f) => !o.doneFields.includes(f))).minutes : 0;
+  }
+
+  /** Ende, wenn ab jetzt `need` Minuten Chef-Arbeitszeit anfallen (10 h je Tag, Start 06:00) */
+  private finishAfter(need: number): number {
+    let t = this.time;
+    let left = Math.max(0, CHEF_MAX_MINUTES - this.chefMinutes);
+    // nach 20:00 beginnt nichts Neues mehr
+    if (t % 1440 >= QUEUE_LAST_START) left = 0;
+    while (need > left) {
+      need -= left;
+      t = (Math.floor(t / 1440) + 1) * 1440;
+      left = CHEF_MAX_MINUTES;
+    }
+    return t + need;
+  }
+
+  /**
+   * Schätzungen für offene Anfragen und Aufträge (Schlüssel = Anfrage- bzw. Auftrags-ID).
+   * Fertigtermin: hinter dem laufenden Auftrag und allen geplanten Aufgaben.
+   */
+  planEstimates(): Record<number, JobEstimate> {
+    const out: Record<number, JobEstimate> = {};
+    if (!this.fields) return out;
+    let backlog = 0;
+    for (const v of this.vehicles) {
+      const t = v.task;
+      if (v.owner !== 'player' || !t) continue;
+      if (t.kind === 'job') {
+        const left = t.queue.slice(t.current + (t.phase === 'work' ? 1 : 0));
+        backlog += this.estimateJobMinutes(left).minutes + (t.phase === 'work' ? 30 : 0);
+      } else backlog += 30;
+    }
+    const running = backlog;
+    for (const q of this.queue) {
+      const m = this.estimateQueueItem(q.cmd);
+      backlog += m;
+      if (q.cmd.kind === 'startJob') {
+        const o = this.business.orders.find((x) => x.id === (q.cmd as { orderId: number }).orderId);
+        if (o) {
+          const e = this.estimateJobMinutes(o.fields.filter((f) => !o.doneFields.includes(f)));
+          out[o.id] = { ...e, finishAt: this.finishAfter(backlog) };
+        }
+      }
+    }
+    for (const o of this.business.orders) {
+      if (o.status === 'fertig' || out[o.id]) continue;
+      const left = o.fields.filter((f) => !o.doneFields.includes(f));
+      const e = this.estimateJobMinutes(left);
+      out[o.id] = { ...e, finishAt: o.status === 'läuft' ? this.finishAfter(running) : this.finishAfter(backlog + e.minutes) };
+    }
+    for (const r of this.business.requests) {
+      if (r.status !== 'offen') continue;
+      const e = this.estimateJobMinutes(r.fields);
+      out[r.id] = { ...e, finishAt: this.finishAfter(backlog + e.minutes) };
+    }
+    return out;
+  }
+
   /** Prüfungen, die unabhängig davon gelten, ob der Chef gerade frei ist; null = in Ordnung */
   private checkQueueCommand(cmd: QueueCommand, ignoreQueueId = 0): string | null {
     const b = this.business;
@@ -461,7 +575,7 @@ export class Simulation {
       rng: this.rng.getState(),
       company: structuredClone(this.company),
       business: structuredClone(this.business.serialize()),
-      farms: this.farms ? this.farms.farms.map((f) => [f.known ? 1 : 0, f.satisfaction] as [number, number]) : [],
+      farms: this.farms ? this.farms.farms.map((f) => [f.known ? 1 : 0, f.satisfaction, f.rivalUntil] as [number, number, number]) : [],
       vehicles: this.vehicles.map((v) => ({
         state: v.state, node: v.node, route: route(v.route), seg: v.seg, segOff: v.segOff, dist: v.dist,
         waitMin: v.waitMin, next: v.next, fieldNode: v.fieldNode, trips: v.trips,
@@ -482,9 +596,9 @@ export class Simulation {
     this.rng.setState(s.rng);
     Object.assign(this.company, structuredClone(s.company));
     this.business.restore(s.business);
-    if (this.farms) s.farms.forEach(([known, sat], i) => {
+    if (this.farms) s.farms.forEach(([known, sat, rival], i) => {
       const f = this.farms!.farms[i];
-      if (f) { f.known = known === 1; f.satisfaction = sat; }
+      if (f) { f.known = known === 1; f.satisfaction = sat; f.rivalUntil = rival ?? 0; }
     });
     this.pending = [];
     this.queue = structuredClone(s.queue ?? []);

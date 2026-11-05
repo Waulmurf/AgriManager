@@ -1,5 +1,5 @@
 /** Nachrichten zwischen Oberfläche und Simulations-Worker. */
-import type { PlayerUnitInfo, SaveState, VehicleInfo } from './engine';
+import type { JobEstimate, PlayerUnitInfo, SaveState, VehicleInfo } from './engine';
 import type { Company } from './economy';
 import type { ContactPreference } from './farms';
 import type { Command, GameEvent, Invoice, LedgerEntry, Order, QueueItem, Request } from './business';
@@ -61,6 +61,11 @@ export interface BusinessState {
   chefBusy: string | null;
   /** geplante Aufgaben des Chefs */
   queue: QueueItem[];
+  /** Zeitschätzung je offener Anfrage bzw. offenem Auftrag (Schlüssel = ID) */
+  estimates: Record<number, JobEstimate>;
+  /** Kunden bei der Konkurrenz bzw. in der Probephase (nur kleine Aufträge) */
+  rivalFarms: number[];
+  trialFarms: number[];
   knownFarms: number[];
   satisfaction: Record<number, number>;
   events: GameEvent[];

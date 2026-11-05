@@ -35,6 +35,36 @@ Jeder Schritt endet mit einer spielbaren Windows-Version.
   Aufträge). Ein Eintrag, der beim Start nicht mehr möglich ist (z. B. Auftrag schon fertig),
   wird mit einer Warnung übersprungen. In Phase 3 bekommt jeder Mitarbeiter eine eigene
   Warteschlange.
+- **Kundenbindung und Konkurrenz** (5. Nov. 2026, umgesetzt):
+  - Zufriedenheit sinkt: Anfrage nicht beantwortet −5, abgelehnt −2, Gegenangebot abgelehnt −3,
+    Auftrag verspätet −10, Zahlungserinnerung −3. Sie steigt durch pünktliche Aufträge (+5) und
+    Besuche (+2).
+  - Fällt sie unter 20 %, wechselt der Kunde für 60–120 Tage zur Konkurrenz. In der Zeit kommen
+    keine Anfragen, offene Anfragen verfallen, ein Besuch bringt nichts. Es gibt eine Warnung.
+  - Danach startet er bei 25 % in einer Probephase: nur kleine Anfragen (ein Feld bis 10 ha),
+    halb so häufig. Ab 40 % gibt es wieder normale Aufträge.
+  - Folge fürs Spiel: Lieber ablehnen als nicht antworten oder zu spät liefern.
+- **Zeitschätzung** (5. Nov. 2026, umgesetzt): Für jede offene Anfrage und jeden Auftrag
+  zeigt das Spiel Dauer und Arbeitstage an, dazu den voraussichtlichen Fertigtermin hinter
+  allem, was schon läuft oder geplant ist. Eine Ampel vergleicht ihn mit dem Termin des Kunden.
+  - Grundlage: Rüstzeiten, Fahrten (Luftlinie × 1,35 bei 28 km/h, nächstes Feld zuerst) und die
+    Flächenleistung des besten eigenen Grubbers bzw. des Marktangebots.
+  - Abgleich im Test: geschätzt 1.179 min, tatsächlich 1.173 min.
+- **Planungsboard** (5. Nov. 2026, geplant für Phase 3 mit Personal und mehreren Maschinen):
+  - Zeitleiste: Zeilen je Fahrer, Spalten je Tag (06–20 Uhr), Wochenansicht mit Blättern.
+    Aufträge sind Balken mit der Länge aus der Zeitschätzung. Unten liegen ungeplante Aufträge
+    und Anfragen mit Termin.
+  - Per Ziehen: Auftrag auf einen Fahrer und Tag legen, verschieben, Reihenfolge tauschen. Am
+    Balken lassen sich Schlepper, Gerät und bei Ketten weitere Rollen (Abfahrer, Radlader)
+    zuweisen.
+  - Prüfungen mit Warnung am Balken: Maschine doppelt belegt, Gerät passt nicht zum Schlepper
+    (PS), Führerschein fehlt, Arbeitszeit überschritten, Termin des Kunden verpasst, Fahrer hat
+    Urlaub.
+  - Technik: Das Board schreibt in die Warteschlangen der Fahrer, die Simulation arbeitet sie
+    ab (heutige Warteschlange des Chefs = erste Ausbaustufe). Mit Startzeit je Eintrag („nicht
+    vor Di 07:00“), damit sich Ketten mit mehreren Fahrern gleichzeitig starten lassen.
+  - Anfragen lassen sich direkt aus dem Board annehmen oder ablehnen. So sieht man vor der
+    Zusage, ob noch Platz ist.
 - **Arbeitsketten** (5. Nov. 2026): Häcksler arbeitet nur mit Abfahrer nebenher; Drescher und
   Roder laden auf Anhänger (angekoppelt oder abgestellt) im Feld bzw. am Feldrand ab; der
   Rübenroder legt eine Feldrandmiete an, die ein Reinigungslader („Rübenmaus“) auf Anhänger

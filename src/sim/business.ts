@@ -26,6 +26,16 @@ export const PAYMENT_TERM_DAYS = 30;
 export const REMIND_DAYS = 14;
 /** Telefonat zur Zahlungserinnerung (Arbeitszeit des Chefs, Minuten) */
 export const REMIND_CALL_MINUTES = 10;
+/** Unter dieser Zufriedenheit wechselt ein Kunde zur Konkurrenz */
+export const RIVAL_SWITCH_SATISFACTION = 20;
+/** so lange bleibt er dort (Tage, Spanne) */
+export const RIVAL_MIN_DAYS = 60;
+export const RIVAL_EXTRA_DAYS = 60;
+/** Neustart der Zufriedenheit nach der Rückkehr; bis RIVAL_TRUST_SATISFACTION nur kleine Aufträge */
+export const RIVAL_RETURN_SATISFACTION = 25;
+export const RIVAL_TRUST_SATISFACTION = 40;
+/** Probeauftrag: ein Feld bis zu dieser Größe */
+export const TRIAL_MAX_HA = 10;
 /** kalkulatorische Maschinenkosten für die Auswertung (Annahmen, LWK-Größenordnung) */
 export const REPAIR_TRACTOR_EUR_H = 8;
 export const WEAR_GRUBBER_EUR_HA = 3;
@@ -207,6 +217,32 @@ export class Business {
     this.version++;
   }
 
+  /**
+   * Zufriedenheit ändern. Fällt sie unter die Schwelle, wechselt der Kunde für eine Weile zur
+   * Konkurrenz; offene Anfragen verfallen, angenommene Aufträge bleiben.
+   */
+  private satisfy(farmId: number, delta: number, time: number) {
+    const farm = this.farms?.farms[farmId];
+    if (!farm) return;
+    farm.satisfaction = Math.max(0, Math.min(100, farm.satisfaction + delta));
+    if (delta < 0 && farm.satisfaction < RIVAL_SWITCH_SATISFACTION && farm.rivalUntil <= time) {
+      farm.rivalUntil = time + (RIVAL_MIN_DAYS + this.rng.int(RIVAL_EXTRA_DAYS + 1)) * 1440;
+      for (const r of this.requests) if (r.farmId === farmId && r.status === 'offen') r.status = 'abgelaufen';
+      this.emit(time, 'warnung', `${farm.name} ist unzufrieden und arbeitet ab jetzt mit einem anderen Lohnunternehmen. In einigen Wochen kann man es mit kleinen Aufträgen wieder versuchen.`, farmId);
+    }
+  }
+
+  /** Kunde ist gerade bei der Konkurrenz */
+  isRival(farmId: number, time: number): boolean {
+    return (this.farms?.farms[farmId]?.rivalUntil ?? 0) > time;
+  }
+
+  /** Kunde wieder zurückgewinnbar, vertraut aber noch nicht: nur Probeaufträge */
+  isTrial(farmId: number, time: number): boolean {
+    const farm = this.farms?.farms[farmId];
+    return !!farm && farm.rivalUntil > 0 && farm.rivalUntil <= time && farm.satisfaction < RIVAL_TRUST_SATISFACTION;
+  }
+
   farmName(id: number): string {
     return this.farms?.farms[id]?.name ?? `Betrieb ${id}`;
   }
@@ -231,12 +267,14 @@ export class Business {
     const f = this.fields;
     if (!fs || !f || !this.grubberSeason(time)) return null;
     const farm = fs.farms[farmId];
+    if (this.isRival(farmId, time)) return null;
     if (this.requests.some((r) => r.farmId === farmId && r.status === 'offen')) return null;
-    if (this.rng.next() >= chance) return null;
+    const trial = this.isTrial(farmId, time);
+    if (this.rng.next() >= (trial ? chance * 0.5 : chance)) return null;
     const spring = gameDate(time).month <= 5;
     const busy = this.busyFields();
     const cand = farm.fields.filter((i) => {
-      if (busy.has(i) || f.areaHa[i] > MAX_REQUEST_FIELD_HA) return false;
+      if (busy.has(i) || f.areaHa[i] > (trial ? TRIAL_MAX_HA : MAX_REQUEST_FIELD_HA)) return false;
       const c = fs.fieldCrop[i];
       return spring ? c === Crop.Mais || c === Crop.Zuckerrueben || c === Crop.Kartoffeln : c !== Crop.Gruenland;
     });
@@ -245,7 +283,7 @@ export class Business {
     const picked: number[] = [];
     let ha = 0;
     const start = this.rng.int(cand.length);
-    for (let k = 0; k < cand.length && picked.length < 3; k++) {
+    for (let k = 0; k < cand.length && picked.length < (trial ? 1 : 3); k++) {
       const i = cand[(start + k) % cand.length];
       if (picked.length && ha + f.areaHa[i] > 60) continue;
       picked.push(i);
@@ -276,14 +314,15 @@ export class Business {
     if (!farm) return;
     const first = !farm.known;
     farm.known = true;
-    if (!first) farm.satisfaction = Math.min(100, farm.satisfaction + 2); // Beziehung pflegen
+    if (!first) this.satisfy(farmId, 2, time); // Beziehung pflegen
     // Ein Besuch zählt als Kontakt für überfällige Rechnungen
     for (const inv of this.invoices) if (inv.farmId === farmId && inv.status === 'überfällig' && inv.remindedAt === undefined) this.remindInvoice(inv, time, 'besuch');
     const req = this.maybeRequest(farmId, time, 0.2 + 0.7 * (1 - farm.mechanization), 'besuch');
     if (req) {
       this.emit(time, 'anfrage', `${farm.name}: Grubbern auf ${req.fields.length} ${req.fields.length === 1 ? 'Feld' : 'Feldern'}, ${fmtHa(req.areaHa)} für ${fmtEur(req.priceHa)}/ha`, farmId);
     } else {
-      this.emit(time, 'besuch', `${farm.name}: ${first ? 'Kennengelernt, jetzt im Adressbuch.' : 'Besuch beendet.'} Zurzeit steht nichts an.`, farmId);
+      const rival = this.isRival(farmId, time);
+      this.emit(time, 'besuch', `${farm.name}: ${first ? 'Kennengelernt, jetzt im Adressbuch.' : 'Besuch beendet.'} ${rival ? 'Arbeitet zurzeit mit einem anderen Lohnunternehmen.' : 'Zurzeit steht nichts an.'}`, farmId);
     }
   }
 
@@ -294,15 +333,18 @@ export class Business {
     for (const r of this.requests) {
       if (r.status === 'offen' && time >= r.replyBy) {
         r.status = 'abgelaufen';
-        const farm = this.farms?.farms[r.farmId];
-        if (farm) farm.satisfaction = Math.max(0, farm.satisfaction - 5);
         this.emit(time, 'warnung', `${this.farmName(r.farmId)} hat sich anderweitig umgesehen (keine Antwort).`, r.farmId);
+        this.satisfy(r.farmId, -5, time);
       }
     }
     const fs = this.farms;
     if (!fs) return;
     for (const farm of fs.farms) {
       if (!farm.known) continue;
+      if (farm.rivalUntil > time - 1440 && farm.rivalUntil <= time) {
+        farm.satisfaction = Math.max(farm.satisfaction, RIVAL_RETURN_SATISFACTION);
+        this.emit(time, 'info', `${farm.name} ist mit der Konkurrenz nicht ganz zufrieden. Mit kleinen Aufträgen lässt sich der Kunde zurückgewinnen.`, farm.id);
+      }
       const req = this.maybeRequest(farm.id, time, 0.06 + 0.1 * (1 - farm.mechanization), farm.contact);
       if (req) {
         this.emit(time, 'anfrage', `${farm.contact === 'anruf' ? 'Anruf' : 'Nachricht'} von ${farm.name}: Grubbern ${fmtHa(req.areaHa)}, bis ${fmtDay(req.latest)}, ${fmtEur(req.priceHa)}/ha`, farm.id);
@@ -314,11 +356,10 @@ export class Business {
   respond(requestId: number, action: 'accept' | 'reject' | 'counter', time: number, priceHa?: number): string {
     const r = this.requests.find((x) => x.id === requestId);
     if (!r || r.status !== 'offen') return 'Anfrage nicht mehr offen';
-    const farm = this.farms?.farms[r.farmId];
     if (action === 'reject') {
       r.status = 'abgelehnt';
-      if (farm) farm.satisfaction = Math.max(0, farm.satisfaction - 2);
       this.emit(time, 'info', `Anfrage von ${this.farmName(r.farmId)} abgelehnt.`, r.farmId);
+      this.satisfy(r.farmId, -2, time);
       return 'abgelehnt';
     }
     let price = r.priceHa;
@@ -329,11 +370,11 @@ export class Business {
       const chance = ratio <= 1 ? 1 : Math.max(0, 1 - (ratio - 1) * 4);
       if (this.rng.next() >= chance) {
         r.status = 'abgelehnt';
-        if (farm) farm.satisfaction = Math.max(0, farm.satisfaction - 3);
+        this.satisfy(r.farmId, -3, time);
         this.emit(time, 'warnung', `${this.farmName(r.farmId)} lehnt ${fmtEur(p)}/ha ab und vergibt den Auftrag anderweitig.`, r.farmId);
         return 'Kunde lehnt ab';
       }
-      if (farm && ratio > 1) farm.satisfaction = Math.max(0, farm.satisfaction - 1);
+      if (ratio > 1) this.satisfy(r.farmId, -1, time);
       price = p;
     }
     r.status = 'angenommen';
@@ -387,10 +428,9 @@ export class Business {
     if (o.doneFields.length === o.fields.length) {
       o.status = 'fertig';
       o.finishedAt = time;
-      const farm = this.farms?.farms[o.farmId];
       const onTime = time <= o.latest;
-      if (farm) farm.satisfaction = Math.max(0, Math.min(100, farm.satisfaction + (onTime ? 5 : -10)));
       this.emit(time, 'auftrag', `Auftrag ${this.farmName(o.farmId)} fertig${onTime ? ', pünktlich' : ', verspätet'} (${fmtHa(o.areaHa)}).`, o.farmId);
+      this.satisfy(o.farmId, onTime ? 5 : -10, time);
       this.issueInvoice(o, time);
     }
   }
@@ -478,8 +518,7 @@ export class Business {
   private remindInvoice(inv: Invoice, time: number, how: 'anruf' | 'besuch') {
     inv.remindedAt = time;
     inv.payAt = time + (1 + this.rng.int(10)) * 1440;
-    const farm = this.farms?.farms[inv.farmId];
-    if (farm) farm.satisfaction = Math.max(0, farm.satisfaction - 3);
+    this.satisfy(inv.farmId, -3, time);
     this.emit(time, 'info', `${how === 'anruf' ? 'Angerufen' : 'Beim Besuch angesprochen'}: ${this.farmName(inv.farmId)} sagt die Zahlung von ${inv.number} in den nächsten Tagen zu.`, inv.farmId);
   }
 

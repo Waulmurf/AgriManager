@@ -508,6 +508,7 @@ export class GameController {
       `${f.livestock ? ', mit Viehhaltung' : ', reiner Ackerbau'}<br>` +
       `<small>${crops}</small><br>` +
       `<small>${f.known ? `Im Adressbuch · Zufriedenheit ${f.satisfaction} % · bevorzugt ${f.contact === 'anruf' ? 'Anrufe' : 'Nachrichten'}` : 'Noch nicht besucht – erst nach einem Besuch im Adressbuch'}</small>` +
+      (this.status.business?.rivalFarms.includes(f.id) ? `<small class="warn">Arbeitet zurzeit mit einem anderen Lohnunternehmen</small>` : this.status.business?.trialFarms.includes(f.id) ? `<small>Probephase: nur kleine Aufträge, bis das Vertrauen wieder da ist</small>` : '') +
       `<div class="popup-actions"><button data-visit="${f.id}">${f.known ? 'Erneut besuchen' : 'Besuchen'}</button><span class="popup-msg"></span></div>`
     );
   }
