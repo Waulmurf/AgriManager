@@ -14,12 +14,13 @@ als Kette mit Rollen geplant; jede Rolle braucht Maschine **und** Fahrer.
 | Düngerstreuen | Schlepper + Streuer | Behälter 1,4–4,2 m³ | Nachschub am Feldrand (Zubringer, Big Bags) | – |
 | Pflanzenschutz | Schlepper + Spritze / Selbstfahrer | Tank 1,6–8 m³ | Wasser/Mittel am Feldrand (Wasserfass, Hydrant) | – |
 | Gülle | Selbstbefüller **oder** Ausbringfass im Feld | Fass 12–32 m³ | ab mittlerer Entfernung: Zubringer + Umschlag am Feldrand | Ausbringung |
-| Maishäckseln, Grashäckseln | Feldhäcksler | **nein** | **mindestens ein Abfahrgespann nebenher**, am Silo Walzschlepper | während der Fahrt auf Abfahrer |
+| Maishäckseln, Grashäckseln | Feldhäcksler | **nein** | **mindestens ein Abfahrgespann nebenher**, am Silo Radlader/Siloverteiler und Walze | während der Fahrt auf Abfahrer |
 | Mähdrusch | Mähdrescher | Korntank 7–12 m³ | Anhänger am Feldrand **oder** Überladewagen/Abfahrer nebenher | Feldrand oder während der Fahrt |
 | Kartoffelroden (Bunkerroder) | gezogener/selbstfahrender Roder | Bunker ca. 6–7 t | Anhänger am Feldrand oder nebenher | Feldrand oder während der Fahrt |
 | Kartoffelroden (Seitenroder ohne Bunker) | gezogener Roder | **nein** | Abfahrer immer nebenher | während der Fahrt |
 | Rübenroden | Rübenroder-Selbstfahrer | Bunker 30–45 m³ (ca. 30 t) | **keine**: legt eine Feldrandmiete an | in die Miete am Feldrand |
 | Rübenverladung | Reinigungslader („Rübenmaus“) | – | Lkw/Abfahrer zur Zuckerfabrik | aus der Miete auf Lkw |
+| Silo verteilen und walzen | Radlader oder Schlepper mit Siloverteiler/Schiebeschild, Walzschlepper | – | Walzgewicht ≈ Anlieferung (t/h) ÷ 4 | – |
 | Pressen | Schlepper + Presse | Ballenkammer | Ballen bergen (Frontlader, Sammelwagen), Silage: Wickler | Ballen werden im Feld abgelegt |
 
 ## Abläufe im Einzelnen
@@ -39,6 +40,21 @@ als Kette mit Rollen geplant; jede Rolle braucht Maschine **und** Fahrer.
 - Am Silo verdichtet ein **Walzschlepper**. Richtwert: 2–3 min Verdichtung je Tonne. Er begrenzt
   die Leistung der ganzen Kette ([Bayerisches Wochenblatt via swissmilk](https://api.swissmilk.ch/wp-content/uploads/2019/05/futterkonservierung-bestes-futter-auf-dem-tisch-artikel-bayerisches-wochenblatt-6-9-2019-de.pdf)).
 - Kosten als Anker: Häcksler 241 €/h, Transportfahrzeug 87 €/h, Walzschlepper 110 €/h (ebd.).
+- **Verdichtung am Silo:** Das Walzgewicht soll etwa ein Viertel der stündlichen Anlieferung
+  betragen (100 t FM/h → rund 25 t Walzgewicht). Ein Walzfahrzeug schafft höchstens etwa
+  20–25 t TM/h. Gewalzt wird mit höchstens 4 km/h, 3–4 Überfahrten je Schicht und mindestens
+  2,5 bar Reifendruck ([Bayerisches Wochenblatt via swissmilk](https://api.swissmilk.ch/wp-content/uploads/2019/05/futterkonservierung-bestes-futter-auf-dem-tisch-artikel-bayerisches-wochenblatt-6-9-2019-de.pdf)).
+  Bei großen Ketten arbeiten deshalb mehrere Walzfahrzeuge.
+- **Verteilen am Silo:** Die Abfahrer kippen vor oder auf dem Silo ab. Ein **Radlader** oder
+  Schlepper mit **Siloverteiler bzw. Schiebeschild** schiebt das Gut in dünnen Schichten auf
+  den Stock. Oft übernimmt dieselbe Maschine das Walzen mit. Ein schwerer Radlader ist dafür
+  verbreitet. Bei großen Ketten wie Biogas sind mehrere Radlader und Walzen üblich
+  ([Beispiel: 22 Schlepper, 3 Häcksler, 3 Radlader, Walze](https://analytics.wizdeo.com/en/videos/view/fAwEP4Gnlq0)).
+- Der **Radlader** hat im Lohnbetrieb weitere Aufgaben, die fürs Spiel wichtig sind:
+  - Silo abdecken helfen, Siloanschnitt und Futterentnahme mit Silozange oder Schaufel
+  - Rüben oder Kartoffeln vom Lager verladen, wenn keine Rübenmaus da ist
+  - Mist, Kompost oder Kalk auf Streuer laden
+  - Hofarbeiten
 - Häckselgeschwindigkeit im Feld meist unter 10 km/h ([Handbuch Biogaslogistik](https://renewable-carbon.eu/news/wp-content/uploads/news-images/20080411-03/HandbuchLog.pdf)).
 
 ### Mähdrusch
@@ -94,11 +110,42 @@ als Kette mit Rollen geplant; jede Rolle braucht Maschine **und** Fahrer.
 - Pressen legen die Ballen im Feld ab. Danach folgen Bergen (Frontlader, Ballensammelwagen) und
   bei Silage Wickeln. Das ist ein zweiter Arbeitsgang mit eigener Maschine.
 
+## Auftragsarten bei Ketten (wer stellt was)
+
+Bei Ketten stellt der Lohnbetrieb oft nur einen Teil. Der Rest kommt vom Landwirt oder von
+anderen Unternehmen. Typische Fälle:
+
+| Auftrag | Lohnbetrieb stellt | Kunde oder Dritte stellen |
+| --- | --- | --- |
+| Komplettkette | Häcksler, Abfahrer, Radlader/Walze | – (nur Silofläche, Folie) |
+| Nur Häcksler | Häcksler mit Fahrer | Abfahrer, Walze, Radlader |
+| Beteiligung an fremder Kette | Abfahrgespanne (Schlepper + Anhänger) mit Fahrer, nach Stunden oder Tonnen | Häcksler, Silo, übrige Abfahrer |
+| Silo walzen/verteilen | Radlader oder Walzschlepper mit Siloverteiler | Häcksler, Abfahrer |
+| Nur Drusch | Mähdrescher | Abfahrer, Korntransport |
+| Rübenroden | Roder | Rübenmaus und Abfuhr meist über die Zuckerfabrik bzw. Rodegemeinschaft |
+
+- Bei Biogasanlagen vergeben die Betreiber oft die ganze Kette. Liefert ein Landwirt ab Halm,
+  stellt die Anlage die Kette selbst. Fährt ein Landwirt für einen Lohnunternehmer mit, rechnet
+  der Lohnunternehmer gegenüber der Anlage ab ([topagrar](https://www.topagrar.com/management-und-politik/aus-dem-heft/transportarbeiten-gewerblich-oder-nicht-9654385.html)).
+- Für Transporte zur gewerblichen Biogasanlage reicht der Führerschein T ([topagrar](https://www.topagrar.com/technik/news/mit-dem-t-fuehrerschein-zur-gewerblichen-biogasanlage-13449657.html)).
+  Schneller als 40 km/h braucht ein gewerblicher Transport ein Kontrollgerät
+  (Fahrtenschreiber). Das ist wichtig für die späteren Lkw und für 50-km/h-Schlepper.
+- Im Spiel ist ein Kettenauftrag deshalb eine Liste von Rollen. Je Rolle wird festgelegt, wer sie
+  stellt: der Spieler, der Kunde (Fremdfahrzeuge, von der Simulation gefahren) oder ein anderer
+  Lohnunternehmer. Die eigene Leistung hängt von den fremden Rollen ab: Stellt der Kunde zu
+  wenige Abfahrer, steht der Häcksler des Spielers. Das kostet Zeit und Zufriedenheit, die
+  Ursache steht in der Auswertung. Abgerechnet wird je nach Rolle nach Hektar (Häcksler),
+  Stunden (Abfahrer, Radlader) oder Tonnen (Transport).
+- Anfragen für eine Beteiligung kommen von Kunden und von fremden Lohnunternehmern, etwa
+  „Brauchen morgen zwei Abfahrer für 120 ha Mais in X“. So kann man schon mit Schlepper und
+  Anhänger Geld verdienen, bevor man einen Häcksler besitzt.
+
 ## Umsetzung im Spiel (Plan)
 
-1. **Arbeitskette als Auftrag:** Ein Auftrag hat Rollen, etwa Häcksler, 2–4 Abfahrer und
-   Walzschlepper oder Rübenroder plus Rübenmaus. Jede Rolle braucht Maschine und Fahrer;
-   Fahrer und Maschinen kommen aus dem eigenen Betrieb, von Mietmaschinen oder vom Kunden.
+1. **Arbeitskette als Auftrag:** Ein Auftrag hat Rollen, etwa Häcksler, 2–4 Abfahrer,
+   Radlader/Siloverteiler und Walzschlepper oder Rübenroder plus Rübenmaus. Jede Rolle braucht
+   Maschine und Fahrer. Sie kommen aus dem eigenen Betrieb, von Mietmaschinen, vom Kunden oder
+   von einem fremden Lohnunternehmer (siehe „Auftragsarten bei Ketten“).
 2. **Materialfluss:** Erntemenge je Feld = Fläche × Ertrag (Kultur, Wetter, Boden). Bunker,
    Anhänger, Mieten und Silos haben Kapazitäten. Eine Hauptmaschine ohne Bunker steht, solange
    kein Abfahrer neben ihr fährt. Eine Maschine mit vollem Bunker fährt zum Feldrand.
@@ -106,8 +153,10 @@ als Kette mit Rollen geplant; jede Rolle braucht Maschine **und** Fahrer.
    später abholen. Sie sind eigene Objekte auf der Karte.
 4. **Feldrandmiete:** wird vom Rübenroder an einer Stelle am Vorgewende angelegt, wächst mit
    jeder Bunkerladung und wird von der Rübenmaus auf Abfuhrfahrzeuge geladen.
-5. **Silo am Ziel:** Abfahrer kippen am Fahrsilo des Kunden oder der Biogasanlage ab; ein
-   Walzschlepper begrenzt die Annahmeleistung.
+5. **Silo am Ziel:** Abfahrer kippen am Fahrsilo des Kunden oder der Biogasanlage ab. Radlader
+   bzw. Siloverteiler und Walze begrenzen die Annahmeleistung: Walzgewicht ≈ Anlieferung (t/h)
+   ÷ 4. Zu wenig Walzgewicht heißt Wartezeit für die Abfahrer oder schlechtere Silage
+   (Zufriedenheit).
 6. **Kennzahlen offen (vor der Umsetzung recherchieren):** Erträge in der Region (Silomais,
    Weizen, Kartoffeln, Rüben), Ladevolumen und Schüttdichten, aktuelle Leistung von Häcksler und
    Reinigungslader, Abfuhrlogistik der Zuckerfabrik Uelzen.

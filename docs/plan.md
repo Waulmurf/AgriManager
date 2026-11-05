@@ -31,7 +31,9 @@ Jeder Schritt endet mit einer spielbaren Windows-Version.
 - **Arbeitsketten** (5. Nov. 2026): Häcksler arbeitet nur mit Abfahrer nebenher; Drescher und
   Roder laden auf Anhänger (angekoppelt oder abgestellt) im Feld bzw. am Feldrand ab; der
   Rübenroder legt eine Feldrandmiete an, die ein Reinigungslader („Rübenmaus“) auf Anhänger
-  verlädt. Recherchierte Abläufe aller Maschinen mit Kennzahlen und Quellen: `docs/ablaeufe.md`.
+  verlädt. Man kann sich auch mit Abfahrgespannen an fremden Ketten beteiligen, oder der
+  Landwirt bucht nur den Häcksler und stellt den Rest selbst. Radlader und Siloverteiler bzw.
+  Walze gehören zur Kette am Silo. Recherchierte Abläufe aller Maschinen mit Kennzahlen und Quellen: `docs/ablaeufe.md`.
   Grundlagen (Rollen im Auftrag, Anhänger als eigene Einheit) in Phase 3, Ernteketten in Phase 4.
 
 ## Felddaten (Stand 5. Nov. 2026)
