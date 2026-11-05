@@ -3,7 +3,7 @@ import type { JobEstimate, PlanBar, PlayerUnitInfo, SaveState, VehicleInfo } fro
 import type { Competitor } from './market';
 import type { Company } from './economy';
 import type { ContactPreference } from './farms';
-import type { Lease, LeaseOffer } from './business';
+import type { BiogasPlant, Lease, LeaseOffer } from './business';
 import type { Applicant, Command, Delivery, StaffRequest, YearResult, GameEvent, Invoice, LedgerEntry, Order, QueueItem, Request } from './business';
 import type { MarketOffer } from './economy';
 
@@ -77,6 +77,8 @@ export interface BusinessState {
   market: { reputation: number; won: number; lost: number; competitors: Competitor[]; loyalFarms: number[] };
   /** Pacht und eigener Ackerbau: offene Angebote (ohne verdecktes Konkurrenzgebot), eigene Pachtflächen */
   farming: { offers: (Omit<LeaseOffer, 'competitorBid'> & { center: [number, number] })[]; leases: (Lease & { center: [number, number] })[] };
+  /** eigene Biogasanlage (PB-07 bis PB-10) */
+  biogas: BiogasPlant | null;
   /** Wetter (Phase 4, Schritt 2): heute und Vorhersage */
   weather: {
     temp: number; rain: number; rainFrom: number; soil: number; frost: boolean; blocked: string | null;

@@ -1222,7 +1222,7 @@ export class Simulation {
     };
     if (o.service === 'haeckseln') {
       const farm = this.farms?.farms[o.farmId];
-      const silo = farm?.homeNode ?? this.homeNode;
+      const silo = o.sourceNode ?? farm?.homeNode ?? this.homeNode;
       const access = this.fields!.access[queue[0]];
       // Wagen des Kunden (nur Häcksler): 3 Gespanne à 12 t, Umlauf = Hin- und Rückfahrt + Abkippen
       const cycle = Math.round((2 * this.nodeDist(silo, access)) / EST_TRACTOR_M_MIN + 8);
@@ -1251,7 +1251,7 @@ export class Simulation {
     }
     if (o.gabe) {
       const farm = this.farms?.farms[o.farmId];
-      unit.task.slurry = { cap: impl.tankM3 ?? 15, load: 0, gabe: o.gabe, source: farm?.homeNode ?? this.homeNode, progress: 0, frac: 0 };
+      unit.task.slurry = { cap: impl.tankM3 ?? 15, load: 0, gabe: o.gabe, source: o.sourceNode ?? farm?.homeNode ?? this.homeNode, progress: 0, frac: 0 };
     }
     unit.state = VehicleState.Waiting;
     unit.waitMin = RUEST_HOF_MIN;
@@ -1398,6 +1398,13 @@ export class Simulation {
         return b.askLand(cmd.farmId, t);
       case 'setCrop':
         return b.setCrop(cmd.leaseId, cmd.crop, t);
+      case 'buildBiogas': return b.buildBiogas(cmd.siteId, cmd.kw, cmd.bidCt, t);
+      case 'biogasBid': return b.biogasBid(cmd.ct);
+      case 'buySubstrate': return b.buySubstrate(cmd.substrate, cmd.t, t);
+      case 'buyMaisField': return b.buyMaisField(cmd.farmId, t);
+      case 'guelleContract': return b.guelleContract(cmd.farmId, t);
+      case 'spreadGaerrest': return b.spreadGaerrest(cmd.leaseId, t);
+      case 'sellGaerrest': return b.sellGaerrest(cmd.m3, t);
       case 'buySite': {
         const o = SITE_OFFERS.find((x) => x.key === cmd.offerKey);
         if (!o) return 'Angebot unbekannt';

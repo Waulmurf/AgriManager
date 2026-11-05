@@ -251,3 +251,13 @@ test('Ackerbau: Reiter zeigt eigene Flächen und Pachtangebote', async ({ page }
   await expect(page.getByRole('heading', { name: 'Eigene Flächen' })).toBeVisible();
   await expect(page.getByRole('heading', { name: /Pachtangebote/ })).toBeVisible();
 });
+
+test('Biogas: Reiter zeigt Baugrößen und Bedingungen', async ({ page }) => {
+  await page.goto('./?neu');
+  await waitForGame(page);
+  await page.getByTestId('speed-0').click();
+  await page.getByTestId('tab-biogas').click();
+  await expect(page.getByRole('heading', { name: 'Biogasanlage bauen' })).toBeVisible();
+  await page.getByTestId('build-biogas').click();
+  await expect(page.locator('.feedback')).toContainText('10 ha');
+});

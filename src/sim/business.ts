@@ -15,6 +15,10 @@ import {
 import { CATALOG, DEALERS, dealersFor, type CatalogModel } from '../data/catalog';
 import { BUILDINGS, PERMIT, SITE_OFFERS, type BuildingKey } from '../data/sites';
 import { CROPS, IRRIGATION_EUR_HA, fieldIrrigated, fieldSoil, referenceRent, rotationFactor, soilFactor, type OwnCrop } from './farming';
+import {
+  BIOGAS, BIOGAS_AFA_YEARS, EEG_MAX_CT, FIXED_SHARE, GAER_GABE, GAER_SELL_EUR, GAER_VALUE_EUR, GUELLE_HAUL_EUR, OPEX_CT,
+  SUBSTRATE_NAME, SUBSTRATE_PRICE, dailyTarget, farmSlurryPerDay, gaerBlocked, gaerOf, ration, type BiogasSize, type Feed, type Substrate,
+} from './biogas';
 import { COMPETITOR_RANGE_KM, PRICE_WAR_KM, generateCompetitors, kmBetween, type Competitor } from './market';
 import {
   DIESEL_MEAN, DIESEL_START, LEASE_BASE_RATE, LIABILITY_PER_YEAR, OVERDRAFT_RATE, RATING_SURCHARGE,
@@ -169,6 +173,12 @@ export interface Order {
   externalCost?: number;
   /** Eigenauftrag auf eigener Pachtfläche (keine Rechnung) */
   ownLeaseId?: number;
+  /** Lager/Silo statt Hofstelle des Kunden (Biogasanlage) */
+  sourceNode?: number;
+  /** Gärrest auf eigene Fläche (m³ schon aus dem Lager genommen) */
+  gaerrest?: boolean;
+  /** Mais auf dem Halm gekauft (€/t), Ernte ins eigene Silo */
+  biogasPriceT?: number;
   earliest: number;
   latest: number;
   status: OrderStatus;
@@ -211,7 +221,33 @@ export interface Invoice {
 export type LedgerCategory =
   | 'Rechnung' | 'Diesel' | 'Maschinenkauf' | 'Personal' | 'Werkstatt'
   | 'Kredit' | 'Tilgung' | 'Zinsen' | 'Leasing' | 'Versicherung' | 'Steuern' | 'Gebäude' | 'Bau'
-  | 'Pacht' | 'Ackerbau' | 'Ernte' | 'Sonstiges';
+  | 'Pacht' | 'Ackerbau' | 'Ernte' | 'Strom' | 'Biogas' | 'Sonstiges';
+
+/** Biogasanlage (PB-07 bis PB-10) */
+export interface BiogasPlant {
+  siteId: number;
+  kw: BiogasSize;
+  status: 'genehmigung' | 'ausschreibung' | 'bau' | 'betrieb';
+  /** eigenes Gebot und Zuschlag (ct/kWh) */
+  bidCt: number;
+  ct?: number;
+  permitUntil: number;
+  tenderAt?: number;
+  readyAt?: number;
+  /** Lager: Gülle (m³, Vorgrube), Silage (t), Gärrest (m³) */
+  stock: { guelle: number; mais: number; gps: number; gras: number };
+  gaer: number;
+  /** Gülle-Lieferverträge mit Viehbetrieben (nehmen Gärrest zurück) */
+  contracts: { farmId: number; m3Day: number; until: number }[];
+  /** laufender Monat: Strom (kWh), Kosten (€); Ration heute */
+  kwhMonth: number;
+  costMonth: number;
+  kwhTotal: number;
+  today: Feed | null;
+  /** Hinweise, damit Warnungen nicht täglich kommen */
+  warnedShort?: number;
+  warnedFull?: number;
+}
 
 /** Pachtangebot (PB-01 bis PB-03) */
 export interface LeaseOffer {
@@ -331,6 +367,13 @@ export type Command =
   | { kind: 'bidLease'; offerId: number; rentHa: number }
   | { kind: 'askLand'; farmId: number }
   | { kind: 'setCrop'; leaseId: number; crop: OwnCrop }
+  | { kind: 'buildBiogas'; siteId: number; kw: BiogasSize; bidCt: number }
+  | { kind: 'biogasBid'; ct: number }
+  | { kind: 'buySubstrate'; substrate: Substrate; t: number }
+  | { kind: 'buyMaisField'; farmId: number }
+  | { kind: 'guelleContract'; farmId: number }
+  | { kind: 'spreadGaerrest'; leaseId: number }
+  | { kind: 'sellGaerrest'; m3: number }
   | { kind: 'buySite'; offerKey: string }
   | { kind: 'sellSite'; siteId: number }
   | { kind: 'transfer'; machineId: number; siteId: number; driverId: number; implementId?: number }
@@ -382,6 +425,8 @@ export class Business {
   readonly leases: Lease[] = [];
   /** Wetterabfrage für Ertrag (Regen eines Tages in mm; setzt der Rechenkern) */
   rainOfDay: ((day: number) => number) | null = null;
+  /** eigene Biogasanlage */
+  biogas: BiogasPlant | null = null;
   /** Markt (Phase 5): Konkurrenten, Ruf, Statistik gewonnen/verloren */
   readonly competitors: Competitor[];
   reputation = 50;
@@ -448,6 +493,7 @@ export class Business {
       dieselPrice: this.dieselPrice,
       leaseOffers: this.leaseOffers,
       leases: this.leases,
+      biogas: this.biogas,
       market: { rng: this.marketRng.getState(), competitors: this.competitors, reputation: this.reputation, won: this.won, lost: this.lost },
       years: this.years,
       yearSaleGain: this.yearSaleGain,
@@ -478,6 +524,7 @@ export class Business {
     put(this.leaseOffers, s.leaseOffers ?? []);
     put(this.leases, s.leases ?? []);
     this.applyLeases();
+    this.biogas = s.biogas ? structuredClone(s.biogas) : null;
     if (s.market) {
       this.marketRng.setState(s.market.rng);
       put(this.competitors, s.market.competitors);
@@ -692,8 +739,14 @@ export class Business {
     const dry = l.irrigated ? 1 : Math.max(0.4, 1 - def.drought * Math.max(0, 0.9 - ratio));
     const tonnes = Math.round(def.yieldT * soilFactor(l.soil) * rotationFactor(def.key, l.lastCrop) * dry * l.yieldFactor * l.areaHa * 10) / 10;
     const price = Math.round(def.priceT * (0.9 + this.marketRng.next() * 0.2) * 100) / 100;
-    const revenue = Math.round(tonnes * price);
-    this.book(time, `Ernte ${def.name}: ${tonnes.toLocaleString('de-DE')} t à ${fmtEur(price)}`, revenue, 'Ernte');
+    // Silomais in die eigene Biogasanlage (PB-06), soweit das Silo Platz hat
+    const intoSilo = def.key === 'mais' ? Math.min(tonnes, this.siloRoom()) : 0;
+    if (intoSilo > 0) {
+      this.biogas!.stock.mais += intoSilo;
+      this.emit(time, 'info', `${intoSilo.toLocaleString('de-DE')} t Silomais ins Silo der Biogasanlage.`);
+    }
+    const revenue = Math.round((tonnes - intoSilo) * price);
+    if (revenue > 0) this.book(time, `Ernte ${def.name}: ${(Math.round((tonnes - intoSilo) * 10) / 10).toLocaleString('de-DE')} t à ${fmtEur(price)}`, revenue, 'Ernte');
     l.history.push({ year: gameDate(time).year, crop: def.key, tonnes, revenue });
     this.emit(time, 'info', `Ernte ${def.name} (${fmtHa(l.areaHa)}): ${tonnes.toLocaleString('de-DE')} t (${(tonnes / l.areaHa).toLocaleString('de-DE', { maximumFractionDigits: 1 })} t/ha${!l.irrigated && dry < 0.95 ? ', Trockenheit' : ''}) – verkauft für ${fmtEur(revenue)}.`);
     l.lastCrop = def.key;
@@ -743,6 +796,7 @@ export class Business {
               id: this.nextId++, requestId: 0, farmId: -1, service: sd.service, fields: l.fields.slice(), doneFields: [],
               areaHa: l.areaHa, priceHa: 0, earliest: st.from, latest: st.to, status: 'offen', dieselL: 0, dieselCost: 0, tractorHours: 0,
               ownLeaseId: l.id, chain: sd.service === 'haeckseln' ? 'komplett' : undefined, doneT: sd.service === 'haeckseln' ? 0 : undefined,
+              sourceNode: sd.service === 'haeckseln' ? this.biogasNode() : undefined,
             };
             this.orders.push(o);
             st.orderId = o.id;
@@ -782,6 +836,252 @@ export class Business {
       if (farm) farm.fields.push(...l.fields);
       for (const f of l.fields) fs.fieldFarm[f] = l.farmId;
       this.emit(time, 'info', `Pachtvertrag mit ${this.farmName(l.farmId)} beendet: ${fmtHa(l.areaHa)} gehen zurück.`, l.farmId);
+    }
+  }
+
+  // ---------- Biogasanlage (PB-07 bis PB-10) ----------
+
+  /** Knoten der Anlage (Silo, Gärrestlager); ohne Anlage der Stammhof */
+  private biogasNode(): number | undefined {
+    return this.biogas ? this.site(this.biogas.siteId)?.node : undefined;
+  }
+
+  /** freier Platz im Silo (t), nur bei laufender Anlage */
+  private siloRoom(): number {
+    const p = this.biogas;
+    if (!p || p.status !== 'betrieb') return 0;
+    const def = BIOGAS.find((d) => d.kw === p.kw)!;
+    return Math.max(0, Math.floor(def.siloT - p.stock.mais - p.stock.gps - p.stock.gras));
+  }
+
+  /** Bau beantragen (PB-07): Hofstelle oder Resthof (Abstand zur Wohnbebauung), eigene Flächen nötig */
+  buildBiogas(siteId: number, kw: BiogasSize, bidCt: number, time: number): string {
+    if (this.biogas) return 'Es gibt schon eine Anlage';
+    const st = this.site(siteId);
+    const def = BIOGAS.find((d) => d.kw === kw);
+    if (!st || !def) return 'Unbekannt';
+    if (st.kind === 'gewerbe') return 'Im Gewerbegebiet nicht genehmigungsfähig (Abstand zur Wohnbebauung, kein Außenbereich)';
+    const ha = this.leases.reduce((a, l) => a + l.areaHa, 0);
+    if (ha < 10) return 'Privilegierung braucht eigenen Ackerbau: mindestens 10 ha Pachtfläche';
+    if (!(bidCt >= 10 && bidCt <= EEG_MAX_CT)) return `Gebot zwischen 10 und ${EEG_MAX_CT.toLocaleString('de-DE')} ct/kWh`;
+    if (!this.canPay(def.permitFee)) return 'Nicht genug Geld für Gutachten und Genehmigung';
+    this.book(time, `Biogasanlage ${kw} kW: Gutachten und Genehmigung`, -def.permitFee, 'Bau');
+    this.biogas = {
+      siteId, kw, status: 'genehmigung', bidCt: Math.round(bidCt * 100) / 100, permitUntil: time + def.permitWeeks * 7 * 1440,
+      stock: { guelle: 0, mais: 0, gps: 0, gras: 0 }, gaer: 0, contracts: [], kwhMonth: 0, costMonth: 0, kwhTotal: 0, today: null,
+    };
+    this.version++;
+    this.emit(time, 'info', `Biogasanlage ${kw} kW in ${st.name} beantragt. Genehmigung etwa bis ${fmtDay(this.biogas.permitUntil)}, danach EEG-Ausschreibung (1. April oder 1. Oktober).`);
+    return `beantragt, Genehmigung bis ${fmtDay(this.biogas.permitUntil)}`;
+  }
+
+  biogasBid(ct: number): string {
+    const p = this.biogas;
+    if (!p || (p.status !== 'genehmigung' && p.status !== 'ausschreibung')) return 'Kein offenes Gebot';
+    if (!(ct >= 10 && ct <= EEG_MAX_CT)) return `Gebot zwischen 10 und ${EEG_MAX_CT.toLocaleString('de-DE')} ct/kWh`;
+    p.bidCt = Math.round(ct * 100) / 100;
+    this.version++;
+    return `Gebot ${p.bidCt.toLocaleString('de-DE')} ct/kWh`;
+  }
+
+  /** nächster Gebotstermin (1. April oder 1. Oktober) ab einem Zeitpunkt */
+  private nextTender(after: number): number {
+    let t = Math.ceil(after / 1440) * 1440;
+    for (let k = 0; k < 400; k++, t += 1440) {
+      const d = gameDate(t);
+      if (d.day === 1 && (d.month === 4 || d.month === 10)) return t;
+    }
+    return t;
+  }
+
+  /** Substrat einkaufen (frei Silo); außerhalb der Ernte 20 % teurer (aus fremden Silos) */
+  buySubstrate(kind: Substrate, t: number, time: number): string {
+    const p = this.biogas;
+    if (!p || p.status !== 'betrieb') return 'Erst wenn die Anlage läuft';
+    if (!(t >= 10)) return 'Mindestens 10 t';
+    const room = this.siloRoom();
+    if (t > room) return `Im Silo ist nur Platz für ${room.toLocaleString('de-DE')} t`;
+    const m = gameDate(time).month;
+    const season = kind === 'mais' ? m === 9 || m === 10 : kind === 'gps' ? m === 6 || m === 7 : m >= 5 && m <= 9;
+    const price = SUBSTRATE_PRICE[kind] * (season ? 1 : 1.2);
+    const cost = Math.round(t * price);
+    if (!this.canPay(cost)) return 'Nicht genug Geld';
+    p.stock[kind] += Math.round(t);
+    this.book(time, `${SUBSTRATE_NAME[kind]} ${Math.round(t).toLocaleString('de-DE')} t frei Silo à ${fmtEur(price)}`, -cost, 'Biogas');
+    this.version++;
+    return `${Math.round(t).toLocaleString('de-DE')} t ${SUBSTRATE_NAME[kind]} eingelagert`;
+  }
+
+  /** Mais auf dem Halm kaufen (PB-10): eigene Häckselkette erntet ins Silo der Anlage */
+  buyMaisField(farmId: number, time: number): string {
+    const p = this.biogas, fs = this.farms, f = this.fields;
+    const farm = fs?.farms[farmId];
+    if (!p || p.status !== 'betrieb' || !fs || !f) return 'Erst wenn die Anlage läuft';
+    if (!farm?.known) return 'Erst den Betrieb besuchen';
+    const m = gameDate(time).month;
+    if (m !== 8 && m !== 9 && m !== 10) return 'Mais auf dem Halm gibt es von August bis Oktober';
+    if (this.orders.some((o) => o.farmId === farmId && o.biogasPriceT !== undefined && o.status !== 'fertig')) return 'Läuft schon';
+    const mais = farm.fields.filter((i) => fs.fieldCrop[i] === Crop.Mais);
+    if (!mais.length || farm.satisfaction < 40) return `${farm.name} verkauft keinen Mais`;
+    const picked: number[] = [];
+    let ha = 0;
+    for (const i of mais) { if (ha + f.areaHa[i] > 30) continue; picked.push(i); ha += f.areaHa[i]; }
+    if (!picked.length) return 'keine passenden Flächen';
+    const priceT = 32;
+    const room = this.siloRoom();
+    if (ha * 42 > room) return `Zu wenig Platz im Silo (${room.toLocaleString('de-DE')} t frei, etwa ${Math.round(ha * 42).toLocaleString('de-DE')} t)`;
+    const o: Order = {
+      id: this.nextId++, requestId: 0, farmId, service: 'haeckseln', fields: picked, doneFields: [], areaHa: Math.round(ha * 100) / 100,
+      priceHa: 0, earliest: time, latest: time + 21 * 1440, status: 'offen', dieselL: 0, dieselCost: 0, tractorHours: 0,
+      chain: 'komplett', doneT: 0, sourceNode: this.biogasNode(), biogasPriceT: priceT,
+    };
+    this.orders.push(o);
+    this.version++;
+    this.emit(time, 'auftrag', `${farm.name} verkauft ${fmtHa(o.areaHa)} Mais auf dem Halm (${priceT} €/t). Häckseln mit eigener Kette bis ${fmtDay(o.latest)} – im Reiter Aufträge starten.`, farmId);
+    return 'gekauft, Auftrag angelegt';
+  }
+
+  /** Gülle-Liefervertrag mit einem Viehbetrieb (ein Jahr; der Betrieb nimmt Gärrest zurück) – zweiter Aufruf kündigt */
+  guelleContract(farmId: number, time: number): string {
+    const p = this.biogas;
+    const farm = this.farms?.farms[farmId];
+    if (!p) return 'Keine Biogasanlage';
+    const i = p.contracts.findIndex((c) => c.farmId === farmId);
+    if (i >= 0) { p.contracts.splice(i, 1); this.version++; return 'Vertrag beendet'; }
+    if (!farm?.known) return 'Erst den Betrieb besuchen';
+    if (!farm.livestock) return `${farm.name} hält kein Vieh`;
+    if (farm.satisfaction < 50) return `${farm.name} ist nicht zufrieden genug`;
+    const m3Day = farmSlurryPerDay(farm.fields.reduce((a, x) => a + (this.fields?.areaHa[x] ?? 0), 0));
+    if (m3Day < 0.5) return 'zu wenig Gülle';
+    p.contracts.push({ farmId, m3Day, until: time + 365 * 1440 });
+    this.version++;
+    return `Vertrag: ${m3Day.toLocaleString('de-DE')} m³ Gülle am Tag (Anfuhr ${fmtEur(GUELLE_HAUL_EUR)}/m³), Gärrest geht zurück`;
+  }
+
+  /** Gärrest auf eine eigene Pachtfläche (PB-09): Eigenauftrag mit dem Güllefass, außerhalb der Sperrfrist */
+  spreadGaerrest(leaseId: number, time: number): string {
+    const p = this.biogas;
+    const l = this.leases.find((x) => x.id === leaseId);
+    if (!p || p.status !== 'betrieb' || !l) return 'Unbekannt';
+    if (gaerBlocked(gameDate(time).month)) return 'Sperrfrist (1. Oktober bis 31. Januar)';
+    if (this.orders.some((o) => o.gaerrest && o.ownLeaseId === leaseId && o.status !== 'fertig')) return 'Läuft schon';
+    const m3 = Math.round(l.areaHa * GAER_GABE);
+    if (p.gaer < m3) return `Zu wenig Gärrest (${Math.round(p.gaer)} m³, gebraucht ${m3} m³)`;
+    p.gaer -= m3;
+    const o: Order = {
+      id: this.nextId++, requestId: 0, farmId: -1, service: 'guelle', fields: l.fields.slice(), doneFields: [], areaHa: l.areaHa, priceHa: 0,
+      earliest: time, latest: time + 21 * 1440, status: 'offen', dieselL: 0, dieselCost: 0, tractorHours: 0,
+      gabe: GAER_GABE, doneM3: 0, ownLeaseId: l.id, gaerrest: true, sourceNode: this.biogasNode(),
+    };
+    this.orders.push(o);
+    this.version++;
+    return `Auftrag angelegt: ${m3.toLocaleString('de-DE')} m³ Gärrest auf ${fmtHa(l.areaHa)}`;
+  }
+
+  /** Gärrest abgeben (Gärrestbörse, Abholung durch Dritte) */
+  sellGaerrest(m3: number, time: number): string {
+    const p = this.biogas;
+    if (!p) return 'Keine Biogasanlage';
+    const v = Math.min(Math.round(m3), Math.floor(p.gaer));
+    if (!(v >= 10)) return 'Mindestens 10 m³';
+    if (gaerBlocked(gameDate(time).month)) return 'Sperrfrist: Abnehmer nehmen erst ab Februar wieder Gärrest';
+    p.gaer -= v;
+    this.book(time, `Gärrest abgegeben: ${v.toLocaleString('de-DE')} m³ à ${fmtEur(GAER_SELL_EUR)}`, -v * GAER_SELL_EUR, 'Biogas');
+    this.version++;
+    return `${v.toLocaleString('de-DE')} m³ abgegeben`;
+  }
+
+  /** AfA der Anlage (20 Jahre) */
+  private biogasAfa(from: number, to: number): number {
+    const p = this.biogas;
+    if (!p || p.status !== 'betrieb' || p.readyAt === undefined) return 0;
+    const cost = BIOGAS.find((d) => d.kw === p.kw)!.cost;
+    const months = Math.max(0, Math.floor((to - Math.max(from, p.readyAt)) / (30 * 1440)));
+    return Math.round((cost / (BIOGAS_AFA_YEARS * 12)) * months);
+  }
+
+  /** Täglich: Genehmigung, Ausschreibung, Bau, Lieferungen, Fütterung, Gärrest, Abrechnung */
+  private biogasDaily(time: number) {
+    const p = this.biogas;
+    if (!p) return;
+    const def = BIOGAS.find((d) => d.kw === p.kw)!;
+    const d = gameDate(time);
+    if (p.status === 'genehmigung' && time >= p.permitUntil) {
+      p.status = 'ausschreibung';
+      p.tenderAt = this.nextTender(time);
+      this.version++;
+      this.emit(time, 'info', `Biogasanlage genehmigt. Nächster Gebotstermin der EEG-Ausschreibung: ${fmtDay(p.tenderAt)} (Gebot ${p.bidCt.toLocaleString('de-DE')} ct/kWh).`);
+    }
+    if (p.status === 'ausschreibung' && time >= (p.tenderAt ?? 0)) {
+      // Zuschlagsgrenze der Runde (verdeckt): 17,6 bis 19,43 ct/kWh
+      const clearing = Math.round((17.6 + this.marketRng.next() * (EEG_MAX_CT - 17.6)) * 100) / 100;
+      if (p.bidCt > clearing) {
+        p.tenderAt = this.nextTender(time + 1440);
+        this.emit(time, 'warnung', `EEG-Ausschreibung: kein Zuschlag (Grenze ${clearing.toLocaleString('de-DE')} ct/kWh). Nächste Runde ${fmtDay(p.tenderAt)}.`);
+      } else if (!this.canPay(def.cost)) {
+        p.tenderAt = this.nextTender(time + 1440);
+        this.emit(time, 'warnung', `Zuschlag erhalten, aber die Finanzierung fehlt (${fmtEur(def.cost)}). Zuschlag verfällt – nächste Runde ${fmtDay(p.tenderAt)}.`);
+      } else {
+        p.ct = p.bidCt;
+        p.status = 'bau';
+        p.readyAt = time + def.buildWeeks * 7 * 1440;
+        this.book(time, `Bau Biogasanlage ${p.kw} kW`, -def.cost, 'Bau');
+        this.emit(time, 'info', `Zuschlag für ${p.ct.toLocaleString('de-DE')} ct/kWh (20 Jahre). Bau der Biogasanlage bis etwa ${fmtDay(p.readyAt)}.`);
+      }
+      this.version++;
+    }
+    if (p.status === 'bau' && time >= (p.readyAt ?? 0)) {
+      p.status = 'betrieb';
+      this.version++;
+      this.emit(time, 'info', `Biogasanlage ${p.kw} kW läuft an. Substrat einlagern (Silo ${def.siloT.toLocaleString('de-DE')} t), Gülleverträge abschließen.`);
+    }
+    if (p.status !== 'betrieb') return;
+    // Gülle-Anfuhr (Vorgrube fasst 30 Tage) und Rücknahme Gärrest durch die Lieferanten (Februar–September)
+    let delivered = 0, back = 0;
+    for (let i = p.contracts.length - 1; i >= 0; i--) {
+      const c = p.contracts[i];
+      if (time >= c.until) {
+        const farm = this.farms?.farms[c.farmId];
+        if (farm && farm.satisfaction >= 40) c.until += 365 * 1440;
+        else { p.contracts.splice(i, 1); this.emit(time, 'info', `Güllevertrag mit ${this.farmName(c.farmId)} ausgelaufen.`, c.farmId); continue; }
+      }
+      delivered += c.m3Day;
+      if (!gaerBlocked(d.month) && d.month <= 9) back += (c.m3Day * 365 / 243) * 0.95;
+    }
+    const pit = delivered * 30;
+    const take = Math.max(0, Math.min(delivered, pit - p.stock.guelle));
+    p.stock.guelle += take;
+    p.costMonth += take * GUELLE_HAUL_EUR;
+    p.gaer = Math.max(0, p.gaer - back);
+    // Fütterung: so viel, wie Substrat und Platz im Gärrestlager erlauben
+    const target = dailyTarget(p.kw);
+    let feed = ration(target, p.stock);
+    const room = def.gaerM3 - p.gaer;
+    const gaer = gaerOf(feed);
+    if (gaer > room) {
+      const f = Math.max(0, room) / gaer;
+      feed = { guelle: feed.guelle * f, mais: feed.mais * f, gps: feed.gps * f, gras: feed.gras * f, kwh: feed.kwh * f };
+      if ((p.warnedFull ?? -1e9) < time - 7 * 1440) { p.warnedFull = time; this.emit(time, 'warnung', 'Gärrestlager voll – die Biogasanlage fährt herunter. Gärrest ausbringen oder abgeben.'); }
+    } else if (feed.kwh < target * 0.95 && (p.warnedShort ?? -1e9) < time - 7 * 1440) {
+      p.warnedShort = time;
+      this.emit(time, 'warnung', `Biogasanlage: Substrat reicht nur für ${Math.round((feed.kwh / target) * 100)} % Leistung (Maisdeckel ${Math.round(0.25 * 100)} %: Gülle, GPS oder Gras nötig).`);
+    }
+    p.stock.guelle -= feed.guelle;
+    p.stock.mais -= feed.mais;
+    p.stock.gps -= feed.gps;
+    p.stock.gras -= feed.gras;
+    p.gaer += gaerOf(feed);
+    p.kwhMonth += feed.kwh;
+    p.kwhTotal += feed.kwh;
+    p.today = feed;
+    this.version++;
+    // Abrechnung am Monatsersten: Strom (Netzbetreiber), Betrieb und Wartung, fixe Kosten, Gülle-Anfuhr
+    if (d.day === 1 && p.kwhMonth > 0) {
+      this.book(time, `Stromerlös Biogas: ${Math.round(p.kwhMonth).toLocaleString('de-DE')} kWh à ${(p.ct ?? 0).toLocaleString('de-DE')} ct`, Math.round((p.kwhMonth * (p.ct ?? 0)) / 100), 'Strom');
+      const opex = (p.kwhMonth * OPEX_CT) / 100 + (def.cost * FIXED_SHARE) / 12 + p.costMonth;
+      this.book(time, 'Biogas: Betrieb, Wartung BHKW, Versicherung, Gülle-Anfuhr', -Math.round(opex), 'Biogas');
+      p.kwhMonth = 0;
+      p.costMonth = 0;
     }
   }
 
@@ -1136,6 +1436,7 @@ export class Business {
     this.marketDaily(time);
     this.sitesDaily(time);
     this.farmingDaily(time);
+    this.biogasDaily(time);
     // Auftrag steht wegen Panne: Kunde wartet und wird unzufriedener (MZ-07)
     for (const o of this.orders) {
       if (o.status !== 'läuft') continue;
@@ -1410,10 +1711,10 @@ export class Business {
     let revenue = 0, expenses = 0;
     for (const l of this.ledger) {
       if (l.time < from || l.time >= to) continue;
-      if (l.category === 'Rechnung' || l.category === 'Ernte') revenue += l.amount;
-      else if (l.category === 'Diesel' || l.category === 'Personal' || l.category === 'Werkstatt' || l.category === 'Zinsen' || l.category === 'Leasing' || l.category === 'Versicherung' || l.category === 'Gebäude' || l.category === 'Pacht' || l.category === 'Ackerbau' || l.category === 'Sonstiges') expenses -= l.amount;
+      if (l.category === 'Rechnung' || l.category === 'Ernte' || l.category === 'Strom') revenue += l.amount;
+      else if (l.category === 'Diesel' || l.category === 'Personal' || l.category === 'Werkstatt' || l.category === 'Zinsen' || l.category === 'Leasing' || l.category === 'Versicherung' || l.category === 'Gebäude' || l.category === 'Pacht' || l.category === 'Ackerbau' || l.category === 'Biogas' || l.category === 'Sonstiges') expenses -= l.amount;
     }
-    let afa = this.yearAfaSold + this.buildingAfa(from, to);
+    let afa = this.yearAfaSold + this.buildingAfa(from, to) + this.biogasAfa(from, to);
     for (const m of this.company.machines) afa += bookValue(m, Math.max(from, m.boughtAt ?? 0)) - bookValue(m, to);
     return { revenue: Math.round(revenue), expenses: Math.round(expenses), afa: Math.round(afa) };
   }
@@ -1840,7 +2141,19 @@ export class Business {
       o.finishedAt = time;
       const onTime = time <= o.latest;
       this.emit(time, 'auftrag', `Auftrag ${this.farmName(o.farmId)} fertig${onTime ? ', pünktlich' : ', verspätet'} (${fmtHa(o.areaHa)}).`, o.farmId);
+      if (o.gaerrest) {
+        const m3 = Math.round(o.areaHa * (o.gabe ?? GAER_GABE));
+        this.book(time, `Gärrest auf eigener Fläche: ${m3.toLocaleString('de-DE')} m³ (Mineraldünger gespart)`, m3 * GAER_VALUE_EUR, 'Ackerbau');
+        return;
+      }
       if (o.ownLeaseId !== undefined) { this.ownStepDone(o, time); return; }
+      if (o.biogasPriceT !== undefined) {
+        const t = Math.min(Math.round(o.doneT ?? 0), this.siloRoom());
+        if (this.biogas) this.biogas.stock.mais += t;
+        this.book(time, `Mais auf dem Halm von ${this.farmName(o.farmId)}: ${Math.round(o.doneT ?? 0).toLocaleString('de-DE')} t à ${fmtEur(o.biogasPriceT)}`, -Math.round((o.doneT ?? 0) * o.biogasPriceT), 'Biogas');
+        this.satisfy(o.farmId, 2, time);
+        return;
+      }
       this.satisfy(o.farmId, onTime ? 5 : -10, time);
       this.changeReputation(onTime ? 1.5 : -3);
       const farm = this.farms?.farms[o.farmId];

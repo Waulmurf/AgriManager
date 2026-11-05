@@ -9,6 +9,8 @@ import { SERVICE_IMPLEMENT, SERVICE_NAMES, fmtDay, fmtTime, partsText, CHECK_COS
 import { CATALOG, DEALERS } from '../data/catalog';
 import { BUILDINGS, SITE_OFFERS } from '../data/sites';
 import { leaseRate } from '../sim/finance';
+import { BIOGAS, EEG_MAX_CT, GAER_GABE, GAER_SELL_EUR, KWH_PER, MAIS_CAP, SUBSTRATE_NAME, SUBSTRATE_PRICE, dailyTarget, farmSlurryPerDay, type BiogasSize, type Substrate } from '../sim/biogas';
+import { Crop } from '../sim/farms';
 import { CROPS, IRRIGATION_EUR_HA, rotationFactor, soilFactor, type OwnCrop } from '../sim/farming';
 import { formatGameTime } from '../game/clock';
 
@@ -272,7 +274,7 @@ function OrderItem({ o, game, status }: { o: Order; game: GameController | null;
         <small className={`badge ${o.status === 'fertig' ? 'done' : o.status === 'läuft' ? 'run' : ''}`}>{o.status}</small>
       </div>
       <div>
-        {SERVICE_NAMES[o.service]}{o.chain ? ` (${o.chain === 'komplett' ? 'Komplettkette' : 'nur Häcksler'})` : ''} {ha(o.areaHa)}{o.ownLeaseId !== undefined ? ' (Eigenauftrag, keine Rechnung)' : <> zu {o.gabe ? `${(o.priceHa / o.gabe).toLocaleString('de-DE', { maximumFractionDigits: 2 })} €/m³ (${Math.round(o.areaHa * o.gabe).toLocaleString('de-DE')} m³)` : `${o.priceHa.toLocaleString('de-DE')} €/ha`} = {eur(o.priceHa * o.areaHa)}</>}
+        {SERVICE_NAMES[o.service]}{o.chain ? ` (${o.chain === 'komplett' ? 'Komplettkette' : 'nur Häcksler'})` : ''} {ha(o.areaHa)}{o.gaerrest ? ' Gärrest (Eigenauftrag)' : o.ownLeaseId !== undefined ? ' (Eigenauftrag, keine Rechnung)' : o.biogasPriceT !== undefined ? ` (Mais auf dem Halm à ${o.biogasPriceT} €/t, ins eigene Silo)` : <> zu {o.gabe ? `${(o.priceHa / o.gabe).toLocaleString('de-DE', { maximumFractionDigits: 2 })} €/m³ (${Math.round(o.areaHa * o.gabe).toLocaleString('de-DE')} m³)` : `${o.priceHa.toLocaleString('de-DE')} €/ha`} = {eur(o.priceHa * o.areaHa)}</>}
         {o.gabe && o.status === 'läuft' ? <small className="hint"> · ausgebracht {Math.round(o.doneM3 ?? 0).toLocaleString('de-DE')} m³</small> : null}
         {o.chain && o.status !== 'offen' ? <small className="hint"> · am Silo {Math.round(o.doneT ?? 0).toLocaleString('de-DE')} t</small> : null}
       </div>
@@ -910,6 +912,130 @@ export function FarmingTab({ status, game }: { status: GameStatus; game: GameCon
         })}
       </ul>
       <p className="hint">Es bieten auch Nachbarn und andere Betriebe mit (verdeckt, meist um den ortsüblichen Preis). Eigene Arbeitsgänge (Stoppel, Grubbern, Häckseln) erscheinen als Eigenaufträge im Reiter Aufträge; Saat, Pflanzenschutz, Drusch und Roden werden eingekauft. Ertrag nach Boden, Fruchtfolge, Termintreue und Sommerregen (ohne Beregnung).</p>
+      {fb.msg && <p className="feedback">{fb.msg}</p>}
+    </>
+  );
+}
+
+/** Biogasanlage (PB-07 bis PB-10) */
+export function BiogasTab({ status, game }: { status: GameStatus; game: GameController | null }) {
+  const b = status.business;
+  const c = status.company;
+  const fb = useFeedback();
+  const [kw, setKw] = useState<BiogasSize>(500);
+  const [site, setSite] = useState(1);
+  const [bid, setBid] = useState(18.9);
+  const [buy, setBuy] = useState<Record<Substrate, number>>({ mais: 500, gps: 300, gras: 300 });
+  const [sell, setSell] = useState(500);
+  if (!b || !c) return <p className="hint">–</p>;
+  const send = async (cmd: Parameters<GameController['command']>[0]) => fb.show(await game!.command(cmd));
+  const p = b.biogas;
+  const n = (x: number, d = 0) => x.toLocaleString('de-DE', { maximumFractionDigits: d });
+  const farms = game?.farmList() ?? [];
+  if (!p) {
+    const def = BIOGAS.find((d) => d.kw === kw)!;
+    const kwh = dailyTarget(kw) * 365;
+    const ownHa = b.farming.leases.reduce((a, l) => a + l.areaHa, 0);
+    return (
+      <>
+        <h2>Biogasanlage bauen</h2>
+        <ul className="cards">
+          {BIOGAS.map((d) => (
+            <li key={d.kw} className={`card${d.kw === kw ? ' selected' : ''}`} onClick={() => setKw(d.kw)}>
+              <div className="card-head"><strong>{d.kw} kW</strong><strong>{eur(d.cost)}</strong></div>
+              <small className="hint">Genehmigung {d.permitWeeks} Wochen ({eur(d.permitFee)}), Bau {d.buildWeeks} Wochen · Silo {n(d.siloT)} t · Gärrestlager {n(d.gaerM3)} m³</small>
+            </li>
+          ))}
+        </ul>
+        <dl>
+          <dt>Strom im Jahr</dt><dd>{n(kwh / 1000)} MWh = {eur((kwh * bid) / 100)} bei {n(bid, 2)} ct/kWh</dd>
+          <dt>Substrat (Beispiel)</dt><dd>{n(kwh / (KWH_PER.guelle * 3 + KWH_PER.mais) )} t Mais + {n((kwh / (KWH_PER.guelle * 3 + KWH_PER.mais)) * 3)} m³ Gülle im Jahr (Maisdeckel {Math.round(MAIS_CAP * 100)} %)</dd>
+          <dt>Eigene Pachtfläche</dt><dd>{ha(ownHa)} {ownHa < 10 ? '(mindestens 10 ha für die Privilegierung)' : ''}</dd>
+        </dl>
+        <div className="card-actions">
+          <select value={site} onChange={(e) => setSite(Number(e.target.value))} aria-label="Standort">
+            {(c.sites ?? []).map((s) => <option key={s.id} value={s.id} disabled={s.kind === 'gewerbe'}>{s.name}{s.kind === 'gewerbe' ? ' (Gewerbegebiet – nicht möglich)' : ''}</option>)}
+          </select>
+          <input type="number" min={10} max={EEG_MAX_CT} step={0.05} value={bid} onChange={(e) => setBid(Number(e.target.value))} aria-label="Gebot ct/kWh" style={{ width: '5em' }} />
+          <span>ct/kWh</span>
+          <button onClick={() => send({ kind: 'buildBiogas', siteId: site, kw, bidCt: bid })} data-testid="build-biogas">Beantragen ({eur(def.permitFee)})</button>
+        </div>
+        <p className="hint">Ablauf: Genehmigung (Abstand zur Wohnbebauung, nur Hofstelle oder Resthof), dann Gebot in der EEG-Ausschreibung zum 1. April oder 1. Oktober (Höchstwert {n(EEG_MAX_CT, 2)} ct/kWh, Zuschlag nach Gebot, 20 Jahre). Erst mit Zuschlag wird gebaut und bezahlt. Betrieb und Wartung etwa 3,5 ct/kWh, fixe Kosten 1,5 % der Baukosten im Jahr, Abschreibung 20 Jahre.</p>
+        {fb.msg && <p className="feedback">{fb.msg}</p>}
+      </>
+    );
+  }
+  const def = BIOGAS.find((d) => d.kw === p.kw)!;
+  const st = (c.sites ?? []).find((s) => s.id === p.siteId);
+  const silage = p.stock.mais + p.stock.gps + p.stock.gras;
+  const target = dailyTarget(p.kw);
+  const contracts = new Set(p.contracts.map((x) => x.farmId));
+  const livestock = farms.filter((f) => f.known && f.livestock);
+  const maisFarms = farms.filter((f) => f.known && f.cropHa[Crop.Mais] > 0);
+  const stateText = p.status === 'genehmigung' ? `Genehmigung bis ${fmtDay(p.permitUntil)}`
+    : p.status === 'ausschreibung' ? `Ausschreibung am ${fmtDay(p.tenderAt ?? b.time)}`
+    : p.status === 'bau' ? `im Bau bis ${fmtDay(p.readyAt ?? b.time)}` : `läuft · ${n(p.ct ?? 0, 2)} ct/kWh`;
+  return (
+    <>
+      <h2>Biogasanlage {p.kw} kW</h2>
+      <small className="hint">{st?.name} · {stateText}</small>
+      {(p.status === 'genehmigung' || p.status === 'ausschreibung') && (
+        <div className="card-actions">
+          <input type="number" min={10} max={EEG_MAX_CT} step={0.05} value={bid} onChange={(e) => setBid(Number(e.target.value))} aria-label="Gebot ct/kWh" style={{ width: '5em' }} />
+          <span>ct/kWh (aktuell {n(p.bidCt, 2)})</span>
+          <button onClick={() => send({ kind: 'biogasBid', ct: bid })}>Gebot ändern</button>
+        </div>
+      )}
+      {p.status === 'betrieb' && (
+        <>
+          <div className="rep-bar" data-testid="biogas-load"><div style={{ width: `${Math.min(100, ((p.today?.kwh ?? 0) / target) * 100)}%` }} /><span>Leistung heute {Math.round(((p.today?.kwh ?? 0) / target) * 100)} %</span></div>
+          <dl>
+            <dt>Ration heute</dt><dd>{p.today ? `${n(p.today.mais, 1)} t Mais, ${n(p.today.gps, 1)} t GPS, ${n(p.today.gras, 1)} t Gras, ${n(p.today.guelle, 1)} m³ Gülle` : '–'}</dd>
+            <dt>Strom diesen Monat</dt><dd>{n(p.kwhMonth / 1000, 1)} MWh ≈ {eur((p.kwhMonth * (p.ct ?? 0)) / 100)}</dd>
+            <dt>Silo</dt><dd>{n(silage)} / {n(def.siloT)} t (Mais {n(p.stock.mais)}, GPS {n(p.stock.gps)}, Gras {n(p.stock.gras)}) · reicht etwa {p.today && p.today.mais + p.today.gps + p.today.gras > 0 ? n(silage / (p.today.mais + p.today.gps + p.today.gras)) : '–'} Tage</dd>
+            <dt>Vorgrube Gülle</dt><dd>{n(p.stock.guelle)} m³</dd>
+            <dt>Gärrestlager</dt><dd className={p.gaer > def.gaerM3 * 0.85 ? 'neg' : ''}>{n(p.gaer)} / {n(def.gaerM3)} m³</dd>
+          </dl>
+          <h3>Substrat einkaufen (frei Silo)</h3>
+          {(['mais', 'gps', 'gras'] as Substrate[]).map((k) => (
+            <div key={k} className="card-actions">
+              <span style={{ width: '8em' }}>{SUBSTRATE_NAME[k]}</span>
+              <input type="number" min={10} step={50} value={buy[k]} onChange={(e) => setBuy({ ...buy, [k]: Number(e.target.value) })} aria-label={`${SUBSTRATE_NAME[k]} t`} style={{ width: '6em' }} />
+              <span>t à {eur(SUBSTRATE_PRICE[k])}</span>
+              <button onClick={() => send({ kind: 'buySubstrate', substrate: k, t: buy[k] })} data-testid={`buy-${k}`}>Kaufen</button>
+            </div>
+          ))}
+          <p className="hint">Außerhalb der Ernte (Mais Sept./Okt., GPS Juni/Juli, Gras Mai–Sept.) 20 % teurer. Eigener Silomais aus dem Reiter Ackerbau kommt direkt ins Silo. Mais auf dem Halm (August–Oktober, 32 €/t) erntet die eigene Häckselkette:</p>
+          <ul className="list">
+            {maisFarms.slice(0, 8).map((f) => (
+              <li key={f.id}><span><button className="link" onClick={() => game?.flyToFarm(f.id)}>{f.name}</button> <small className="hint">{ha(f.cropHa[Crop.Mais])} Mais</small></span>
+                <button onClick={() => send({ kind: 'buyMaisField', farmId: f.id })}>Mais auf dem Halm kaufen</button></li>
+            ))}
+            {maisFarms.length === 0 && <li className="hint">Noch keine bekannten Betriebe mit Mais.</li>}
+          </ul>
+          <h3>Gülle-Lieferverträge</h3>
+          <ul className="list" data-testid="slurry-contracts">
+            {livestock.map((f) => (
+              <li key={f.id}><span><button className="link" onClick={() => game?.flyToFarm(f.id)}>{f.name}</button> <small className="hint">etwa {n(farmSlurryPerDay(f.areaHa), 1)} m³/Tag</small></span>
+                <button onClick={() => send({ kind: 'guelleContract', farmId: f.id })}>{contracts.has(f.id) ? 'Vertrag beenden' : 'Vertrag anbieten'}</button></li>
+            ))}
+            {livestock.length === 0 && <li className="hint">Noch keine bekannten Viehbetriebe.</li>}
+          </ul>
+          <h3>Gärrest</h3>
+          <ul className="list">
+            {b.farming.leases.map((l) => (
+              <li key={l.id}><span>{ha(l.areaHa)} von {game?.farmById(l.farmId)?.name} <small className="hint">{n(l.areaHa * GAER_GABE)} m³</small></span>
+                <button onClick={() => send({ kind: 'spreadGaerrest', leaseId: l.id })}>Gärrest ausbringen (Eigenauftrag)</button></li>
+            ))}
+          </ul>
+          <div className="card-actions">
+            <input type="number" min={10} step={100} value={sell} onChange={(e) => setSell(Number(e.target.value))} aria-label="Gärrest m³" style={{ width: '6em' }} />
+            <span>m³</span>
+            <button onClick={() => send({ kind: 'sellGaerrest', m3: sell })}>An Gärrestbörse abgeben ({eur(GAER_SELL_EUR)}/m³)</button>
+          </div>
+          <p className="hint">Sperrfrist für Gärrest auf Ackerland vom 1. Oktober bis 31. Januar. Gülle-Lieferanten nehmen von Februar bis September ihren Anteil Gärrest zurück. Ist das Gärrestlager voll, fährt die Anlage herunter.</p>
+        </>
+      )}
       {fb.msg && <p className="feedback">{fb.msg}</p>}
     </>
   );

@@ -94,7 +94,10 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
   `business.ts` (`sitesDaily`), Überführung (`transfer`), `homeOf(v)` in `engine.ts`, Reiter Standorte.
 - Pacht und eigener Ackerbau fertig: `src/sim/farming.ts` (Kulturen, Boden, Fruchtfolge), Pachtangebote/Gebote/
   `askLand`/`setCrop`/`farmingDaily`/Ernte in `business.ts`, Eigenaufträge (`Order.ownLeaseId`, farmId −1), Reiter Ackerbau.
-- Als Nächstes: Biogasanlage (docs/plan.md).
+- Biogasanlage fertig: `src/sim/biogas.ts` (Größen, Ration mit Maisdeckel, Gärrest), Bau/Ausschreibung/Substrat/
+  Gülleverträge/Gärrest/`biogasDaily` in `business.ts`, `Order.sourceNode` (Silo/Lager der Anlage), Reiter Biogas.
+- Weitere Schichten (Standorte, Pacht, Ackerbau, Biogas) damit komplett. Danach laut Anforderungen: Transport,
+  Winterdienst, Kommunal.
 
 ## CI (GitHub Actions)
 

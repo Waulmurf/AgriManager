@@ -154,3 +154,5 @@ html, body, #root { margin: 0; height: 100%; }
 .rep-bar > div { height: 100%; background: linear-gradient(90deg, #b5512b, #c9a227 50%, #5b7f3a); }
 .rep-bar > span { position: absolute; inset: 0; text-align: center; font-size: 11px; line-height: 18px; font-weight: 600; }
 .tbl tr.war td { background: rgba(181, 81, 43, 0.08); }
+.card.selected { outline: 2px solid #3a7a2e; }
+.list li > span + button { align-self: flex-start; }

@@ -657,7 +657,7 @@ Schritte:
 
 ## Weitere Schichten: Standorte, Pacht, Ackerbau, Biogas (ab 5. Nov. 2026)
 
-Schritte: 1. Standorte und Gebäude (umgesetzt), 2. Pacht und eigener Ackerbau (umgesetzt), 3. Biogasanlage.
+Schritte: 1. Standorte und Gebäude (umgesetzt), 2. Pacht und eigener Ackerbau (umgesetzt), 3. Biogasanlage (umgesetzt).
 
 ### Schritt 1: Standorte und Gebäude (Annahmen)
 
@@ -717,3 +717,41 @@ Schritte: 1. Standorte und Gebäude (umgesetzt), 2. Pacht und eigener Ackerbau (
   - Verkauf zum Marktpreis ±10 % (Buchung „Ernte“, zählt als Umsatz).
 - **Später:** Lagerung und Vermarktung (Vorkontrakte), eigener Mähdrescher und Roder,
   Düngebedarf, Flächenkauf, Silomais in die eigene Biogasanlage.
+
+### Schritt 3: Biogasanlage (Annahmen)
+
+- **Bau (PB-07, `src/sim/biogas.ts`):**
+
+  | Größe | Baukosten | Genehmigung | Bau | Silo | Gärrestlager |
+  | --- | --- | --- | --- | --- | --- |
+  | 250 kW | 1,25 Mio. € (5.000 €/kW) | 20 Wochen, 25.000 € | 26 Wochen | 4.000 t | 6.000 m³ |
+  | 500 kW | 2,1 Mio. € (4.200 €/kW) | 26 Wochen, 40.000 € | 30 Wochen | 8.000 t | 12.000 m³ |
+
+  - Nur auf Hofstelle oder Resthof: Abstand zur Wohnbebauung, im Gewerbegebiet nicht.
+  - Privilegierung: mindestens 10 ha eigener Ackerbau (Pacht).
+- **EEG-Ausschreibung:** Gebotstermine 1. April und 1. Oktober, Höchstwert 19,43 ct/kWh.
+  - Zuschlagsgrenze je Runde verdeckt 17,6–19,43 ct; Zuschlag zum eigenen Gebot, 20 Jahre.
+  - Erst mit Zuschlag wird gebaut und bezahlt; ohne Geld verfällt der Zuschlag.
+- **Substrat (PB-08):** Strom je t Frischmasse: Maissilage 400 kWh, GPS 360, Grassilage 330,
+  Gülle 45 kWh/m³. Daraus folgen rund 2 kW je ha Mais.
+  - Maisdeckel 25 % der Masse. Ration: Gülle zuerst, dann Mais bis zum Deckel, Rest GPS und Gras;
+    fehlt Substrat, sinkt die Leistung.
+  - Einkauf frei Silo: Mais 45 €/t, GPS 42 €/t, Gras 38 €/t, außerhalb der Ernte +20 %.
+  - Eigener Silomais geht ins Silo statt in den Verkauf.
+  - Mais auf dem Halm (August–Oktober, 32 €/t) erntet die eigene Häckselkette ins Silo der
+    Anlage (PB-10).
+  - Gülle-Lieferverträge mit bekannten Viehbetrieben: 0,5 GV/ha × 15 m³ im Jahr, Anfuhr
+    2,5 €/m³. Die Lieferanten nehmen ihren Anteil Gärrest von Februar bis September zurück.
+- **Erlös und Kosten (PB-09):** 95 % Volllast. Strom wird monatlich abgerechnet (Kategorie
+  „Strom“).
+  - Betrieb und Wartung 3,5 ct/kWh, fixe Kosten 1,5 % der Baukosten im Jahr (Kategorie „Biogas“).
+  - Abschreibung 20 Jahre.
+  - Beispiel 500 kW: rund 4,2 GWh = 800.000 € Erlös gegen etwa 700.000 € Kosten inkl. AfA.
+- **Gärrest:** 0,75 m³ je t Silage, 0,95 m³ je m³ Gülle. Ist das Lager voll, fährt die Anlage
+  herunter.
+  - Ausbringen auf eigenen Pachtflächen als Eigenauftrag mit dem Güllefass (20 m³/ha, spart
+    4 €/m³ Mineraldünger), Quelle ist das Lager der Anlage.
+  - Oder an die Gärrestbörse abgeben (6 €/m³).
+  - Sperrfrist auf Ackerland vereinfacht 1. Oktober bis 31. Januar.
+- **Später:** Wärmeverkauf, Flexzuschlag, Gärrest als Dienstleistung für viehlose Kunden,
+  Gülle-Anfuhr mit eigenen Fahrzeugen, Rüben als Substrat, Silo festfahren als eigener Arbeitsgang.
