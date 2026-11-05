@@ -31,11 +31,12 @@ const at = (month: number, day: number) => (MONTH_START[month] + day - 1) * 1440
 
 describe('Jahreslauf', () => {
   it('Saisonkalender: Frühjahr Grubbern, Sommer Stoppel, Herbst Grubbern, Winter nichts', () => {
-    expect(seasonServices(at(4, 10)).map((x) => x.service)).toEqual(['grubbern']);
+    expect(seasonServices(at(4, 10)).map((x) => x.service)).toEqual(['grubbern', 'guelle', 'guelle']);
     expect(seasonServices(at(6, 15))).toEqual([]);
     expect(seasonServices(at(7, 20)).map((x) => x.service)).toEqual(['stoppel']);
-    expect(seasonServices(at(8, 20)).map((x) => x.service)).toEqual(['stoppel']);
-    expect(seasonServices(at(9, 10)).map((x) => x.service).sort()).toEqual(['grubbern', 'stoppel']);
+    expect(seasonServices(at(8, 20)).map((x) => x.service)).toEqual(['stoppel', 'guelle']);
+    expect(seasonServices(at(9, 10)).map((x) => x.service).sort()).toEqual(['grubbern', 'guelle', 'stoppel']);
+    expect(seasonServices(at(9, 25)).map((x) => x.service).sort()).toEqual(['grubbern']);
     expect(seasonServices(at(12, 1))).toEqual([]);
   });
 

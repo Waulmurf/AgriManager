@@ -12,7 +12,7 @@ import { fieldPattern, type FieldSet } from './fields';
 import { generateFarms, type FarmSet } from './farms';
 import { MACHINE_SKILL, MECHANIC_MIN, START_OFFERS, normalizeDrivers, skillDiesel, skillSpeed, startCompany, type CarKind, type Company, type Machine } from './economy';
 import { DEALERS } from '../data/catalog';
-import { Business, REMIND_CALL_MINUTES, SERVICE_IMPLEMENT, SERVICE_NAMES, SERVICE_VERB, VISIT_MINUTES, WEAR_GRUBBER_EUR_HA, type Service, fmtDay, fmtHa, fmtTime, type Command, type QueueCommand, type QueueItem } from './business';
+import { Business, REMIND_CALL_MINUTES, SERVICE_IMPLEMENT, SERVICE_NAMES, SERVICE_SKILL, SERVICE_VERB, type Order, VISIT_MINUTES, WEAR_GRUBBER_EUR_HA, type Service, fmtDay, fmtHa, fmtTime, type Command, type QueueCommand, type QueueItem } from './business';
 import { appendEdgePoints, nearestNode, project, RoadClass, unproject, type RoadGraph } from './roadgraph';
 import { surchargeFactor } from './calendar';
 import { Weather } from './weather';
@@ -169,11 +169,19 @@ type PlayerTask =
       orderId: number;
       queue: number[];
       current: number;
-      phase: 'prep' | 'to' | 'setup' | 'work' | 'back' | 'unhitch';
+      phase: 'prep' | 'to' | 'setup' | 'work' | 'back' | 'unhitch' | 'toFill' | 'fill' | 'waitFeed' | 'feed';
       width: number;
       haPerHour: number;
       workKmh: number;
       dieselLHa: number;
+      /** Gülle: Fass (m³), Ladung, Gabe, Güllelager (Knoten), Anteil des aktuellen Feldes, Zubringer (Fahrzeug) */
+      slurry?: { cap: number; load: number; gabe: number; source: number; progress: number; frac: number; feeder?: number };
+    }
+  | {
+      /** Zubringer (Gülle-Kette): pendelt zwischen Güllelager und Feldrand, füllt das Fass um */
+      kind: 'feeder'; driverId: number; implementId: number; orderId: number; spreader: number;
+      cap: number; load: number; source: number;
+      phase: 'prep' | 'toFill' | 'fill' | 'toField' | 'wait' | 'transfer' | 'back' | 'unhitch';
     };
 
 export interface SimOptions {
@@ -204,6 +212,9 @@ const FIELD_DRIVE_KMH = 8;
 export const RUEST_HOF_MIN = 15;
 export const RUEST_FELD_MIN = 5;
 export const RUEST_ABBAU_MIN = 10;
+/** Gülle (Annahmen): Befüllen mit Saugrüssel bzw. Zapfstelle 3 m³/min, Umfüllen vom Zubringer 4 m³/min */
+export const SLURRY_FILL_M3_MIN = 3;
+export const SLURRY_TRANSFER_M3_MIN = 4;
 /** Höchstarbeitszeit des Chefs je Tag (ArbZG § 3: 10 h), Tageswechsel 06:00 */
 export const CHEF_MAX_MINUTES = 600;
 /** Geplante Aufgaben starten nur tagsüber: bis 20:00 (Minute des Tages ab 06:00) */
@@ -444,6 +455,7 @@ export class Simulation {
       const who = this.driverName(driverId);
       if (v.task.kind === 'shuttle') return `${who} fährt ${this.driverName(v.task.passengerId)} zum Fahrerwechsel`;
       if (v.task.kind === 'repair') return `${who} repariert mit dem Werkstattwagen`;
+      if (v.task.kind === 'feeder') return `${who} fährt Zubringer`;
       return v.task.kind === 'visit' ? `${who} ist auf Besuch bei ${this.business.farmName(v.task.farmId)}` : `${who} fährt einen Auftrag`;
     }
     for (const v of this.vehicles) {
@@ -465,14 +477,23 @@ export class Simulation {
   /** Schlepper oder Gerät gerade bei einem anderen Fahrer im Einsatz? */
   private machineInUse(cmd: QueueCommand): string | null {
     if (cmd.kind === 'visit') return this.freeCar(1) ? null : 'Firmenwagen sind unterwegs';
-    for (const id of [cmd.tractorId, cmd.implementId]) {
+    const ids = [cmd.tractorId, cmd.implementId, ...(cmd.feeder ? [cmd.feeder.tractorId, cmd.feeder.implementId] : [])];
+    for (const id of ids) {
       const m = this.company.machines.find((x) => x.id === id);
       if (m && (m.downUntil ?? 0) > this.time) return `${m.brand} ${m.model}: ${m.downReason ?? 'in der Werkstatt'}`;
+    }
+    if (cmd.feeder) {
+      for (const v of this.vehicles) {
+        if (v.owner !== 'player' || !v.task) continue;
+        if (v.machineId === cmd.feeder.tractorId) return 'Schlepper des Zubringers ist im Einsatz';
+        if ((v.task.kind === 'job' || v.task.kind === 'feeder') && v.task.implementId === cmd.feeder.implementId) return 'Zubringerfass ist im Einsatz';
+      }
+      if (this.driverBusy(cmd.feeder.driverId) || this.driverBlocked(cmd.feeder.driverId)) return `${this.driverName(cmd.feeder.driverId)} (Zubringer) ist nicht frei`;
     }
     for (const v of this.vehicles) {
       if (v.owner !== 'player' || !v.task) continue;
       if (v.machineId === cmd.tractorId) return 'Schlepper ist im Einsatz';
-      if (v.task.kind === 'job' && v.task.implementId === cmd.implementId) return 'Gerät ist im Einsatz';
+      if ((v.task.kind === 'job' || v.task.kind === 'feeder') && v.task.implementId === cmd.implementId) return 'Gerät ist im Einsatz';
     }
     return null;
   }
@@ -543,13 +564,45 @@ export class Simulation {
     return { minutes: Math.round(minutes), workMinutes: Math.round(work) };
   }
 
+  /**
+   * Gülle: Umläufe (Füllen, Fahrt Lager–Feld hin und zurück, Ausbringen) bzw. mit Zubringer der
+   * Engpass aus Ausbringen + Umfüllen und Zubringerumlauf.
+   */
+  estimateSlurryMinutes(fields: number[], gabe: number, source: number, haPerHour: number, cap = 15, feederCap?: number): number {
+    if (!this.fields || !fields.length) return 0;
+    let area = 0, dist = 0;
+    for (const f of fields) { area += this.fields.areaHa[f]; dist += this.nodeDist(source, this.fields.access[f]); }
+    dist /= fields.length;
+    const m3 = area * gabe;
+    const road = (2 * dist) / EST_TRACTOR_M_MIN;
+    const spread = (cap / gabe / haPerHour) * 60;
+    const loads = Math.ceil(m3 / cap);
+    let cycle: number;
+    if (feederCap) {
+      const feederCycle = (feederCap / SLURRY_FILL_M3_MIN + road + feederCap / SLURRY_TRANSFER_M3_MIN + 4) * (cap / feederCap);
+      cycle = Math.max(spread + cap / SLURRY_TRANSFER_M3_MIN + 2, feederCycle);
+    } else cycle = cap / SLURRY_FILL_M3_MIN + road + spread + 2;
+    const toFirst = this.nodeDist(this.homeNode, source) / EST_TRACTOR_M_MIN + this.nodeDist(this.homeNode, this.fields.access[fields[0]]) / EST_TRACTOR_M_MIN;
+    return Math.round(RUEST_HOF_MIN + RUEST_ABBAU_MIN + fields.length * RUEST_FELD_MIN + toFirst + loads * cycle);
+  }
+
+  /** Dauer eines Auftrags (bzw. einer Anfrage) mit dem besten verfügbaren Gerät */
+  private estimateFor(fields: number[], _service: Service, haPerHour: number, gabe?: number, farmId?: number): { minutes: number; workMinutes: number } {
+    const base = this.estimateJobMinutes(fields, haPerHour);
+    if (!gabe) return base;
+    const source = this.farms?.farms[farmId ?? -1]?.homeNode ?? this.homeNode;
+    let cap = 0;
+    for (const m of this.company.machines) if (m.type === 'guellefass') cap = Math.max(cap, m.tankM3 ?? 0);
+    return { minutes: this.estimateSlurryMinutes(fields, gabe, source, haPerHour, cap || 14), workMinutes: base.workMinutes };
+  }
+
   private estimateQueueItem(cmd: QueueCommand): number {
     if (cmd.kind === 'visit') {
       const farm = this.farms?.farms[cmd.farmId];
       return farm ? Math.round((2 * this.nodeDist(this.homeNode, farm.homeNode)) / EST_CAR_M_MIN + VISIT_MINUTES) : VISIT_MINUTES;
     }
     const o = this.business.orders.find((x) => x.id === cmd.orderId);
-    return o ? this.estimateJobMinutes(o.fields.filter((f) => !o.doneFields.includes(f)), this.estimateHaPerHour(o.service)).minutes : 0;
+    return o ? this.estimateFor(o.fields.filter((f) => !o.doneFields.includes(f)), o.service, this.estimateHaPerHour(o.service), o.gabe, o.farmId).minutes : 0;
   }
 
   /** Ende, wenn ab jetzt `need` Minuten Chef-Arbeitszeit anfallen (10 h je Tag, Start 06:00) */
@@ -600,7 +653,7 @@ export class Simulation {
       if (q.cmd.kind === 'startJob') {
         const o = this.business.orders.find((x) => x.id === (q.cmd as { orderId: number }).orderId);
         if (o) {
-          const e = this.estimateJobMinutes(o.fields.filter((f) => !o.doneFields.includes(f)), this.driverHaPerHour(q.driverId, o.service));
+          const e = this.estimateFor(o.fields.filter((f) => !o.doneFields.includes(f)), o.service, this.driverHaPerHour(q.driverId, o.service), o.gabe, o.farmId);
           out[o.id] = { ...e, finishAt: this.finishAfter(backlog[q.driverId], q.driverId) };
         }
       }
@@ -611,13 +664,13 @@ export class Simulation {
     for (const o of this.business.orders) {
       if (o.status === 'fertig' || out[o.id]) continue;
       const left = o.fields.filter((f) => !o.doneFields.includes(f));
-      const e = this.estimateJobMinutes(left, this.driverHaPerHour(best, o.service));
+      const e = this.estimateFor(left, o.service, this.driverHaPerHour(best, o.service), o.gabe, o.farmId);
       const d = running[o.id];
       out[o.id] = { ...e, finishAt: d !== undefined ? this.finishAfter(runBacklog[d], d) : this.finishAfter((backlog[best] ?? 0) + e.minutes, best) };
     }
     for (const r of this.business.requests) {
       if (r.status !== 'offen') continue;
-      const e = this.estimateJobMinutes(r.fields, this.driverHaPerHour(best, r.service));
+      const e = this.estimateFor(r.fields, r.service, this.driverHaPerHour(best, r.service), r.gabe, r.farmId);
       out[r.id] = { ...e, finishAt: this.finishAfter((backlog[best] ?? 0) + e.minutes, best) };
     }
     return out;
@@ -660,7 +713,13 @@ export class Simulation {
         cursor[t.driverId] = Math.max(cursor[t.driverId] ?? this.time, end);
       } else {
         const end = this.time + 30;
-        if (t.kind === 'repair') {
+        if (t.kind === 'feeder') {
+          const sb = bars.find((x) => x.vehicle === t.spreader);
+          const o = b.orders.find((x) => x.id === t.orderId);
+          bars.push({ key: `r${v.id}`, driverId: t.driverId, kind: 'running', vehicle: v.id, orderId: t.orderId, farmId: o?.farmId, label: `Zubringer ${o ? b.farmName(o.farmId) : ''}`, start: o?.startedAt ?? this.time, end: sb?.end ?? this.time + 120, tractorId: v.machineId, implementId: t.implementId, warnings: [] });
+          cursor[t.driverId] = Math.max(cursor[t.driverId] ?? this.time, sb?.end ?? this.time);
+          continue;
+        } else if (t.kind === 'repair') {
           bars.push({ key: `r${v.id}`, driverId: t.driverId, kind: 'visit', label: 'Reparatur mit Werkstattwagen', start: this.time, end: this.time + 120, warnings: [] });
         } else if (t.kind === 'shuttle') {
           const lbl = `Fahrerwechsel: bringt ${this.driverName(t.passengerId)}`;
@@ -953,11 +1012,23 @@ export class Simulation {
     if ((driver.skills[need.skill] ?? 0) < need.min) return `${this.driverName(driver.id)} ist nicht als Traktorfahrer qualifiziert`;
     const o = b.orders.find((x) => x.id === cmd.orderId);
     if (!o || o.status !== 'offen') return 'Auftrag nicht startbar';
+    const sk = SERVICE_SKILL[o.service];
+    if ((driver.skills[sk] ?? 0) < 1) return `${this.driverName(driver.id)} ist für ${SERVICE_NAMES[o.service]} nicht qualifiziert`;
     const tractor = this.company.machines.find((m) => m.id === cmd.tractorId && m.type === 'schlepper');
     const impl = this.company.machines.find((m) => m.id === cmd.implementId);
     if (!tractor || !impl) return 'Maschine fehlt';
     const needType = SERVICE_IMPLEMENT[o.service];
-    if (impl.type !== needType) return `Für ${SERVICE_NAMES[o.service]} wird ${needType === 'grubber' ? 'ein Grubber' : 'eine Kurzscheibenegge'} gebraucht`;
+    if (impl.type !== needType) return `Für ${SERVICE_NAMES[o.service]} wird ${({ grubber: 'ein Grubber', kurzscheibenegge: 'eine Kurzscheibenegge', guellefass: 'ein Güllefass' } as Record<string, string>)[needType] ?? needType} gebraucht`;
+    if (cmd.feeder) {
+      if (o.service !== 'guelle') return 'Zubringer gibt es nur bei Gülle';
+      const fd = this.company.drivers.find((d) => d.id === cmd.feeder!.driverId);
+      const ft = this.company.machines.find((m) => m.id === cmd.feeder!.tractorId && m.type === 'schlepper');
+      const fz = this.company.machines.find((m) => m.id === cmd.feeder!.implementId && m.type === 'zubringer');
+      if (!fd || !ft || !fz) return 'Zubringer: Fahrer, Schlepper und Zubringerfass wählen';
+      if (fd.id === driver.id || ft.id === tractor.id) return 'Zubringer braucht einen eigenen Fahrer und Schlepper';
+      if ((fd.skills.boden ?? 0) < 1) return `${this.driverName(fd.id)} ist nicht als Traktorfahrer qualifiziert`;
+      if ((fz.powerNeed ?? 0) > (ft.power ?? 0)) return 'Zubringer: Schlepper zu schwach';
+    }
     if ((impl.powerNeed ?? 0) > (tractor.power ?? 0)) return 'Schlepper zu schwach für das Gerät';
     if (!this.vehicles.some((v) => v.owner === 'player' && v.machineId === tractor.id)) return 'Schlepper nicht verfügbar';
     if (!this.fields) return 'Keine Felddaten';
@@ -1018,7 +1089,7 @@ export class Simulation {
     const unit = this.vehicles.find((v) => v.owner === 'player' && v.machineId === tractor.id);
     if (!unit || unit.task) return 'Schlepper nicht verfügbar';
     const driverId = cmd.driverId ?? 1;
-    const skill = this.company.drivers.find((d) => d.id === driverId)?.skills.boden ?? 1;
+    const skill = this.company.drivers.find((d) => d.id === driverId)?.skills[SERVICE_SKILL[o.service]] ?? 1;
     const queue = o.fields.filter((f) => !o.doneFields.includes(f));
     unit.task = {
       kind: 'job', driverId, implementId: impl.id, skill, orderId: o.id, queue, current: 0, phase: 'prep',
@@ -1027,8 +1098,23 @@ export class Simulation {
       workKmh: (impl.workKmh ?? 10) * skillSpeed(skill),
       dieselLHa: (impl.dieselLHa ?? 9) * skillDiesel(skill),
     };
+    if (o.gabe) {
+      const farm = this.farms?.farms[o.farmId];
+      unit.task.slurry = { cap: impl.tankM3 ?? 15, load: 0, gabe: o.gabe, source: farm?.homeNode ?? this.homeNode, progress: 0, frac: 0 };
+    }
     unit.state = VehicleState.Waiting;
     unit.waitMin = RUEST_HOF_MIN;
+    if (cmd.feeder && unit.task.slurry) {
+      const fu = this.vehicles.find((v) => v.owner === 'player' && v.machineId === cmd.feeder!.tractorId)!;
+      const fz = this.company.machines.find((m) => m.id === cmd.feeder!.implementId)!;
+      fu.task = {
+        kind: 'feeder', driverId: cmd.feeder.driverId, implementId: fz.id, orderId: o.id, spreader: unit.id,
+        cap: fz.tankM3 ?? 20, load: 0, source: unit.task.slurry.source, phase: 'prep',
+      };
+      fu.state = VehicleState.Waiting;
+      fu.waitMin = RUEST_HOF_MIN;
+      unit.task.slurry.feeder = fu.id;
+    }
     b.orderStarted(o, tractor.id, impl.id, t, this.driverName(driverId));
     return `Auftrag gestartet (${this.driverName(driverId)})`;
   }
@@ -1042,6 +1128,14 @@ export class Simulation {
         const t = v.task;
         const b = this.business;
         if (t?.kind === 'visit') status = t.phase === 'to' ? `fährt zu ${b.farmName(t.farmId)}` : t.phase === 'at' ? `Besuch bei ${b.farmName(t.farmId)}` : 'fährt zurück zum Hof';
+        if (t?.kind === 'feeder') {
+          const o = b.orders.find((x) => x.id === t.orderId);
+          status = ({
+            prep: 'hängt das Zubringerfass an', toFill: `fährt zum Güllelager (${o ? b.farmName(o.farmId) : ''})`, fill: 'füllt am Güllelager',
+            toField: `bringt ${Math.round(t.load)} m³ zum Feld`, wait: `wartet am Feldrand (${Math.round(t.load)} m³)`, transfer: 'füllt das Ausbringfass um',
+            back: 'fährt zurück zum Hof', unhitch: 'stellt das Zubringerfass ab',
+          } as Record<string, string>)[t.phase];
+        }
         if (t?.kind === 'repair') {
           const m = this.company.machines.find((x) => x.id === t.machineId);
           const what = m ? `${m.brand} ${m.model}` : 'Maschine';
@@ -1052,14 +1146,19 @@ export class Simulation {
           const o = b.orders.find((x) => x.id === t.orderId);
           const who = o ? b.farmName(o.farmId) : '';
           const n = `Feld ${t.current + 1}/${t.queue.length}`;
-          status = {
+          const sl = t.slurry;
+          status = ({
             prep: 'baut am Hof das Gerät an (Rüstzeit)',
             to: `fährt zum Feld (${who}, ${n})`,
             setup: `richtet das Gerät am Feld ein (${n})`,
-            work: `${o ? SERVICE_VERB[o.service] : 'arbeitet'} für ${who} (${n})`,
+            work: `${o ? SERVICE_VERB[o.service] : 'arbeitet'} für ${who} (${n}${sl ? `, ${Math.round(sl.progress * 100)} %` : ''})`,
             back: 'fährt zurück zum Hof',
             unhitch: 'baut am Hof das Gerät ab',
-          }[t.phase];
+            toFill: `fährt zum Güllelager (${who})`,
+            fill: 'füllt am Güllelager',
+            waitFeed: 'wartet am Feldrand auf den Zubringer',
+            feed: 'wird vom Zubringer befüllt',
+          } as Record<string, string>)[t.phase];
         }
         if (v.restUntil > this.time) status = `Feierabend (Arbeitszeit erreicht), weiter um 06:00 – ${status}`;
         if ((v.handoverUntil ?? 0) > this.time) status = `Fahrerwechsel – ${status}`;
@@ -1205,6 +1304,14 @@ export class Simulation {
           task.phase = 'back';
         } else {
           if (task.phase === 'back') return 'Fahrzeug ist schon auf dem Rückweg';
+          if (task.kind === 'feeder') {
+            // Ausbringfass macht ohne Zubringer weiter (fährt selbst zum Lager)
+            const sv = this.vehicles[task.spreader];
+            if (sv?.task?.kind === 'job' && sv.task.slurry) {
+              sv.task.slurry.feeder = undefined;
+              if (sv.task.phase === 'waitFeed') { sv.task.phase = 'toFill'; this.driveTo(sv, sv.task.slurry.source); }
+            }
+          }
           if (task.kind === 'repair') {
             const m = this.company.machines.find((x) => x.id === task.machineId);
             if (m?.repair && task.phase !== 'at') { m.repair.state = 'wartet'; m.repair.mechanicId = undefined; m.repair.since = t; m.downReason = 'Panne – Reparatur offen'; }
@@ -1505,6 +1612,8 @@ export class Simulation {
       }
       if (down) return;
     }
+    if (t?.kind === 'feeder' && t.phase === 'wait') { this.feederWait(v); return; }
+    if (t?.kind === 'job' && t.phase === 'waitFeed') return; // Zubringer kommt
     let budget = STEP_SECONDS;
     for (let guard = 0; budget > 0 && guard < 8; guard++) {
       if (v.state === VehicleState.Waiting) {
@@ -1589,14 +1698,36 @@ export class Simulation {
       b.version++;
       return;
     }
+    if (t.kind === 'feeder') {
+      if (t.phase === 'toFill') { t.phase = 'fill'; v.state = VehicleState.Waiting; v.waitMin = Math.ceil(t.cap / SLURRY_FILL_M3_MIN); }
+      else if (t.phase === 'toField') { t.phase = 'wait'; v.state = VehicleState.Waiting; }
+      else if (t.phase === 'back') { t.phase = 'unhitch'; v.state = VehicleState.Waiting; v.waitMin = RUEST_ABBAU_MIN; }
+      b.version++;
+      return;
+    }
     // Auftrag
     const o = b.orders.find((x) => x.id === t.orderId);
-    if (t.phase === 'to') {
+    if (t.phase === 'toFill') {
+      t.phase = 'fill';
+      v.state = VehicleState.Waiting;
+      v.waitMin = Math.ceil((t.slurry?.cap ?? 15) / SLURRY_FILL_M3_MIN);
+      b.version++;
+    } else if (t.phase === 'to' && t.slurry && t.slurry.feeder !== undefined && t.slurry.load < 0.5) {
+      // Kette: am Feldrand auf den Zubringer warten
+      t.phase = 'waitFeed';
+      v.state = VehicleState.Waiting;
+      b.version++;
+    } else if (t.phase === 'to' && t.slurry && t.slurry.progress > 0) {
+      // zurück am angefangenen Feld: ohne Rüstzeit weiter
+      this.startSlurrySlice(v, t);
+    } else if (t.phase === 'to') {
       // am Feld: Gerät ausklappen und einstellen
       t.phase = 'setup';
       v.state = VehicleState.Waiting;
       v.waitMin = RUEST_FELD_MIN;
       b.version++;
+    } else if (t.phase === 'work' && t.slurry) {
+      this.slurrySliceDone(v, t, o);
     } else if (t.phase === 'work') {
       const fi = t.queue[t.current];
       if (o) {
@@ -1648,8 +1779,31 @@ export class Simulation {
       this.business.onVisit(t.farmId, this.time);
       t.phase = 'back';
       this.driveTo(v, this.homeNode);
+    } else if (t.kind === 'feeder') {
+      if (t.phase === 'prep') { t.phase = 'toFill'; this.driveTo(v, t.source); }
+      else if (t.phase === 'fill') {
+        t.load = Math.min(t.cap, this.slurryStillNeeded(t.orderId, v.id));
+        t.phase = 'toField';
+        this.driveTo(v, this.spreaderNode(t));
+      } else if (t.phase === 'transfer') { t.phase = 'wait'; v.state = VehicleState.Waiting; }
+      else if (t.phase === 'unhitch') v.task = undefined;
+      this.business.version++;
     } else if (t.kind === 'job') {
-      if (t.phase === 'prep') {
+      if (t.phase === 'prep' && t.slurry) {
+        // ohne Zubringer zuerst ans Güllelager, mit Zubringer gleich zum Feld
+        if (t.slurry.feeder !== undefined) { t.phase = 'to'; this.driveTo(v, this.fields!.access[t.queue[0]]); }
+        else { t.phase = 'toFill'; this.driveTo(v, t.slurry.source); }
+      } else if (t.phase === 'fill' && t.slurry) {
+        const o = this.business.orders.find((x) => x.id === t.orderId);
+        const left = o ? o.areaHa * (o.gabe ?? 0) - (o.doneM3 ?? 0) : t.slurry.cap;
+        t.slurry.load = Math.max(0, Math.min(t.slurry.cap, left));
+        t.phase = 'to';
+        this.driveTo(v, this.fields!.access[t.queue[t.current]]);
+      } else if (t.phase === 'feed' && t.slurry) {
+        this.startSlurrySlice(v, t);
+      } else if (t.phase === 'setup' && t.slurry) {
+        this.startSlurrySlice(v, t);
+      } else if (t.phase === 'prep') {
         t.phase = 'to';
         this.driveTo(v, this.fields!.access[t.queue[0]]);
       } else if (t.phase === 'setup') {
@@ -1723,6 +1877,148 @@ export class Simulation {
    * bis zur Flächenleistung (ha/h, enthält Wenden, Überlappung, Einstellen) wird als Halt am
    * Vorgewende eingefügt. Ist das Muster länger als die Zeit erlaubt, wird gleichmäßig schneller gefahren.
    */
+  // ---------- Gülle: Umlauf und Kette ----------
+
+  /** Noch zu holende Gülle eines Auftrags (abzüglich ausgebrachter Menge und der Ladungen unterwegs) */
+  private slurryStillNeeded(orderId: number, exceptVehicle = -1): number {
+    const o = this.business.orders.find((x) => x.id === orderId);
+    if (!o || !o.gabe) return 0;
+    let onBoard = 0;
+    for (const v of this.vehicles) {
+      if (v.id === exceptVehicle || !v.task) continue;
+      if (v.task.kind === 'job' && v.task.orderId === orderId && v.task.slurry) onBoard += v.task.slurry.load;
+      if (v.task.kind === 'feeder' && v.task.orderId === orderId) onBoard += v.task.load;
+    }
+    return Math.max(0, o.areaHa * o.gabe - (o.doneM3 ?? 0) - onBoard);
+  }
+
+  /** Feldzugang, an dem das Ausbringfass gerade arbeitet bzw. hinfährt */
+  private spreaderNode(t: Extract<PlayerTask, { kind: 'feeder' }>): number {
+    const sp = this.vehicles[t.spreader]?.task;
+    if (sp?.kind !== 'job') return t.source;
+    return this.fields!.access[sp.queue[Math.min(sp.current, sp.queue.length - 1)]];
+  }
+
+  /** Zubringer wartet am Feldrand: umfüllen, wenn das Fass leer wartet; sonst nachfahren oder heim */
+  private feederWait(v: Vehicle) {
+    const t = v.task;
+    if (t?.kind !== 'feeder') return;
+    const sv = this.vehicles[t.spreader];
+    const st = sv?.task;
+    if (st?.kind !== 'job' || st.orderId !== t.orderId || !st.slurry) {
+      // Auftrag fertig oder abgebrochen: Rest zurück
+      t.phase = 'back';
+      this.driveTo(v, this.homeNode);
+      this.business.version++;
+      return;
+    }
+    const node = this.spreaderNode(t);
+    if (node !== v.node) { t.phase = 'toField'; this.driveTo(v, node); return; }
+    if (t.load < 0.5) {
+      if (this.slurryStillNeeded(t.orderId) > 0.5) { t.phase = 'toFill'; this.driveTo(v, t.source); }
+      else { t.phase = 'back'; this.driveTo(v, this.homeNode); }
+      this.business.version++;
+      return;
+    }
+    if (st.phase !== 'waitFeed' || sv.node !== v.node) return;
+    const amount = Math.min(t.load, st.slurry.cap - st.slurry.load);
+    const minutes = Math.ceil(amount / SLURRY_TRANSFER_M3_MIN) + 2;
+    t.load -= amount;
+    st.slurry.load += amount;
+    t.phase = 'transfer';
+    v.state = VehicleState.Waiting;
+    v.waitMin = minutes;
+    st.phase = 'feed';
+    sv.state = VehicleState.Waiting;
+    sv.waitMin = minutes;
+    this.business.version++;
+  }
+
+  /** Teil des Feldes abfahren, bis das Fass leer ist (bzw. das Feld fertig) */
+  private startSlurrySlice(v: Vehicle, t: Extract<PlayerTask, { kind: 'job' }>) {
+    const sl = t.slurry!;
+    const fi = t.queue[t.current];
+    const area = this.fields!.areaHa[fi];
+    const frac = Math.min(1 - sl.progress, sl.load / Math.max(0.01, sl.gabe * area));
+    sl.frac = frac;
+    v.fieldNode = fi;
+    const wf = this.weather.speedFactor(this.time);
+    const full = this.buildRealFieldRoute(v.node, fi, t.width, t.haPerHour * wf, t.workKmh * wf);
+    this.startRoute(v, this.sliceFieldRoute(full, sl.progress, sl.progress + frac));
+    t.phase = 'work';
+    this.business.version++;
+  }
+
+  /** Abschnitt einer Feldroute [f0, f1] der Arbeitsstrecke, mit An- und Rückfahrt zum Feldzugang */
+  private sliceFieldRoute(r: RouteGeom, f0: number, f1: number): RouteGeom {
+    const n = r.xs.length;
+    if (n < 4) return r;
+    const w0 = r.cum[1], w1 = r.cum[n - 2];
+    const d0 = w0 + (w1 - w0) * Math.max(0, f0), d1 = w0 + (w1 - w0) * Math.min(1, f1);
+    const at = (d: number): [number, number, number] => {
+      let i = 1;
+      while (i < n - 1 && r.cum[i] < d) i++;
+      const a = i - 1;
+      const L = r.cum[i] - r.cum[a] || 1;
+      const k = (d - r.cum[a]) / L;
+      return [r.xs[a] + (r.xs[i] - r.xs[a]) * k, r.ys[a] + (r.ys[i] - r.ys[a]) * k, a];
+    };
+    const drive = FIELD_DRIVE_KMH / 3.6;
+    const [x0, y0, a0] = at(d0);
+    const [x1, y1, a1] = at(d1);
+    const xs = [r.xs[0], x0], ys = [r.ys[0], y0], sp = [drive];
+    for (let i = a0 + 1; i <= a1; i++) { xs.push(r.xs[i]); ys.push(r.ys[i]); sp.push(r.speed[i - 1]); }
+    xs.push(x1); ys.push(y1); sp.push(r.speed[a1]);
+    xs.push(r.xs[n - 1]); ys.push(r.ys[n - 1]); sp.push(drive);
+    return this.makeRoute(xs, ys, sp, 'field');
+  }
+
+  /** Fass leer bzw. Feld fertig: buchen, dann nachfüllen, nächstes Feld oder heim */
+  private slurrySliceDone(v: Vehicle, t: Extract<PlayerTask, { kind: 'job' }>, o: Order | undefined) {
+    const b = this.business;
+    const sl = t.slurry!;
+    const fi = t.queue[t.current];
+    const area = this.fields!.areaHa[fi];
+    const ha = area * sl.frac;
+    const m3 = Math.min(sl.load, ha * sl.gabe);
+    sl.load = Math.max(0, sl.load - m3);
+    sl.progress = Math.min(1, sl.progress + sl.frac);
+    if (o) {
+      o.doneM3 = Math.round(((o.doneM3 ?? 0) + m3) * 10) / 10;
+      b.chargeDiesel(ha * t.dieselLHa, o, this.time);
+    }
+    const hours = ha / t.haPerHour;
+    if (o) o.tractorHours = Math.round((o.tractorHours + hours) * 100) / 100;
+    for (const id of [v.machineId, t.implementId]) {
+      const m = this.company.machines.find((x) => x.id === id);
+      if (!m) continue;
+      m.hours = Math.round((m.hours + hours) * 10) / 10;
+      b.wear(m, hours);
+    }
+    b.addExperience(t.driverId, 'guelle', Math.round(hours * 60), this.time);
+    if (sl.progress >= 0.999) {
+      if (o) b.fieldDone(o, fi, this.time);
+      t.current++;
+      sl.progress = 0;
+      if (t.current >= t.queue.length) { t.phase = 'back'; this.driveTo(v, this.homeNode); return; }
+    }
+    const feeder = sl.feeder !== undefined;
+    if (sl.load >= 0.5) {
+      t.phase = 'to';
+      if (sl.progress > 0) this.startSlurrySlice(v, t);
+      else this.driveTo(v, this.fields!.access[t.queue[t.current]]);
+    } else if (feeder) {
+      // am Feldrand auf den Zubringer warten (ggf. erst zum nächsten Feld)
+      const node = this.fields!.access[t.queue[t.current]];
+      if (node === v.node) { t.phase = 'waitFeed'; v.state = VehicleState.Waiting; }
+      else { t.phase = 'to'; this.driveTo(v, node); }
+    } else {
+      t.phase = 'toFill';
+      this.driveTo(v, sl.source);
+    }
+    b.version++;
+  }
+
   private buildRealFieldRoute(
     node: number,
     fi: number,

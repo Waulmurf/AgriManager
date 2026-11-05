@@ -17,7 +17,7 @@ export function marketValue(newPrice: number, ageYears: number, hours: number): 
   return Math.max(newPrice * 0.15, w);
 }
 
-export type MachineType = 'schlepper' | 'firmenwagen' | 'grubber' | 'kurzscheibenegge';
+export type MachineType = 'schlepper' | 'firmenwagen' | 'grubber' | 'kurzscheibenegge' | 'guellefass' | 'zubringer';
 
 export interface Machine {
   id: number;
@@ -40,6 +40,8 @@ export interface Machine {
   workKmh?: number;
   /** Geräte: Dieselverbrauch des Gespanns bei der Arbeit (l/ha) */
   dieselLHa?: number;
+  /** Güllefass und Zubringer: Fassvolumen (m³) */
+  tankM3?: number;
   /** Firmenwagen: Sitzplätze inkl. Fahrer und Art */
   seats?: number;
   carKind?: CarKind;
@@ -219,6 +221,7 @@ export const SKILLS: { key: Skill; name: string; short: string }[] = [
 /** Welche Tätigkeit eine Maschine verlangt und ab welcher Stufe (PA-10) */
 export const MACHINE_SKILL: Partial<Record<MachineType, { skill: Skill; min: number }>> = {
   schlepper: { skill: 'boden', min: 1 },
+  guellefass: { skill: 'guelle', min: 1 },
 };
 /** Eigene Reparatur mit dem Werkstattwagen: ab Stufe 2 */
 export const MECHANIC_MIN = 2;

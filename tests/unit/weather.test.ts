@@ -69,9 +69,9 @@ describe('Wetter', () => {
     for (const farm of s.farms!.farms) {
       s.command({ kind: 'visit', farmId: farm.id });
       runUntil(s, () => !s.chefBusy);
-      if (s.business.requests.some((r) => r.status === 'offen')) break;
+      if (s.business.requests.some((r) => r.status === 'offen' && r.service === 'grubbern')) break;
     }
-    const req = s.business.requests.find((r) => r.status === 'offen')!;
+    const req = s.business.requests.find((r) => r.status === 'offen' && r.service === 'grubbern')!;
     s.command({ kind: 'respond', requestId: req.id, action: 'accept' });
     s.command({ kind: 'buy', offerId: 1 });
     const g = s.company.machines.find((m) => m.type === 'grubber')!;

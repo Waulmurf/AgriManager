@@ -554,3 +554,35 @@ Schritte:
 - **Noch offen:** Fruchtwechsel der Kundenfelder je Jahr (heute behält jedes Feld seine Kultur),
   weitere Dienstleistungen (Saat, Gülle, Ernte) mit den Maschinen aus Phase 4, Schritt 4.
 
+### Schritt 4a: Gülle als erste Arbeitskette (Annahmen und Quellen)
+
+- **Dienstleistung „Gülle ausbringen“:** nur für Betriebe mit Vieh, aus deren Güllelager an der
+  Hofstelle.
+  - Saison: 1.2.–30.4. Getreide und Raps (Kopfdüngung, 20 m³/ha), 1.3.–15.5. Mais und Rüben
+    (vor der Saat, 25 m³/ha), 1.8.–20.9. wenig zu Raps und Getreide.
+  - Sperrfrist auf Ackerland von der Ernte bis 31. Januar
+    ([topagrar](https://www.topagrar.com/acker/news/guelle-sperrfrist-endet-am-31-januar-12461860.html)).
+  - Bei nassem oder gefrorenem Boden ruht die Ausbringung (Wetter, Schritt 2).
+  - Preis um 4 €/m³ (Spanne für Lohnausbringung 2,50–8 €/m³ je nach Entfernung und System,
+    [LK Niederösterreich](https://noe.lko.at/rindergülle-wirtschaftlich-bodennah-ausbringen+2400+3635932)).
+    Abgerechnet wird je m³, verhandelt auch.
+- **Technik:** Güllefässer mit Schleppschlauch bzw. Schleppschuh, Pflicht auf bestelltem Ackerland
+  ([topagrar](https://www.topagrar.com/acker/news/breitverteilerverbot-2025-wo-gelten-ausnahmen-1-20008994.html)).
+  - Modelle: Joskin 7,1 m³, Kotte 13,9 m³, Joskin 16,5 m³, Zunhammer 18,5 m³, Preise aus
+    `docs/maschinen.md`. Zubringer Kotte 24 m³ und Joskin 20 m³ (Annahme).
+  - Flächenleistung = Breite × 8 km/h × 0,7.
+  - Fahrer brauchen die Tätigkeit Gülle ab Stufe 1.
+- **Umlauf ohne Zubringer:** Rüsten am Hof → Güllelager → Füllen (3 m³/min) → Feld → anteilig
+  Bahnen abfahren, bis das Fass leer ist → zurück zum Lager → … → nächstes Feld → Hof. Der
+  Fortschritt je Feld wird gemerkt; bei der Rückkehr ans Feld gibt es keine neue Rüstzeit.
+- **Kette mit Zubringer:** zweites Gespann mit eigenem Fahrer, Schlepper und Zubringerfass.
+  - Der Zubringer pendelt Lager ↔ Feldrand und füllt um (4 m³/min + 2 min). Das Ausbringfass
+    bleibt auf dem Feld und wartet am Feldrand.
+  - Der Zubringer holt nur so viel, wie noch fehlt, folgt zum nächsten Feld und fährt am Ende
+    heim.
+  - Ruft man den Zubringer zurück, macht das Fass allein weiter.
+- **Zeitschätzung:** Umläufe aus Füllen, Fahrt, Ausbringen. Mit Zubringer zählt der Engpass aus
+  Ausbringen und Zubringerumlauf, daher schneller bei weiten Wegen.
+- **Später:** Lkw-Zubringer mit Tankauflieger, Feldrandcontainer, Gärrest aus Biogasanlagen,
+  Häckselkette (Häcksler + Abfahrer + Silo mit Radlader/Walze), Kleinbus-Mannschaftsfahrten.
+

@@ -67,7 +67,7 @@ describe('Besuch, Anfrage, Auftrag', () => {
     for (const farm of s.farms!.farms) {
       s.command({ kind: 'visit', farmId: farm.id });
       runUntil(s, () => !s.chefBusy);
-      req = s.business.requests.find((r) => r.status === 'offen');
+      req = s.business.requests.find((r) => r.status === 'offen' && r.service === 'grubbern');
       if (req) break;
     }
     expect(req).toBeDefined();
@@ -109,7 +109,7 @@ describe('Besuch, Anfrage, Auftrag', () => {
 
   it('Gegenangebot: zu teuer wird abgelehnt, günstiger angenommen', () => {
     const s = world(8);
-    const reqs = () => s.business.requests.filter((r) => r.status === 'offen');
+    const reqs = () => s.business.requests.filter((r) => r.status === 'offen' && r.service === 'grubbern');
     for (const farm of s.farms!.farms) {
       if (reqs().length >= 2) break;
       s.command({ kind: 'visit', farmId: farm.id });
@@ -142,7 +142,7 @@ describe('Besuch, Anfrage, Auftrag', () => {
       s.command({ kind: 'visit', farmId: farm.id });
       runUntil(s, () => !s.chefBusy);
     }
-    for (const r of s.business.requests) if (r.status === 'offen') s.command({ kind: 'respond', requestId: r.id, action: 'reject' });
+    for (const r of s.business.requests) if (r.status === 'offen' && r.service === 'grubbern') s.command({ kind: 'respond', requestId: r.id, action: 'reject' });
     s.run(20 * 1440);
     expect(s.business.requests.some((r) => r.channel === 'anruf' || r.channel === 'nachricht')).toBe(true);
   });
@@ -167,9 +167,9 @@ describe('Rückruf, Rüstzeit, Arbeitszeit', () => {
     for (const farm of s.farms!.farms) {
       s.command({ kind: 'visit', farmId: farm.id });
       runUntil(s, () => !s.chefBusy);
-      if (s.business.requests.some((r) => r.status === 'offen')) break;
+      if (s.business.requests.some((r) => r.status === 'offen' && r.service === 'grubbern')) break;
     }
-    const req = s.business.requests.find((r) => r.status === 'offen')!;
+    const req = s.business.requests.find((r) => r.status === 'offen' && r.service === 'grubbern')!;
     s.command({ kind: 'respond', requestId: req.id, action: 'accept' });
     s.command({ kind: 'buy', offerId: 1 });
     const order = s.business.orders[0];
@@ -229,9 +229,9 @@ describe('Rechnung, Zahlung, Buchungen', () => {
     for (const farm of s.farms!.farms) {
       s.command({ kind: 'visit', farmId: farm.id });
       runUntil(s, () => !s.chefBusy);
-      if (s.business.requests.some((r) => r.status === 'offen')) break;
+      if (s.business.requests.some((r) => r.status === 'offen' && r.service === 'grubbern')) break;
     }
-    const req = s.business.requests.find((r) => r.status === 'offen')!;
+    const req = s.business.requests.find((r) => r.status === 'offen' && r.service === 'grubbern')!;
     s.command({ kind: 'respond', requestId: req.id, action: 'accept' });
     s.command({ kind: 'buy', offerId: 1 });
     const order = s.business.orders[0];
@@ -269,9 +269,9 @@ function finishedInvoice(seed: number) {
   for (const farm of s.farms!.farms) {
     s.command({ kind: 'visit', farmId: farm.id });
     runUntil(s, () => !s.chefBusy);
-    if (s.business.requests.some((r) => r.status === 'offen')) break;
+    if (s.business.requests.some((r) => r.status === 'offen' && r.service === 'grubbern')) break;
   }
-  const req = s.business.requests.find((r) => r.status === 'offen')!;
+  const req = s.business.requests.find((r) => r.status === 'offen' && r.service === 'grubbern')!;
   s.command({ kind: 'respond', requestId: req.id, action: 'accept' });
   s.command({ kind: 'buy', offerId: 1 });
   const order = s.business.orders[0];
@@ -289,11 +289,11 @@ describe('Warteschlange des Chefs', () => {
       for (const farm of s.farms!.farms) {
         s.command({ kind: 'visit', farmId: farm.id });
         runUntil(s, () => !s.chefBusy);
-        if (s.business.requests.some((r) => r.status === 'offen')) break;
+        if (s.business.requests.some((r) => r.status === 'offen' && r.service === 'grubbern')) break;
       }
       return { s };
     })();
-    const req = s.business.requests.find((r) => r.status === 'offen')!;
+    const req = s.business.requests.find((r) => r.status === 'offen' && r.service === 'grubbern')!;
     s.command({ kind: 'respond', requestId: req.id, action: 'accept' });
     s.command({ kind: 'buy', offerId: 1 });
     const order = s.business.orders[0];
@@ -380,9 +380,9 @@ describe('Kundenbindung', () => {
     for (const farm of s.farms!.farms) {
       s.command({ kind: 'visit', farmId: farm.id });
       runUntil(s, () => !s.chefBusy);
-      if (s.business.requests.some((r) => r.status === 'offen')) break;
+      if (s.business.requests.some((r) => r.status === 'offen' && r.service === 'grubbern')) break;
     }
-    const req = s.business.requests.find((r) => r.status === 'offen')!;
+    const req = s.business.requests.find((r) => r.status === 'offen' && r.service === 'grubbern')!;
     const farm = s.farms!.farms[req.farmId];
     const sat = farm.satisfaction;
     s.command({ kind: 'respond', requestId: req.id, action: 'reject' });
@@ -396,9 +396,9 @@ describe('Zeitschätzung', () => {
     for (const farm of s.farms!.farms) {
       s.command({ kind: 'visit', farmId: farm.id });
       runUntil(s, () => !s.chefBusy);
-      if (s.business.requests.some((r) => r.status === 'offen')) break;
+      if (s.business.requests.some((r) => r.status === 'offen' && r.service === 'grubbern')) break;
     }
-    const req = s.business.requests.find((r) => r.status === 'offen')!;
+    const req = s.business.requests.find((r) => r.status === 'offen' && r.service === 'grubbern')!;
     const e = s.planEstimates()[req.id];
     expect(e).toBeDefined();
     // Feldarbeit nach Flächenleistung des Grubbers aus dem Markt (1,7 ha/h)
@@ -507,7 +507,7 @@ describe('Spielstand', () => {
       a.command({ kind: 'visit', farmId: farm.id });
       runUntil(a, () => !a.chefBusy);
     }
-    const req = a.business.requests.find((r) => r.status === 'offen');
+    const req = a.business.requests.find((r) => r.status === 'offen' && r.service === 'grubbern');
     if (req) {
       a.command({ kind: 'respond', requestId: req.id, action: 'accept' });
       a.command({ kind: 'buy', offerId: 1 });

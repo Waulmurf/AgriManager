@@ -83,6 +83,8 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
   ruht bei Nässe/Frost (`Simulation.weatherHold`, Warteschlange), Anzeige oben und im Board.
 - Schritt 3 Jahreslauf fertig: Dienstleistungen `Service` (grubbern, stoppel) mit `SERVICE_IMPLEMENT`,
   Saisonkalender `seasonServices`, Wintercheck (`Machine.winterCheckAt`).
+- Schritt 4a Gülle-Kette fertig: Dienstleistung `guelle` (je m³, Gabe), Güllefass/Zubringer im Katalog,
+  Umlauf Lager↔Feld (`slurry` im Job, `startSlurrySlice`, `sliceFieldRoute`), Zubringer-Task `feeder`.
 
 ## CI (GitHub Actions)
 

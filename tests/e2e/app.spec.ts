@@ -167,17 +167,17 @@ test('Kern-Schleife: Besuch → Anfrage → Gerät kaufen → Auftrag starten', 
       return b && !b.chefBusy;
     }, null, { timeout: 90_000 });
     await page.waitForTimeout(200);
-    if (await page.evaluate(() => (window as any).__game.status.business.requests.some((r: any) => r.status === 'offen'))) break;
+    if (await page.evaluate(() => (window as any).__game.status.business.requests.some((r: any) => r.status === 'offen' && r.service === 'grubbern'))) break;
   }
   await page.getByTestId('speed-0').click();
   expect(Number(await page.getByTestId('known-count').textContent())).toBeGreaterThan(0);
   await page.getByTestId('tab-auftraege').click();
-  await expect(page.getByTestId('request').first()).toBeVisible();
+  await expect(page.getByTestId('request').filter({ hasText: 'Grubbern' }).first()).toBeVisible();
   await page.getByTestId('tab-markt').click();
   await page.getByTestId('buy').first().click();
   await expect(page.getByTestId('cash')).toHaveText(/87\.500/);
   await page.getByTestId('tab-auftraege').click();
-  await page.getByTestId('accept').first().click();
+  await page.getByTestId('request').filter({ hasText: 'Grubbern' }).first().getByTestId('accept').click();
   await expect(page.getByTestId('order').first()).toBeVisible();
   await page.getByTestId('start-job').first().click();
   // bei nassem Boden wird der Auftrag eingeplant statt gestartet (Wetter)
@@ -224,12 +224,12 @@ test('Planungsboard: Auftrag auf Fahrer und Tag ziehen', async ({ page }) => {
     await page.evaluate((id) => (window as any).__game.command({ kind: 'visit', farmId: id }), id);
     await page.waitForFunction(() => { const b = (window as any).__game.status.business; return b && !b.chefBusy && b.queue.length === 0; }, null, { timeout: 90_000 });
     await page.waitForTimeout(200);
-    if (await page.evaluate(() => (window as any).__game.status.business.requests.some((r: any) => r.status === 'offen'))) break;
+    if (await page.evaluate(() => (window as any).__game.status.business.requests.some((r: any) => r.status === 'offen' && r.service === 'grubbern'))) break;
   }
   await page.getByTestId('speed-0').click();
   await page.evaluate(async () => {
     const g = (window as any).__game;
-    const r = g.status.business.requests.find((x: any) => x.status === 'offen');
+    const r = g.status.business.requests.find((x: any) => x.status === 'offen' && x.service === 'grubbern');
     await g.command({ kind: 'respond', requestId: r.id, action: 'accept' });
     await g.command({ kind: 'buy', offerId: 1 });
   });

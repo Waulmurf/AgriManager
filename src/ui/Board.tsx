@@ -169,7 +169,7 @@ export function PlanningBoard({ status, game, onClose }: { status: GameStatus; g
                 return (
                   <li key={o.id} draggable onDragStart={drag({ kind: 'order', orderId: o.id })} className={e && e.finishAt > o.latest ? 'warn' : ''} data-testid="board-order">
                     <strong>{game?.farmById(o.farmId)?.name ?? `Betrieb ${o.farmId}`}</strong>
-                    <small>{SERVICE_NAMES[o.service]} {o.areaHa.toLocaleString('de-DE', { maximumFractionDigits: 1 })} ha · bis {fmtDay(o.latest)}{e ? ` · ca. ${(e.minutes / 60).toLocaleString('de-DE', { maximumFractionDigits: 1 })} h` : ''}</small>
+                    <small>{SERVICE_NAMES[o.service]} {o.areaHa.toLocaleString('de-DE', { maximumFractionDigits: 1 })} ha{o.gabe ? ` (${Math.round(o.areaHa * o.gabe)} m³)` : ''} · bis {fmtDay(o.latest)}{e ? ` · ca. ${(e.minutes / 60).toLocaleString('de-DE', { maximumFractionDigits: 1 })} h` : ''}</small>
                   </li>
                 );
               })}
@@ -187,7 +187,7 @@ export function PlanningBoard({ status, game, onClose }: { status: GameStatus; g
                 return (
                   <li key={r.id} className={ok ? '' : 'warn'}>
                     <strong>{game?.farmById(r.farmId)?.name ?? `Betrieb ${r.farmId}`}</strong>
-                    <small>{SERVICE_NAMES[r.service]} {r.areaHa.toLocaleString('de-DE', { maximumFractionDigits: 1 })} ha · {r.priceHa} €/ha · bis {fmtDay(r.latest)}{e ? ` · fertig etwa ${fmtDay(e.finishAt)} ${ok ? '✓' : '⚠'}` : ''}</small>
+                    <small>{SERVICE_NAMES[r.service]} {r.areaHa.toLocaleString('de-DE', { maximumFractionDigits: 1 })} ha · {r.gabe ? `${(r.priceHa / r.gabe).toLocaleString('de-DE', { maximumFractionDigits: 2 })} €/m³` : `${r.priceHa} €/ha`} · bis {fmtDay(r.latest)}{e ? ` · fertig etwa ${fmtDay(e.finishAt)} ${ok ? '✓' : '⚠'}` : ''}</small>
                     <span className="card-actions">
                       <button onClick={() => send({ kind: 'respond', requestId: r.id, action: 'accept' })}>Annehmen</button>
                       <button onClick={() => send({ kind: 'respond', requestId: r.id, action: 'reject' })}>Ablehnen</button>

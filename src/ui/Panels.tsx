@@ -107,11 +107,13 @@ export function BusinessTab({ status, game }: { status: GameStatus; game: GameCo
 }
 
 function RequestItem({ r, game, time, estimate }: { r: Request; game: GameController | null; time: number; estimate?: JobEstimate }) {
-  const [price, setPrice] = useState(String(r.priceHa));
+  // Gülle wird je m³ verhandelt, intern als €/ha (× Gabe)
+  const [price, setPrice] = useState(String(r.gabe ? Math.round((r.priceHa / r.gabe) * 100) / 100 : r.priceHa));
   const fb = useFeedback();
   const farm = game?.farmById(r.farmId);
   const send = async (action: 'accept' | 'reject' | 'counter') => {
-    const msg = await game!.command({ kind: 'respond', requestId: r.id, action, priceHa: Number(price.replace(',', '.')) });
+    const p = Number(price.replace(',', '.'));
+    const msg = await game!.command({ kind: 'respond', requestId: r.id, action, priceHa: r.gabe ? p * r.gabe : p });
     fb.show(msg);
   };
   const hoursLeft = Math.max(0, Math.round((r.replyBy - time) / 60));
@@ -125,7 +127,8 @@ function RequestItem({ r, game, time, estimate }: { r: Request; game: GameContro
         {SERVICE_NAMES[r.service]}: {r.fields.length} {r.fields.length === 1 ? 'Feld' : 'Felder'}, {ha(r.areaHa)} · bis {fmtDay(r.latest)}
       </div>
       <div>
-        Angebot Kunde: <strong>{r.priceHa.toLocaleString('de-DE')} €/ha</strong> = {eur(r.priceHa * r.areaHa)}
+        Angebot Kunde: <strong>{r.gabe ? `${(r.priceHa / r.gabe).toLocaleString('de-DE', { maximumFractionDigits: 2 })} €/m³` : `${r.priceHa.toLocaleString('de-DE')} €/ha`}</strong> = {eur(r.priceHa * r.areaHa)}
+        {r.gabe ? <small className="hint"> · {r.gabe} m³/ha = {Math.round(r.areaHa * r.gabe).toLocaleString('de-DE')} m³ ab Güllelager des Kunden</small> : null}
       </div>
       {r.status === 'offen' && <EstimateLine e={estimate} latest={r.latest} />}
       {r.status === 'offen' ? (
@@ -136,7 +139,7 @@ function RequestItem({ r, game, time, estimate }: { r: Request; game: GameContro
             <button onClick={() => send('reject')}>Ablehnen</button>
             <span className="counter">
               <input value={price} onChange={(e) => setPrice(e.target.value)} aria-label="Gegenangebot €/ha" />
-              <button onClick={() => send('counter')}>€/ha anbieten</button>
+              <button onClick={() => send('counter')}>{r.gabe ? '€/m³' : '€/ha'} anbieten</button>
             </span>
           </div>
         </>
@@ -155,12 +158,23 @@ function OrderItem({ o, game, status }: { o: Order; game: GameController | null;
   const [tractor, setTractor] = useState(tractors[0]?.id ?? 0);
   const [impl, setImpl] = useState(0);
   const [driver, setDriver] = useState(1);
+  // Gülle-Kette: optionaler Zubringer
+  const feeders = c.machines.filter((m) => m.type === 'zubringer');
+  const [useFeeder, setUseFeeder] = useState(false);
+  const [fDriver, setFDriver] = useState(0);
+  const [fTractor, setFTractor] = useState(0);
+  const [fImpl, setFImpl] = useState(0);
   const fb = useFeedback();
   const farm = game?.farmById(o.farmId);
   const implId = impl || implementsOk[0]?.id || 0;
   const drivers = c.drivers;
   const start = async () => {
-    fb.show(await game!.command({ kind: 'startJob', orderId: o.id, tractorId: tractor, implementId: implId, driverId: driver }));
+    const feeder = useFeeder ? {
+      driverId: fDriver || drivers.find((d) => d.id !== driver)?.id || 0,
+      tractorId: fTractor || tractors.find((t) => t.id !== tractor)?.id || 0,
+      implementId: fImpl || feeders[0]?.id || 0,
+    } : undefined;
+    fb.show(await game!.command({ kind: 'startJob', orderId: o.id, tractorId: tractor, implementId: implId, driverId: driver, feeder }));
   };
   const driverBusy = status.business?.driverStatus[driver] || status.business?.queue.some((q) => q.driverId === driver);
   const late = status.business && o.status !== 'fertig' && status.business.time > o.latest;
@@ -172,7 +186,8 @@ function OrderItem({ o, game, status }: { o: Order; game: GameController | null;
         <small className={`badge ${o.status === 'fertig' ? 'done' : o.status === 'läuft' ? 'run' : ''}`}>{o.status}</small>
       </div>
       <div>
-        {SERVICE_NAMES[o.service]} {ha(o.areaHa)} zu {o.priceHa.toLocaleString('de-DE')} €/ha = {eur(o.priceHa * o.areaHa)}
+        {SERVICE_NAMES[o.service]} {ha(o.areaHa)} zu {o.gabe ? `${(o.priceHa / o.gabe).toLocaleString('de-DE', { maximumFractionDigits: 2 })} €/m³ (${Math.round(o.areaHa * o.gabe).toLocaleString('de-DE')} m³)` : `${o.priceHa.toLocaleString('de-DE')} €/ha`} = {eur(o.priceHa * o.areaHa)}
+        {o.gabe && o.status === 'läuft' ? <small className="hint"> · ausgebracht {Math.round(o.doneM3 ?? 0).toLocaleString('de-DE')} m³</small> : null}
       </div>
       <small className={late ? 'warn' : 'hint'}>
         Zeitfenster bis {fmtDay(o.latest)}
@@ -189,7 +204,7 @@ function OrderItem({ o, game, status }: { o: Order; game: GameController | null;
           </select>
           {implementsOk.length ? (
             <select value={implId} onChange={(e) => setImpl(Number(e.target.value))} aria-label="Gerät">
-              {implementsOk.map((m) => <option key={m.id} value={m.id}>{machineName(m)} ({m.width} m)</option>)}
+              {implementsOk.map((m) => <option key={m.id} value={m.id}>{machineName(m)} ({m.tankM3 ? `${m.tankM3} m³, ` : ''}{m.width} m)</option>)}
             </select>
           ) : (
             <small className="warn">Kein Gerät ({TYPE_NAMES[SERVICE_IMPLEMENT[o.service]]}) – im Markt kaufen</small>
@@ -200,6 +215,27 @@ function OrderItem({ o, game, status }: { o: Order; game: GameController | null;
           <button onClick={start} disabled={!implementsOk.length || queued} data-testid="start-job">
             {queued ? 'Eingeplant' : driverBusy ? 'Einplanen' : 'Starten'}
           </button>
+        </div>
+      )}
+      {o.status === 'offen' && o.service === 'guelle' && (
+        <div className="card-actions">
+          <label><input type="checkbox" checked={useFeeder} onChange={(e) => setUseFeeder(e.target.checked)} disabled={!feeders.length || tractors.length < 2 || drivers.length < 2} /> mit Zubringer</label>
+          {useFeeder && (
+            <>
+              <select value={fDriver} onChange={(e) => setFDriver(Number(e.target.value))} aria-label="Fahrer Zubringer">
+                <option value={0}>Fahrer …</option>
+                {drivers.filter((d) => d.id !== driver).map((d) => <option key={d.id} value={d.id}>{d.isPlayer ? 'Chef' : d.name}</option>)}
+              </select>
+              <select value={fTractor} onChange={(e) => setFTractor(Number(e.target.value))} aria-label="Schlepper Zubringer">
+                <option value={0}>Schlepper …</option>
+                {tractors.filter((t) => t.id !== tractor).map((t) => <option key={t.id} value={t.id}>{machineName(t)} ({t.power} PS)</option>)}
+              </select>
+              <select value={fImpl} onChange={(e) => setFImpl(Number(e.target.value))} aria-label="Zubringerfass">
+                {feeders.map((m) => <option key={m.id} value={m.id}>{machineName(m)} ({m.tankM3} m³)</option>)}
+              </select>
+            </>
+          )}
+          {!feeders.length && <small className="hint">Zubringer: Zubringerfass, zweiter Schlepper und zweiter Fahrer nötig. Lohnt sich bei weiten Wegen vom Güllelager zum Feld.</small>}
         </div>
       )}
       {fb.msg && <small className="feedback">{fb.msg}</small>}
@@ -441,10 +477,12 @@ export function StaffTab({ status, game }: { status: GameStatus; game: GameContr
   );
 }
 
-const TYPE_NAMES: Record<string, string> = { schlepper: 'Schlepper', grubber: 'Grubber', kurzscheibenegge: 'Kurzscheibenegge', firmenwagen: 'Firmenwagen' };
+const TYPE_NAMES: Record<string, string> = { schlepper: 'Schlepper', grubber: 'Grubber', kurzscheibenegge: 'Kurzscheibenegge', firmenwagen: 'Firmenwagen', guellefass: 'Güllefass', zubringer: 'Zubringerfass' };
 
-function machineSpecs(m: Pick<Machine, 'type' | 'power' | 'width' | 'powerNeed' | 'haPerHour' | 'seats'>): string {
+function machineSpecs(m: Pick<Machine, 'type' | 'power' | 'width' | 'powerNeed' | 'haPerHour' | 'seats' | 'tankM3'>): string {
   if (m.type === 'schlepper') return `${m.power} PS`;
+  if (m.type === 'zubringer') return `${m.tankM3} m³ · ab ${m.powerNeed} PS`;
+  if (m.type === 'guellefass') return `${m.tankM3} m³ · ${m.width} m · ab ${m.powerNeed} PS`;
   if (m.type === 'firmenwagen') return `${m.seats ?? 5} Plätze`;
   if (m.width) return `${m.width.toLocaleString('de-DE')} m · ab ${m.powerNeed} PS · ${m.haPerHour?.toLocaleString('de-DE')} ha/h`;
   return '';
@@ -474,6 +512,8 @@ export function MarketTab({ status, game }: { status: GameStatus; game: GameCont
           <option value="schlepper">Schlepper</option>
           <option value="grubber">Grubber</option>
           <option value="kurzscheibenegge">Kurzscheibenegge</option>
+          <option value="guellefass">Güllefass</option>
+          <option value="zubringer">Zubringerfass</option>
           <option value="firmenwagen">Firmenwagen</option>
         </select>
       </div>

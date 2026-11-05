@@ -38,6 +38,7 @@ describe('Katalog und Händler', () => {
       expect(m.newPrice).toBeGreaterThan(0);
       if (m.type === 'schlepper') expect(m.power).toBeGreaterThan(90);
       else if (m.type === 'firmenwagen') expect(m.seats).toBeGreaterThanOrEqual(3);
+      else if (m.type === 'zubringer') expect(m.tankM3).toBeGreaterThan(10);
       else { expect(m.width).toBeGreaterThan(0); expect(m.powerNeed).toBeGreaterThan(0); expect(m.haPerHour).toBeGreaterThan(0); }
     }
   });

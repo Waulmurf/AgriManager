@@ -34,7 +34,7 @@ function withOrders(seed = 5, count = 2) {
     if (s.business.orders.length >= count) break;
     s.command({ kind: 'visit', farmId: farm.id });
     runUntil(s, () => !s.chefBusy);
-    const req = s.business.requests.find((r) => r.status === 'offen');
+    const req = s.business.requests.find((r) => r.status === 'offen' && r.service === 'grubbern');
     if (req) s.command({ kind: 'respond', requestId: req.id, action: 'accept' });
   }
   s.command({ kind: 'buy', offerId: 1 });

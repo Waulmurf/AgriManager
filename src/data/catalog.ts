@@ -12,6 +12,7 @@ import type { MachineType } from '../sim/economy';
 
 export interface CatalogModel {
   key: string;
+  tankM3?: number;
   seats?: number;
   carKind?: 'kombi' | 'kleinbus' | 'werkstatt';
   type: MachineType;
@@ -71,6 +72,17 @@ export const CATALOG: CatalogModel[] = [
   // Kurzscheibeneggen (für spätere Stoppelaufträge)
   K('horsch-joker3', 'Horsch', 'Joker 3 CT', 3, 110, 2.0, 21_000),
   K('koeck-rebell6', 'Köckerling', 'Rebell 600 T', 6, 190, 3.8, 48_000),
+  // Güllefässer mit Schleppschlauch bzw. Schleppschuh (Pflicht auf bestelltem Ackerland).
+  // Preise aus docs/maschinen.md (Zunhammer SKE 18,5 + Bomech 15 m 86.885 €; Joskin Volumetra
+  // 16500 D neu 139.000 €; Kotte Garant VT 13900 109.896 € brutto AT ≈ 92.000 € netto; Joskin Alpina 2
+  // 7100 S 43.553 € brutto AT ≈ 36.600 € netto). Flächenleistung: Breite × 8 km/h × 0,7 (Annahme).
+  { key: 'joskin-alpina7', type: 'guellefass', brand: 'Joskin', model: 'Alpina 2 7100 S + Schleppschuh 7,5 m', tankM3: 7.1, width: 7.5, powerNeed: 110, haPerHour: 4.2, workKmh: 8, dieselLHa: 4, newPrice: 36_600, deliveryWeeks: 6 },
+  { key: 'kotte-vt13900', type: 'guellefass', brand: 'Kotte', model: 'Garant VT 13900 + Schleppschlauch 12 m', tankM3: 13.9, width: 12, powerNeed: 180, haPerHour: 6.7, workKmh: 8, dieselLHa: 4, newPrice: 92_000, deliveryWeeks: 8 },
+  { key: 'joskin-volumetra16', type: 'guellefass', brand: 'Joskin', model: 'Volumetra 16500 D + Schleppschlauch 15 m', tankM3: 16.5, width: 15, powerNeed: 200, haPerHour: 8.4, workKmh: 8, dieselLHa: 4, newPrice: 139_000, deliveryWeeks: 10 },
+  { key: 'zunhammer-ske185', type: 'guellefass', brand: 'Zunhammer', model: 'SKE 18,5 PU + Bomech Multi 15 m', tankM3: 18.5, width: 15, powerNeed: 220, haPerHour: 8.4, workKmh: 8, dieselLHa: 4, newPrice: 86_900, deliveryWeeks: 10 },
+  // Zubringerfässer ohne Verteiler (Annahme, Preise in der Größenordnung großer Tandem-/Tridemfässer)
+  { key: 'kotte-zubringer24', type: 'zubringer', brand: 'Kotte', model: 'Zubringer VTR 24.000', tankM3: 24, powerNeed: 220, newPrice: 78_000, deliveryWeeks: 10 },
+  { key: 'joskin-quadra20', type: 'zubringer', brand: 'Joskin', model: 'Quadra 20000 TS (Zubringer)', tankM3: 20, powerNeed: 200, newPrice: 66_000, deliveryWeeks: 8 },
   // Firmenwagen (Annahme, Nettopreise gut ausgestatteter Nutzfahrzeuge): Kombi 5 Plätze,
   // Kleinbus 8 Plätze (Mannschaftswagen), Werkstattwagen 3 Plätze mit Werkstatteinbau
   { key: 'car-kombi', type: 'firmenwagen', brand: 'Firmenwagen', model: 'Kombi', newPrice: 38_000, seats: 5, carKind: 'kombi', deliveryWeeks: 3 },

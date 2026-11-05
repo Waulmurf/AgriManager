@@ -69,13 +69,19 @@ export const TRIAL_MAX_HA = 10;
 export const REPAIR_TRACTOR_EUR_H = 8;
 export const WEAR_GRUBBER_EUR_HA = 3;
 
-export type Service = 'grubbern' | 'stoppel';
-export const SERVICE_NAMES: Record<Service, string> = { grubbern: 'Grubbern', stoppel: 'Stoppelbearbeitung' };
+export type Service = 'grubbern' | 'stoppel' | 'guelle';
+export const SERVICE_NAMES: Record<Service, string> = { grubbern: 'Grubbern', stoppel: 'Stoppelbearbeitung', guelle: 'Gülle ausbringen' };
 /** Gerät je Dienstleistung und Tätigkeitswort für die Anzeige */
-export const SERVICE_IMPLEMENT: Record<Service, MachineType> = { grubbern: 'grubber', stoppel: 'kurzscheibenegge' };
-export const SERVICE_VERB: Record<Service, string> = { grubbern: 'grubbert', stoppel: 'bearbeitet Stoppeln' };
-/** Startpreis je ha inkl. Schlepper, Fahrer, Diesel (Annahme): Stoppelbearbeitung flach, günstiger als Grubbern */
-export const SERVICE_BASE_PRICE: Record<Service, number> = { grubbern: 55, stoppel: 38 };
+export const SERVICE_IMPLEMENT: Record<Service, MachineType> = { grubbern: 'grubber', stoppel: 'kurzscheibenegge', guelle: 'guellefass' };
+export const SERVICE_VERB: Record<Service, string> = { grubbern: 'grubbert', stoppel: 'bearbeitet Stoppeln', guelle: 'bringt Gülle aus' };
+/** Tätigkeit des Fahrers je Dienstleistung (Skill) */
+export const SERVICE_SKILL: Record<Service, Skill> = { grubbern: 'boden', stoppel: 'boden', guelle: 'guelle' };
+/**
+ * Startpreis je ha inkl. Schlepper, Fahrer, Diesel (Annahme): Stoppelbearbeitung flach, günstiger als
+ * Grubbern. Gülle wird je m³ abgerechnet: 4 €/m³ (Spanne für Lohnausbringung 2,50–8 €/m³ je nach
+ * Entfernung und System laut LK Niederösterreich); priceHa = €/m³ × Gabe.
+ */
+export const SERVICE_BASE_PRICE: Record<Service, number> = { grubbern: 55, stoppel: 38, guelle: 4 };
 
 /**
  * Jahreslauf (AK-04): welche Dienstleistung wann gefragt ist, für welche Kulturen, und wie stark.
@@ -88,8 +94,15 @@ export function seasonServices(time: number): { service: Service; crops: Crop[];
   const md = d.month * 100 + d.day;
   const out: { service: Service; crops: Crop[]; weight: number }[] = [];
   if (md >= 301 && md <= 515) out.push({ service: 'grubbern', crops: [Crop.Mais, Crop.Zuckerrueben, Crop.Kartoffeln], weight: md >= 401 && md <= 430 ? 1.2 : 1 });
+  // (Gülle siehe unten)
   if (md >= 715 && md <= 915) out.push({ service: 'stoppel', crops: md < 801 ? [Crop.Raps] : [Crop.Getreide, Crop.Raps], weight: md >= 801 && md <= 831 ? 1.3 : 0.8 });
   if (md >= 901 && md <= 1031) out.push({ service: 'grubbern', crops: [Crop.Getreide, Crop.Raps, Crop.Ackerfutter], weight: md <= 1015 ? 0.9 : 0.6 });
+  // Gülle (nur Betriebe mit Vieh): Ende der Sperrfrist 1.2. bis Mitte Mai – Getreide und Raps als
+  // Kopfdüngung (Februar–April), Mais und Rüben vor der Saat (März–Mai); nach der Ernte im August/September
+  // wenig zu Raps und Zwischenfrüchten (ab 1.10. Sperrfrist)
+  if (md >= 201 && md <= 430) out.push({ service: 'guelle', crops: [Crop.Getreide, Crop.Raps], weight: 1 });
+  if (md >= 301 && md <= 515) out.push({ service: 'guelle', crops: [Crop.Mais, Crop.Zuckerrueben], weight: 1 });
+  if (md >= 801 && md <= 920) out.push({ service: 'guelle', crops: [Crop.Raps, Crop.Getreide], weight: 0.4 });
   return out;
 }
 
@@ -105,8 +118,10 @@ export interface Request {
   /** Zeitfenster für die Arbeit (Spielminuten) */
   earliest: number;
   latest: number;
-  /** vom Kunden genannter Preis (€/ha) */
+  /** vom Kunden genannter Preis (€/ha; bei Gülle €/m³ × Gabe) */
   priceHa: number;
+  /** Gülle: Gabe (m³/ha) */
+  gabe?: number;
   createdAt: number;
   /** Antwortfrist */
   replyBy: number;
@@ -124,6 +139,9 @@ export interface Order {
   doneFields: number[];
   areaHa: number;
   priceHa: number;
+  /** Gülle: Gabe (m³/ha) und schon ausgebrachte Menge */
+  gabe?: number;
+  doneM3?: number;
   earliest: number;
   latest: number;
   status: OrderStatus;
@@ -212,7 +230,11 @@ export interface GameEvent {
 export type Command =
   | { kind: 'visit'; farmId: number }
   | { kind: 'respond'; requestId: number; action: 'accept' | 'reject' | 'counter'; priceHa?: number }
-  | { kind: 'startJob'; orderId: number; tractorId: number; implementId: number; driverId?: number }
+  | {
+      kind: 'startJob'; orderId: number; tractorId: number; implementId: number; driverId?: number;
+      /** Gülle-Kette: Zubringer mit eigenem Fahrer, Schlepper und Zubringerfass */
+      feeder?: { driverId: number; tractorId: number; implementId: number };
+    }
   | { kind: 'buy'; offerId: number }
   | { kind: 'recall'; vehicle: number }
   | { kind: 'remind'; invoiceId: number }
@@ -429,6 +451,11 @@ export class Business {
     if (this.isRival(farmId, time)) return null;
     if (this.requests.some((r) => r.farmId === farmId && r.status === 'offen')) return null;
     const trial = this.isTrial(farmId, time);
+    // Gülle gibt es nur auf Betrieben mit Vieh
+    const offered = season.filter((x) => x.service !== 'guelle' || farm.livestock);
+    if (!offered.length) return null;
+    season.length = 0;
+    season.push(...offered);
     // Dienstleistung der Saison wählen (bei mehreren nach Gewicht)
     const total = season.reduce((a, x) => a + x.weight, 0);
     let pick = this.rng.next() * total;
@@ -451,7 +478,11 @@ export class Business {
       picked.push(i);
       ha += f.areaHa[i];
     }
-    const priceHa = Math.round(SERVICE_BASE_PRICE[sv.service] * (0.92 + this.rng.next() * 0.16) * 2) / 2;
+    // Gülle: Gabe 20 m³/ha zu Getreide/Raps, 25 m³/ha vor Mais/Rüben (Annahme, etwa 80–100 kg N/ha)
+    const gabe = sv.service === 'guelle' ? (sv.crops.includes(Crop.Mais) ? 25 : 20) : undefined;
+    const priceHa = gabe
+      ? Math.round(SERVICE_BASE_PRICE.guelle * (0.9 + this.rng.next() * 0.25) * 10) / 10 * gabe
+      : Math.round(SERVICE_BASE_PRICE[sv.service] * (0.92 + this.rng.next() * 0.16) * 2) / 2;
     const req: Request = {
       id: this.nextId++,
       farmId,
@@ -461,6 +492,7 @@ export class Business {
       earliest: time,
       latest: time + (5 + this.rng.int(8)) * 1440,
       priceHa,
+      gabe,
       createdAt: time,
       replyBy: time + REPLY_MINUTES,
       status: 'offen',
@@ -569,6 +601,8 @@ export class Business {
       doneFields: [],
       areaHa: r.areaHa,
       priceHa: price,
+      gabe: r.gabe,
+      doneM3: r.gabe ? 0 : undefined,
       earliest: r.earliest,
       latest: r.latest,
       status: 'offen',
@@ -1222,7 +1256,9 @@ export class Business {
       number: `RE-${d.year}-${String(this.invoices.length + 1).padStart(4, '0')}`,
       orderId: o.id,
       farmId: o.farmId,
-      text: `${SERVICE_NAMES[o.service]} ${fmtHa(o.areaHa)} à ${fmtEur(o.priceHa)}/ha`,
+      text: o.gabe
+        ? `${SERVICE_NAMES[o.service]} ${fmtM3(o.areaHa * o.gabe)} à ${fmtEur(o.priceHa / o.gabe)}/m³ (${fmtHa(o.areaHa)})`
+        : `${SERVICE_NAMES[o.service]} ${fmtHa(o.areaHa)} à ${fmtEur(o.priceHa)}/ha`,
       amount: Math.round(o.priceHa * o.areaHa * 100) / 100,
       issuedAt: time,
       dueAt: time + PAYMENT_TERM_DAYS * 1440,
@@ -1655,6 +1691,9 @@ export class Business {
 
 export function fmtEur(v: number): string {
   return v.toLocaleString('de-DE', { minimumFractionDigits: v % 1 ? 2 : 0, maximumFractionDigits: 2 }) + ' €';
+}
+export function fmtM3(v: number): string {
+  return v.toLocaleString('de-DE', { maximumFractionDigits: 0 }) + ' m³';
 }
 export function fmtHa(v: number): string {
   return v.toLocaleString('de-DE', { maximumFractionDigits: 1 }) + ' ha';
