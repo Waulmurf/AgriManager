@@ -4,7 +4,7 @@
 import { useState } from 'react';
 import type { GameController, GameStatus } from '../game/controller';
 import type { JobEstimate } from '../sim/engine';
-import { SKILLS, employerHourCost, employerMonthCost, machineValue, marketWage, takeOverFee, type Employee, type Machine } from '../sim/economy';
+import { MECHANIC_MIN, SKILLS, roleName, employerHourCost, employerMonthCost, machineValue, marketWage, takeOverFee, type Employee, type Machine } from '../sim/economy';
 import { SERVICE_NAMES, fmtDay, fmtTime, CHECK_COST, type Invoice, type Request, type Order } from '../sim/business';
 import { CATALOG, DEALERS } from '../data/catalog';
 import { formatGameTime } from '../game/clock';
@@ -194,7 +194,7 @@ function OrderItem({ o, game, status }: { o: Order; game: GameController | null;
             <small className="warn">Kein Grubber – im Markt kaufen</small>
           )}
           <select value={driver} onChange={(e) => setDriver(Number(e.target.value))} aria-label="Fahrer" data-testid="driver">
-            {drivers.map((d) => <option key={d.id} value={d.id}>{d.isPlayer ? 'Chef (du)' : d.name} · Boden {d.skills.boden}</option>)}
+            {drivers.map((d) => <option key={d.id} value={d.id}>{d.isPlayer ? 'Chef (du)' : d.name} · Traktor {d.skills.boden}</option>)}
           </select>
           <button onClick={start} disabled={!implementsOk.length || queued} data-testid="start-job">
             {queued ? 'Eingeplant' : driverBusy ? 'Einplanen' : 'Starten'}
@@ -281,8 +281,8 @@ export function OrdersTab({ status, game }: { status: GameStatus; game: GameCont
   );
 }
 
-const skillShort = (e: Pick<Employee, 'skills'>) =>
-  SKILLS.filter((k) => e.skills[k.key] > 1 || k.key === 'boden').map((k) => `${k.name.split('/')[0]} ${e.skills[k.key]}`).join(' · ');
+const skillShort = (e: Pick<Employee, 'skills' | 'isPlayer'>) =>
+  `${roleName(e)}: ` + (SKILLS.filter((k) => (e.skills[k.key] ?? 0) > 0).map((k) => `${k.short} ${e.skills[k.key]}`).join(' · ') || 'keine Qualifikation');
 
 function EmployeeCard({ e, status, game, show }: { e: Employee; status: GameStatus; game: GameController | null; show: (m: string) => void }) {
   const b = status.business!;
@@ -442,8 +442,9 @@ export function StaffTab({ status, game }: { status: GameStatus; game: GameContr
 
 const TYPE_NAMES: Record<string, string> = { schlepper: 'Schlepper', grubber: 'Grubber', kurzscheibenegge: 'Kurzscheibenegge', firmenwagen: 'Firmenwagen' };
 
-function machineSpecs(m: Pick<Machine, 'type' | 'power' | 'width' | 'powerNeed' | 'haPerHour'>): string {
+function machineSpecs(m: Pick<Machine, 'type' | 'power' | 'width' | 'powerNeed' | 'haPerHour' | 'seats'>): string {
   if (m.type === 'schlepper') return `${m.power} PS`;
+  if (m.type === 'firmenwagen') return `${m.seats ?? 5} Plätze`;
   if (m.width) return `${m.width.toLocaleString('de-DE')} m · ab ${m.powerNeed} PS · ${m.haPerHour?.toLocaleString('de-DE')} ha/h`;
   return '';
 }
@@ -472,6 +473,7 @@ export function MarketTab({ status, game }: { status: GameStatus; game: GameCont
           <option value="schlepper">Schlepper</option>
           <option value="grubber">Grubber</option>
           <option value="kurzscheibenegge">Kurzscheibenegge</option>
+          <option value="firmenwagen">Firmenwagen</option>
         </select>
       </div>
       {view === 'gebraucht' ? (
@@ -532,6 +534,34 @@ export function MarketTab({ status, game }: { status: GameStatus; game: GameCont
   );
 }
 
+/** Offene Panne: Händler-Service oder eigener Werkstattwagen mit Mechaniker; Ersatzteillage */
+function RepairChoice({ m, status, send }: { m: Machine; status: GameStatus; send: (cmd: Parameters<GameController['command']>[0]) => void }) {
+  const r = m.repair!;
+  const b = status.business!;
+  const c = status.company!;
+  const mechanics = c.drivers.filter((d) => (d.skills.werkstatt ?? 0) >= MECHANIC_MIN);
+  const [mech, setMech] = useState(mechanics[0]?.id ?? 0);
+  const van = c.machines.some((x) => x.carKind === 'werkstatt');
+  const teil = r.parts === 'lager' ? 'Lagerteil (im Werkstattwagen)' : r.parts === 'haendler' ? `Teil liegt bei ${r.dealer} – muss geholt werden` : `Teil bestellt, ab ${fmtDay(r.partsReadyAt)} ${fmtTime(r.partsReadyAt)} bei ${r.dealer}`;
+  if (r.state !== 'wartet') return <small className="hint">{teil}</small>;
+  return (
+    <div className="repair-choice" data-testid="repair-choice">
+      <small className="warn">Panne – {teil}. Ohne Entscheidung ruft der Fahrer um {fmtTime(r.since + 60)} den Händler.{r.mechanicId !== undefined ? ' Eigene Werkstatt ist eingeplant.' : ''}</small>
+      <div className="card-actions">
+        <button onClick={() => send({ kind: 'repair', machineId: m.id, mode: 'dealer' })} data-testid="repair-dealer">Händler-Service ({r.cost ? eur(r.cost) : 'Gewährleistung'})</button>
+        {van && mechanics.length > 0 ? (
+          <span className="counter">
+            <select value={mech} onChange={(e) => setMech(Number(e.target.value))} aria-label="Mechaniker">
+              {mechanics.map((d) => <option key={d.id} value={d.id}>{d.isPlayer ? 'Chef' : d.name} (Werkstatt {d.skills.werkstatt}){b.driverStatus[d.id] ? ' – beschäftigt' : ''}</option>)}
+            </select>
+            <button onClick={() => send({ kind: 'repair', machineId: m.id, mode: 'own', mechanicId: mech })} data-testid="repair-own">Eigene Werkstatt (Teile ~{eur(Math.round((r.cost * 0.45) / 10) * 10)})</button>
+          </span>
+        ) : <small className="hint">Eigene Reparatur braucht Werkstattwagen und Mechaniker (Werkstatt ab Stufe {MECHANIC_MIN}).</small>}
+      </div>
+    </div>
+  );
+}
+
 /** Fuhrpark (MF-07, MZ-01, MZ-05, MZ-09, MZ-12): Zustand, Wartung, Kosten, Verkauf */
 export function FleetTab({ status, game }: { status: GameStatus; game: GameController | null }) {
   const b = status.business;
@@ -566,6 +596,7 @@ export function FleetTab({ status, game }: { status: GameStatus; game: GameContr
                 {(m.warrantyUntil ?? 0) > b.time ? ` · Gewährleistung bis ${fmtDay(m.warrantyUntil!)}` : ''}
               </small>
               {m.saleAt !== undefined && <small className="hint">inseriert – Käufer meldet sich bis etwa {fmtDay(m.saleAt)}</small>}
+              {m.repair && <RepairChoice m={m} status={status} send={send} />}
               <div className="card-actions">
                 <button onClick={() => send({ kind: 'service', machineId: m.id })} disabled={busy || down} data-testid="service">Wartung</button>
                 <button onClick={() => send({ kind: 'sell', machineId: m.id, mode: 'tradein' })} disabled={busy}>In Zahlung geben ({eur(Math.round(((b.machineValues[m.id] ?? 0) * 0.8) / 100) * 100)})</button>

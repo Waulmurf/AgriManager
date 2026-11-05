@@ -12,6 +12,8 @@ import type { MachineType } from '../sim/economy';
 
 export interface CatalogModel {
   key: string;
+  seats?: number;
+  carKind?: 'kombi' | 'kleinbus' | 'werkstatt';
   type: MachineType;
   brand: string;
   model: string;
@@ -69,6 +71,11 @@ export const CATALOG: CatalogModel[] = [
   // Kurzscheibeneggen (für spätere Stoppelaufträge)
   K('horsch-joker3', 'Horsch', 'Joker 3 CT', 3, 110, 2.0, 21_000),
   K('koeck-rebell6', 'Köckerling', 'Rebell 600 T', 6, 190, 3.8, 48_000),
+  // Firmenwagen (Annahme, Nettopreise gut ausgestatteter Nutzfahrzeuge): Kombi 5 Plätze,
+  // Kleinbus 8 Plätze (Mannschaftswagen), Werkstattwagen 3 Plätze mit Werkstatteinbau
+  { key: 'car-kombi', type: 'firmenwagen', brand: 'Firmenwagen', model: 'Kombi', newPrice: 38_000, seats: 5, carKind: 'kombi', deliveryWeeks: 3 },
+  { key: 'car-kleinbus', type: 'firmenwagen', brand: 'Firmenwagen', model: 'Kleinbus (8 Plätze)', newPrice: 49_000, seats: 8, carKind: 'kleinbus', deliveryWeeks: 6 },
+  { key: 'car-werkstatt', type: 'firmenwagen', brand: 'Firmenwagen', model: 'Werkstattwagen (3 Plätze)', newPrice: 68_000, seats: 3, carKind: 'werkstatt', deliveryWeeks: 8 },
 ];
 
 export interface Dealer {
@@ -89,6 +96,7 @@ export const DEALERS: Dealer[] = [
   { id: 4, name: 'Landmaschinen Suhlendorf', town: 'Suhlendorf', lonLat: [10.7660, 52.9370], tractorBrands: ['Claas'], implementBrands: ['Horsch', 'Kotte', 'Zunhammer'] },
   { id: 5, name: 'Landtechnik Altmark', town: 'Salzwedel', lonLat: [11.1500, 52.8500], tractorBrands: ['Case IH', 'New Holland'], implementBrands: ['Kverneland', 'Joskin'] },
   { id: 6, name: 'Agrarservice Wittingen', town: 'Wittingen', lonLat: [10.7300, 52.7270], tractorBrands: ['Deutz-Fahr'], implementBrands: ['Rabe', 'Köckerling'] },
+  { id: 7, name: 'Nutzfahrzeuge Uelzen', town: 'Uelzen', lonLat: [10.5450, 52.9560], tractorBrands: ['Firmenwagen'], implementBrands: [] },
 ];
 
 /** Händler, die eine Marke führen (für Werkstatt und Neukauf) */

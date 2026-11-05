@@ -9,8 +9,8 @@ import { Rng } from './rng';
 import { Crop, SURNAMES, type FarmSet } from './farms';
 import type { FieldSet } from './fields';
 import {
-  EMPLOYER_SV, MIN_WAGE, MONTH_HOURS, SKILLS, VACATION_DAYS, marketWage, agencyRate, takeOverFee, AGENCY_MIN_HOURS, XP_MINUTES_PER_LEVEL, baseSkills, gameDate, marketValue,
-  serviceInterval, START_OFFERS, type Company, type Employee, type Machine, type MarketOffer, type Skill,
+  EMPLOYER_SV, MIN_WAGE, MONTH_HOURS, ROLES, SKILLS, VACATION_DAYS, marketWage, agencyRate, takeOverFee, AGENCY_MIN_HOURS, XP_MINUTES_PER_LEVEL, baseSkills, gameDate, marketValue,
+  serviceInterval, START_OFFERS, type Company, type Employee, type Machine, type MarketOffer, type Repair, type Skill,
 } from './economy';
 import { CATALOG, DEALERS, dealersFor, type CatalogModel } from '../data/catalog';
 
@@ -187,6 +187,7 @@ export type Command =
   | { kind: 'extendRent'; employeeId: number; days: number }
   | { kind: 'takeOver'; employeeId: number; asKind: 'fest' | 'saison' }
   | { kind: 'swapDriver'; vehicle: number; driverId: number; chauffeurId?: number }
+  | { kind: 'repair'; machineId: number; mode: 'dealer' | 'own'; mechanicId?: number }
   | { kind: 'staffAnswer'; requestId: number; accept: boolean }
   | { kind: 'setWage'; employeeId: number; wage: number }
   | { kind: 'plan'; orderId: number; driverId: number; tractorId: number; implementId: number; notBefore?: number }
@@ -557,7 +558,7 @@ export class Business {
       machine: {
         type: m.type, brand: m.brand, model: m.model, year: gameDate(time).year, hours: 0, condition: 100,
         newPrice: m.newPrice, power: m.power, width: m.width, powerNeed: m.powerNeed, haPerHour: m.haPerHour,
-        workKmh: m.workKmh, dieselLHa: m.dieselLHa, serviceAtH: serviceInterval(m),
+        workKmh: m.workKmh, dieselLHa: m.dieselLHa, serviceAtH: serviceInterval(m), seats: m.seats, carKind: m.carKind,
       },
       dealerId,
       at: time + weeks * 7 * 1440,
@@ -616,6 +617,7 @@ export class Business {
       machine: {
         type: m.type, brand: m.brand, model: m.model, year: year - age, hours, condition, newPrice: m.newPrice,
         power: m.power, width: m.width, powerNeed: m.powerNeed, haPerHour: m.haPerHour, workKmh: m.workKmh, dieselLHa: m.dieselLHa,
+        seats: m.seats, carKind: m.carKind,
         serviceAtH: hours + (r.next() < 0.3 ? -50 : serviceInterval(m) - r.int(200)),
         // privat: jeder vierte mit verstecktem Mangel
         defect: !dealer && r.next() < 0.25 ? true : undefined,
@@ -738,21 +740,69 @@ export class Business {
     return this.rng.next() < perHour / 60;
   }
 
-  /** Panne: Händler-Service kommt, Dauer nach Entfernung und Ersatzteillage (MZ-06, HM-05) */
+  /**
+   * Panne (MZ-04, MZ-06): Maschine steht. Der Spieler entscheidet: Service des Markenhändlers
+   * rufen oder eigenen Werkstattwagen mit Mechaniker schicken. Ohne Entscheidung ruft der Fahrer
+   * nach einer Stunde den Händler.
+   */
   breakdown(m: Machine, time: number, home: [number, number], where: string): void {
     const d = this.dealerKm(m.brand, home);
     const r = this.rng.next();
-    const parts = r < 0.6 ? 0 : r < 0.85 ? 4 : 24 + this.rng.int(25); // Stunden Ersatzteilwartezeit
-    let hours = 1.5 + (2 * d.km) / 50 + parts;
-    if (this.workshopBusy(time)) hours *= 1.5;
-    m.downUntil = time + Math.round(hours * 60);
-    m.downReason = `Panne – ${d.name} repariert`;
-    m.breakdowns = (m.breakdowns ?? 0) + 1;
+    const parts: Repair['parts'] = r < 0.6 ? 'lager' : r < 0.85 ? 'haendler' : 'bestellt';
+    // bestellte Teile: vormittags bestellt am selben Tag 14 Uhr, sonst am nächsten Morgen 8 Uhr
+    const day0 = Math.floor(time / 1440) * 1440;
+    const partsReadyAt = parts !== 'bestellt' ? time : time - day0 < 4 * 60 ? day0 + 8 * 60 : day0 + 1440 + 2 * 60;
+    const workHours = Math.round((1 + this.rng.next() * 2.5) * 10) / 10;
     const warranty = (m.warrantyUntil ?? 0) > time;
     const cost = warranty ? 0 : Math.round((200 + 0.004 * m.newPrice * (0.5 + this.rng.next() * 1.5)) * (1 + (100 - m.condition) / 100) / 10) * 10;
-    if (cost) this.payWorkshop(time, cost, `Reparatur ${m.brand} ${m.model}`, m);
-    m.defect = undefined; // Mangel ist damit behoben
-    this.emit(time, 'warnung', `Panne: ${m.brand} ${m.model} ${where}. ${d.name} kommt, Reparatur etwa ${hours.toLocaleString('de-DE', { maximumFractionDigits: 0 })} h${parts >= 24 ? ' (Ersatzteil muss bestellt werden)' : ''}, ${warranty ? 'Gewährleistung' : fmtEur(cost)}.`);
+    m.repair = { state: 'wartet', since: time, parts, partsReadyAt, dealerId: d.id, dealer: d.name, dealerKm: d.km, workHours, cost };
+    m.downUntil = time + 365 * 1440; // bis zur Reparatur
+    m.downReason = 'Panne – Reparatur offen';
+    m.breakdowns = (m.breakdowns ?? 0) + 1;
+    const teil = parts === 'lager' ? 'Lagerteil' : parts === 'haendler' ? `Teil liegt bei ${d.name}` : `Teil wird bestellt, da ${fmtDay(partsReadyAt)} ${fmtTime(partsReadyAt)}`;
+    this.emit(time, 'warnung', `Panne: ${m.brand} ${m.model} ${where}. ${teil}. Händler-Service (${warranty ? 'Gewährleistung' : fmtEur(cost)}) oder eigene Werkstatt? Ohne Entscheidung ruft der Fahrer in einer Stunde den Händler.`);
+  }
+
+  /** Händler-Service: Anfahrt, ggf. Warten aufs bestellte Teil, Reparatur */
+  callDealer(m: Machine, time: number): string {
+    const r = m.repair;
+    if (!r || r.state !== 'wartet') return 'Keine offene Panne';
+    const travel = (2 * r.dealerKm) / 50;
+    let hours = travel + r.workHours;
+    if (this.workshopBusy(time)) hours *= 1.5; // Ernte: Werkstatt ausgelastet (HM-08)
+    const start = Math.max(time, r.partsReadyAt);
+    m.downUntil = start + Math.round(hours * 60);
+    m.downReason = `Panne – ${r.dealer} repariert`;
+    r.state = 'haendler';
+    if (r.cost) this.payWorkshop(time, r.cost, `Reparatur ${m.brand} ${m.model}`, m);
+    m.defect = undefined;
+    this.version++;
+    this.emit(time, 'info', `${r.dealer} übernimmt die Reparatur von ${m.brand} ${m.model}, fertig etwa ${fmtDay(m.downUntil)} ${fmtTime(m.downUntil)}.`);
+    return `Händler kommt, fertig etwa ${fmtDay(m.downUntil)} ${fmtTime(m.downUntil)}`;
+  }
+
+  /** Reparaturdauer in eigener Regie (min): Stufe 2 = 120 %, 5 = 90 % der Profizeit */
+  ownRepairMinutes(m: Machine, skill: number): number {
+    return Math.round((m.repair?.workHours ?? 2) * (1.4 - 0.1 * skill) * 60);
+  }
+
+  /** Eigene Werkstatt beginnt (Engine schickt den Werkstattwagen): Teile kosten etwa 45 % */
+  startOwnRepair(m: Machine, time: number): void {
+    const r = m.repair!;
+    r.state = 'eigen';
+    m.downReason = 'Panne – eigene Werkstatt ist unterwegs';
+    const parts = Math.round((r.cost * 0.45) / 10) * 10;
+    if (parts) this.payWorkshop(time, parts, `Ersatzteile ${m.brand} ${m.model}`, m);
+    this.version++;
+  }
+
+  finishOwnRepair(m: Machine, time: number, mechanic: string): void {
+    m.downUntil = time;
+    m.downReason = undefined;
+    m.repair = undefined;
+    m.defect = undefined;
+    this.version++;
+    this.emit(time, 'info', `${mechanic} hat ${m.brand} ${m.model} repariert.`);
   }
 
   /** Verschleiß je Betriebsstunde (MZ-03): Schlepper 0,6 %/100 h, Geräte 2 %/100 h, doppelt bei überfälliger Wartung */
@@ -966,22 +1016,28 @@ export class Business {
   private makeApplicant(time: number): Applicant {
     const r = this.rng;
     const age = 18 + r.int(45);
-    const skills = baseSkills(1);
-    // Erfahrung wächst mit dem Alter, Schwerpunkte zufällig
-    const exp = Math.min(4, Math.floor((age - 18) / 8) + r.int(2));
-    skills.boden = Math.min(5, 1 + r.int(exp + 1));
-    for (const k of SKILLS) if (k.key !== 'boden' && r.next() < 0.35) skills[k.key] = Math.min(5, 1 + r.int(exp + 1));
-    const licenseC = r.next() < 0.3;
-    let top = 0, sum = 0;
-    for (const k of SKILLS) { top = Math.max(top, skills[k.key]); sum += skills[k.key] - 1; }
-    // Gehaltsvorstellung: Mindestlohn + Stufe der besten Tätigkeit + Breite, LKW-Schein extra
-    const wantFest = Math.round((ECK_WAGE - 2 + (top - 1) * 1.1 + sum * 0.15 + (licenseC ? 0.8 : 0) + (r.next() - 0.5)) * 10) / 10;
+    // Berufsbild ziehen (Gewicht), dann Stufen je Tätigkeit nach Erfahrung (Alter)
+    const total = ROLES.reduce((x, y) => x + y.weight, 0);
+    let pick = r.next() * total;
+    let role = ROLES[0];
+    for (const ro of ROLES) { pick -= ro.weight; if (pick < 0) { role = ro; break; } }
+    const skills = baseSkills(0);
+    const exp = Math.min(1, (age - 18) / 25);
+    for (const [k, span] of Object.entries(role.skills) as [Skill, [number, number]][]) {
+      const lvl = span[0] + Math.round((span[1] - span[0]) * Math.min(1, exp * 0.7 + r.next() * 0.5));
+      skills[k] = Math.max(span[0], Math.min(span[1], lvl));
+    }
+    // Erntemaschinenfahrer: mindestens eine Erntemaschine ab Stufe 2
+    if (role.key === 'ernte' && Math.max(skills.haecksler, skills.drescher, skills.roder) < 2) skills[(['haecksler', 'drescher', 'roder'] as Skill[])[r.int(3)]] = 2;
+    const licenseC = r.next() < (role.licenseC ?? 0.3);
+    // Gehaltsvorstellung: Marktlohn für diese Skills ± 0,50 € (Ecklohn-Annahme in marketWage)
+    const wantFest = Math.round((marketWage({ skills, licenseC }) + (r.next() - 0.5)) * 10) / 10;
     const reliability = Math.round((0.5 + r.next() * 0.5) * 100) / 100;
     const resilience = Math.round((0.5 + r.next() * 0.5) * 100) / 100;
     const wage = Math.max(MIN_WAGE, wantFest);
     const first = FIRST_NAMES[r.int(FIRST_NAMES.length)];
     const last = SURNAMES[r.int(SURNAMES.length)];
-    const notes = ['sucht feste Stelle', 'auch als Saisonkraft', 'Landwirtssohn, kennt Schlepper', 'kommt aus der Region', 'bisher bei einem anderen Lohnunternehmen'];
+    const notes = [`${role.name}, sucht feste Stelle`, `${role.name}, auch als Saisonkraft`, `${role.name}, kommt aus der Region`, `${role.name}, bisher bei einem anderen Lohnunternehmen`];
     return {
       id: this.nextId++,
       person: { name: `${first} ${last}`, isPlayer: false, kind: 'fest', wage, skills, xp: {}, licenseC, age, reliability, resilience, satisfaction: 70, absences: [] },

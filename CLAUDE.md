@@ -72,6 +72,8 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
 - Schritt 4 fertig: Kalender/Zuschläge `src/sim/calendar.ts`, Abwesenheit/Zufriedenheit/Wünsche in
   `business.ts` (`staffDaily`), Ruhezeit und Abwesenheit in `engine.ts` (`driverBlocked`).
 - Zeitarbeit (Leiharbeiter buchen/übernehmen) und Fahrerwechsel (`swapDriver`) ergänzt.
+- Firmenwagen-Arten (Plätze), Berufe/Skills mit Stufe 0 (`ROLES`, `MACHINE_SKILL`), Pannen mit
+  Entscheidung Händler/eigene Werkstatt und Ersatzteillage (`Machine.repair`, `checkRepairs`).
 - Phase 3 damit komplett → nächste Phase 4 (Wirtschaft: Finanzen, Kredit, Wetter, Jahreslauf).
 
 ## CI (GitHub Actions)

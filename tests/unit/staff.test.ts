@@ -83,8 +83,8 @@ describe('Personal', () => {
   it('zweiter Fahrer grubbert mit zweitem Schlepper, während der Chef Kunden besucht', () => {
     const s = twoOrders(5);
     expect(s.business.orders.length).toBe(2);
-    runUntil(s, () => s.business.applicants.length > 0, 20 * 1440);
-    s.command({ kind: 'hire', applicantId: s.business.applicants[0].id, asKind: 'fest' });
+    runUntil(s, () => s.business.applicants.some((a) => a.person.skills.boden >= 1), 20 * 1440);
+    s.command({ kind: 'hire', applicantId: s.business.applicants.find((a) => a.person.skills.boden >= 1)!.id, asKind: 'fest' });
     const driver = s.company.drivers[1];
     expect(s.command({ kind: 'buy', offerId: 1 })).toBe('gekauft');
     expect(s.command({ kind: 'buy', offerId: 2 })).toBe('gekauft');
@@ -108,8 +108,8 @@ describe('Personal', () => {
 
   it('Auftrag wartet in der Warteschlange, solange der Schlepper bei einem anderen Fahrer ist', () => {
     const s = twoOrders(5);
-    runUntil(s, () => s.business.applicants.length > 0, 20 * 1440);
-    s.command({ kind: 'hire', applicantId: s.business.applicants[0].id, asKind: 'fest' });
+    runUntil(s, () => s.business.applicants.some((a) => a.person.skills.boden >= 1), 20 * 1440);
+    s.command({ kind: 'hire', applicantId: s.business.applicants.find((a) => a.person.skills.boden >= 1)!.id, asKind: 'fest' });
     const driver = s.company.drivers[1];
     s.command({ kind: 'buy', offerId: 1 });
     s.command({ kind: 'buy', offerId: 2 });
@@ -139,8 +139,8 @@ describe('Personal', () => {
 
   it('Spielstand mit gekauftem Schlepper und eingestelltem Fahrer läuft bitgleich weiter', () => {
     const a = twoOrders(6);
-    runUntil(a, () => a.business.applicants.length > 0, 20 * 1440);
-    a.command({ kind: 'hire', applicantId: a.business.applicants[0].id, asKind: 'saison' });
+    runUntil(a, () => a.business.applicants.some((x) => x.person.skills.boden >= 1), 20 * 1440);
+    a.command({ kind: 'hire', applicantId: a.business.applicants.find((x) => x.person.skills.boden >= 1)!.id, asKind: 'saison' });
     a.command({ kind: 'buy', offerId: 4 });
     a.command({ kind: 'buy', offerId: 1 });
     const t2 = a.company.machines.find((m) => m.type === 'schlepper' && m.id !== 1)!;
@@ -161,8 +161,8 @@ describe('Personal', () => {
 describe('Urlaub, Krankheit, Zufriedenheit, Zuschläge', () => {
   const hired = (seed = 5) => {
     const s = world(seed);
-    runUntil(s, () => s.business.applicants.length > 0, 20 * 1440);
-    s.command({ kind: 'hire', applicantId: s.business.applicants[0].id, asKind: 'fest' });
+    runUntil(s, () => s.business.applicants.some((a) => a.person.skills.boden >= 1), 20 * 1440);
+    s.command({ kind: 'hire', applicantId: s.business.applicants.find((a) => a.person.skills.boden >= 1)!.id, asKind: 'fest' });
     return { s, e: s.company.drivers[1] };
   };
 
@@ -232,8 +232,8 @@ describe('Urlaub, Krankheit, Zufriedenheit, Zuschläge', () => {
 describe('Zeitarbeit und Fahrerwechsel', () => {
   it('Fahrerwechsel am Hof geht sofort', () => {
     const s = twoOrders(5);
-    runUntil(s, () => s.business.applicants.length > 0, 20 * 1440);
-    s.command({ kind: 'hire', applicantId: s.business.applicants[0].id, asKind: 'fest' });
+    runUntil(s, () => s.business.applicants.some((a) => a.person.skills.boden >= 1), 20 * 1440);
+    s.command({ kind: 'hire', applicantId: s.business.applicants.find((a) => a.person.skills.boden >= 1)!.id, asKind: 'fest' });
     const e = s.company.drivers[1];
     s.command({ kind: 'buy', offerId: 1 });
     const g = s.company.machines.find((m) => m.type === 'grubber')!;
@@ -249,7 +249,7 @@ describe('Zeitarbeit und Fahrerwechsel', () => {
 
   it('Leiharbeiter buchen: ab morgen im Einsatz, Kosten nach Stunden, endet nach der Buchung', () => {
     const s = world(5);
-    runUntil(s, () => s.business.agencyPool.length > 0, 2 * 1440);
+    runUntil(s, () => s.business.agencyPool.some((a) => a.person.skills.boden >= 1), 2 * 1440);
     const a = s.business.agencyPool[0];
     expect(a.person.agencyRate).toBeGreaterThanOrEqual(27);
     expect(s.command({ kind: 'rent', poolId: a.id, days: 3 })).toMatch(/gebucht bis/);
@@ -268,8 +268,8 @@ describe('Zeitarbeit und Fahrerwechsel', () => {
 
   it('Leiharbeiter übernehmen: Provision nach Einsatzdauer', () => {
     const s = world(5);
-    runUntil(s, () => s.business.agencyPool.length > 0, 2 * 1440);
-    s.command({ kind: 'rent', poolId: s.business.agencyPool[0].id, days: 30 });
+    runUntil(s, () => s.business.agencyPool.some((a) => a.person.skills.boden >= 1), 2 * 1440);
+    s.command({ kind: 'rent', poolId: s.business.agencyPool.find((a) => a.person.skills.boden >= 1)!.id, days: 30 });
     const e = s.company.drivers.find((d) => d.kind === 'leih')!;
     s.run(10 * 1440);
     const cash = s.company.cash;
@@ -282,11 +282,11 @@ describe('Zeitarbeit und Fahrerwechsel', () => {
 
   it('Fahrerwechsel: Ersatzfahrer übernimmt das Gespann, wenn der Fahrer krank ist', () => {
     const s = twoOrders(5);
-    runUntil(s, () => s.business.agencyPool.length > 0, 3 * 1440);
-    s.command({ kind: 'rent', poolId: s.business.agencyPool[0].id, days: 10 });
+    runUntil(s, () => s.business.agencyPool.some((a) => a.person.skills.boden >= 1), 3 * 1440);
+    s.command({ kind: 'rent', poolId: s.business.agencyPool.find((a) => a.person.skills.boden >= 1)!.id, days: 10 });
     const leih = s.company.drivers.find((d) => d.kind === 'leih')!;
-    runUntil(s, () => s.business.applicants.length > 0, 20 * 1440);
-    s.command({ kind: 'hire', applicantId: s.business.applicants[0].id, asKind: 'fest' });
+    runUntil(s, () => s.business.applicants.some((a) => a.person.skills.boden >= 1), 20 * 1440);
+    s.command({ kind: 'hire', applicantId: s.business.applicants.find((a) => a.person.skills.boden >= 1)!.id, asKind: 'fest' });
     const fest = s.company.drivers.find((d) => d.kind === 'fest')!;
     s.command({ kind: 'buy', offerId: 1 });
     const g = s.company.machines.find((m) => m.type === 'grubber')!;

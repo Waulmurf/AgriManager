@@ -40,6 +40,11 @@ export interface Machine {
   workKmh?: number;
   /** Geräte: Dieselverbrauch des Gespanns bei der Arbeit (l/ha) */
   dieselLHa?: number;
+  /** Firmenwagen: Sitzplätze inkl. Fahrer und Art */
+  seats?: number;
+  carKind?: CarKind;
+  /** offene Panne: Entscheidung Händler oder eigene Werkstatt (MZ-06) */
+  repair?: Repair;
   /** nächste Wartung fällig bei diesen Betriebsstunden (MZ-05) */
   serviceAtH?: number;
   /** in der Werkstatt bzw. ausgefallen bis Spielminute (MZ-06) */
@@ -61,6 +66,29 @@ export interface Machine {
   boughtAt?: number;
   dealerId?: number;
 }
+
+/**
+ * Offene Panne. Ersatzteil: Lagerteil (häufig, im Werkstattwagen dabei), beim Händler vorrätig
+ * (muss geholt werden) oder bestellt (spätestens am nächsten Tag beim Händler).
+ */
+export interface Repair {
+  state: 'wartet' | 'haendler' | 'eigen';
+  since: number;
+  parts: 'lager' | 'haendler' | 'bestellt';
+  partsReadyAt: number;
+  dealerId: number;
+  dealer: string;
+  dealerKm: number;
+  /** reine Reparaturzeit beim Profi (h) */
+  workHours: number;
+  /** Kosten beim Händler (Arbeit + Teile + Anfahrt) */
+  cost: number;
+  /** eigene Werkstatt eingeplant (startet, sobald Teil, Mechaniker und Werkstattwagen bereit) */
+  mechanicId?: number;
+}
+
+export type CarKind = 'kombi' | 'kleinbus' | 'werkstatt';
+export const CAR_KINDS: Record<CarKind, string> = { kombi: 'Kombi', kleinbus: 'Kleinbus', werkstatt: 'Werkstattwagen' };
 
 /** Wartungsintervall (Betriebsstunden): Schlepper 500 h, Geräte 250 h (Annahme) */
 export function serviceInterval(m: Pick<Machine, 'type'>): number {
@@ -142,18 +170,59 @@ export const START_OFFERS: MarketOffer[] = [
 ];
 
 /** Tätigkeiten mit eigenem Skill (PA-02) */
-export type Skill = 'boden' | 'saat' | 'guelle' | 'haecksler' | 'drescher' | 'roder' | 'kartoffel' | 'transport' | 'werkstatt';
-export const SKILLS: { key: Skill; name: string }[] = [
-  { key: 'boden', name: 'Schlepper/Bodenbearbeitung' },
-  { key: 'saat', name: 'Saat' },
-  { key: 'guelle', name: 'Gülle' },
-  { key: 'haecksler', name: 'Häcksler' },
-  { key: 'drescher', name: 'Mähdrescher' },
-  { key: 'roder', name: 'Rübenroder' },
-  { key: 'kartoffel', name: 'Kartoffeltechnik' },
-  { key: 'transport', name: 'Transport' },
-  { key: 'werkstatt', name: 'Werkstatt' },
+export type Skill =
+  | 'boden' | 'saat' | 'guelle' | 'pflanzenschutz' | 'radlader' | 'haecksler' | 'drescher' | 'roder' | 'kartoffel' | 'transport' | 'werkstatt';
+/**
+ * Tätigkeiten (PA-02, PA-10). Stufe 0 = nicht qualifiziert (darf die Maschine nicht fahren),
+ * 1 = Anfänger … 5 = Profi. `short` für Listen.
+ */
+export const SKILLS: { key: Skill; name: string; short: string }[] = [
+  { key: 'boden', name: 'Traktorfahrer (Bodenbearbeitung)', short: 'Traktor' },
+  { key: 'saat', name: 'Säen und Legen', short: 'Saat' },
+  { key: 'guelle', name: 'Gülle', short: 'Gülle' },
+  { key: 'pflanzenschutz', name: 'Pflanzenschutz (Sachkunde)', short: 'PSM' },
+  { key: 'radlader', name: 'Radlader und Teleskoplader', short: 'Radlader' },
+  { key: 'haecksler', name: 'Feldhäcksler', short: 'Häcksler' },
+  { key: 'drescher', name: 'Mähdrescher', short: 'Drescher' },
+  { key: 'roder', name: 'Rübenroder', short: 'Roder' },
+  { key: 'kartoffel', name: 'Kartoffeltechnik', short: 'Kartoffel' },
+  { key: 'transport', name: 'Lkw und Transport', short: 'Lkw' },
+  { key: 'werkstatt', name: 'Werkstatt (Mechaniker)', short: 'Werkstatt' },
 ];
+
+/** Welche Tätigkeit eine Maschine verlangt und ab welcher Stufe (PA-10) */
+export const MACHINE_SKILL: Partial<Record<MachineType, { skill: Skill; min: number }>> = {
+  schlepper: { skill: 'boden', min: 1 },
+};
+/** Eigene Reparatur mit dem Werkstattwagen: ab Stufe 2 */
+export const MECHANIC_MIN = 2;
+
+/**
+ * Berufsbilder für Bewerbungen und Anzeige. Gewicht = Anteil der Bewerbungen (Annahme).
+ * Spannen [von, bis] je Tätigkeit; nicht genannte Tätigkeiten 0.
+ */
+export const ROLES: { key: string; name: string; weight: number; skills: Partial<Record<Skill, [number, number]>>; licenseC?: number }[] = [
+  { key: 'traktor', name: 'Traktorfahrer', weight: 34, skills: { boden: [1, 5], saat: [0, 3], guelle: [0, 3], radlader: [0, 2], transport: [0, 2] }, licenseC: 0.25 },
+  { key: 'helfer', name: 'Helfer', weight: 14, skills: { boden: [1, 1], radlader: [0, 1] }, licenseC: 0.05 },
+  { key: 'radlader', name: 'Radladerfahrer', weight: 12, skills: { radlader: [2, 5], boden: [1, 2] }, licenseC: 0.2 },
+  { key: 'werkstatt', name: 'Werkstattmitarbeiter', weight: 10, skills: { werkstatt: [2, 5], boden: [1, 2], radlader: [0, 1] }, licenseC: 0.3 },
+  { key: 'ernte', name: 'Erntemaschinenfahrer', weight: 12, skills: { boden: [2, 3], haecksler: [0, 4], drescher: [0, 4], roder: [0, 3] }, licenseC: 0.2 },
+  { key: 'lkw', name: 'Lkw-Fahrer', weight: 8, skills: { transport: [2, 4], boden: [0, 1] }, licenseC: 1 },
+  { key: 'psm', name: 'Fahrer Pflanzenschutz und Düngung', weight: 10, skills: { boden: [1, 3], pflanzenschutz: [1, 4], saat: [0, 2] }, licenseC: 0.15 },
+];
+
+/** Berufsbezeichnung aus den Skills (höchste Spezialisierung) */
+export function roleName(e: Pick<Employee, 'skills' | 'isPlayer'>): string {
+  if (e.isPlayer) return 'Chef';
+  const s = e.skills;
+  if ((s.werkstatt ?? 0) >= 2) return 'Werkstattmitarbeiter';
+  if (Math.max(s.haecksler ?? 0, s.drescher ?? 0, s.roder ?? 0) >= 2) return 'Erntemaschinenfahrer';
+  if ((s.transport ?? 0) >= 2 && (s.boden ?? 0) <= 1) return 'Lkw-Fahrer';
+  if ((s.radlader ?? 0) >= 2 && (s.radlader ?? 0) >= (s.boden ?? 0)) return 'Radladerfahrer';
+  if ((s.pflanzenschutz ?? 0) >= 1) return 'Fahrer Pflanzenschutz und Düngung';
+  if ((s.boden ?? 0) >= 2) return 'Traktorfahrer';
+  return 'Helfer';
+}
 
 /** Gesetzlicher Mindestlohn 2027 (PA-03), €/h brutto */
 export const MIN_WAGE = 14.6;
@@ -209,7 +278,9 @@ export interface Employee {
  * 4 Stunden je gebuchtem Tag.
  */
 export function agencyRate(e: Pick<Employee, 'skills' | 'licenseC'>): number {
-  return 27 + (e.skills.boden - 1) * 3 + (e.licenseC ? 2 : 0);
+  let top = 1;
+  for (const k of SKILLS) top = Math.max(top, e.skills[k.key] ?? 0);
+  return 27 + (top - 1) * 3 + (e.licenseC ? 2 : 0);
 }
 export const AGENCY_MIN_HOURS = 4;
 
@@ -228,11 +299,18 @@ export const VACATION_DAYS = 26;
 /** Lohn, den ein Mitarbeiter mit diesen Skills am Markt bekommt (PA-13, auch Gehaltswunsch) */
 export function marketWage(e: Pick<Employee, 'skills' | 'licenseC'>): number {
   let top = 0, sum = 0;
-  for (const k of SKILLS) { top = Math.max(top, e.skills[k.key]); sum += e.skills[k.key] - 1; }
-  return Math.max(MIN_WAGE, Math.round((15 + (top - 1) * 1.1 + sum * 0.15 + (e.licenseC ? 0.8 : 0)) * 10) / 10);
+  for (const k of SKILLS) {
+    const l = e.skills[k.key] ?? 0;
+    // Mechaniker und Erntemaschinenfahrer sind gesucht: zählen eine halbe Stufe mehr
+    const w = k.key === 'werkstatt' || k.key === 'haecksler' || k.key === 'drescher' ? l + 0.5 : l;
+    top = Math.max(top, l ? w : 0);
+    sum += Math.max(0, l - 1);
+  }
+  return Math.max(MIN_WAGE, Math.round((15 + Math.max(0, top - 1) * 1.1 + sum * 0.15 + (e.licenseC ? 0.8 : 0)) * 10) / 10);
 }
 
-export function baseSkills(level = 1): Record<Skill, number> {
+/** Alle Tätigkeiten auf eine Stufe (0 = nicht qualifiziert) */
+export function baseSkills(level = 0): Record<Skill, number> {
   const s = {} as Record<Skill, number>;
   for (const k of SKILLS) s[k.key] = level;
   return s;
@@ -288,7 +366,7 @@ export function startCompany(homeNode: number): Company {
     site: 'Unbefestigter Abstellplatz, Büro im Wohnhaus',
     machines: [
       { id: 1, type: 'schlepper', brand: 'Fendt', model: '720 Vario', year: 2014, hours: 9000, condition: 68, newPrice: 225_000, power: 200, serviceAtH: 9200 },
-      { id: 2, type: 'firmenwagen', brand: '', model: 'Firmenwagen (Kombi)', year: 2018, hours: 2800, condition: 75, newPrice: 38_000, serviceAtH: 3000 },
+      { id: 2, type: 'firmenwagen', brand: '', model: 'Kombi', year: 2018, hours: 2800, condition: 75, newPrice: 38_000, serviceAtH: 3000, seats: 5, carKind: 'kombi' },
     ],
     drivers: [chefEmployee()],
   };
@@ -297,7 +375,7 @@ export function startCompany(homeNode: number): Company {
 export function chefEmployee(): Employee {
   return {
     id: 1, name: 'Chef (du)', isPlayer: true, kind: 'chef', wage: 0,
-    skills: { ...baseSkills(1), boden: 3, saat: 2, guelle: 2, transport: 2 },
+    skills: { ...baseSkills(0), boden: 3, saat: 2, guelle: 2, pflanzenschutz: 1, radlader: 1, transport: 1, werkstatt: 1 },
     xp: {}, licenseC: false, hiredAt: 0, age: 34,
   };
 }
@@ -306,6 +384,10 @@ export function chefEmployee(): Employee {
 export function normalizeDrivers(c: Company): void {
   c.drivers = (c.drivers ?? []).map((d) => (d.isPlayer && !(d as Partial<Employee>).skills ? chefEmployee() : d));
   if (!c.drivers.length) c.drivers.push(chefEmployee());
+  // neue Tätigkeiten aus späteren Versionen ergänzen (nicht qualifiziert)
+  for (const d of c.drivers) for (const k of SKILLS) if (d.skills[k.key] === undefined) d.skills[k.key] = 0;
+  // Firmenwagen älterer Spielstände sind Kombis mit 5 Plätzen
+  for (const m of c.machines) if (m.type === 'firmenwagen' && m.seats === undefined) { m.seats = 5; m.carKind = 'kombi'; }
 }
 
 /** Spielkalender ohne Date-Objekt (deterministisch): Minute 0 = 1. März 2027, 06:00. */

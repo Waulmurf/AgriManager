@@ -7,7 +7,7 @@
 import { useState, type DragEvent } from 'react';
 import type { GameController, GameStatus } from '../game/controller';
 import type { PlanBar } from '../sim/engine';
-import type { Machine } from '../sim/economy';
+import { roleName, type Machine } from '../sim/economy';
 import { fmtDay, fmtTime, type Order, type Request } from '../sim/business';
 import { formatGameTime } from '../game/clock';
 import { SwapDriver } from './Panels';
@@ -116,7 +116,7 @@ export function PlanningBoard({ status, game, onClose }: { status: GameStatus; g
           <div className="board-row" key={dr.id} data-testid="board-row">
             <div className="board-name">
               <strong>{dr.isPlayer ? 'Chef' : dr.name}</strong>
-              <small>Boden {dr.skills.boden} · heute {((b.driverMinutes[dr.id] ?? 0) / 60).toLocaleString('de-DE', { maximumFractionDigits: 1 })} h</small>
+              <small>{roleName(dr)} · Traktor {dr.skills.boden} · heute {((b.driverMinutes[dr.id] ?? 0) / 60).toLocaleString('de-DE', { maximumFractionDigits: 1 })} h</small>
             </div>
             <div className="board-track">
               {Array.from({ length: DAYS }, (_, d) => (

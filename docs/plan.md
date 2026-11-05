@@ -347,3 +347,84 @@ Schritte:
   - Ist der Fahrer eines laufenden Auftrags krank, steht das Gespann. Am Balken erscheint die
     Warnung „Fahrer wechseln“.
 
+### Ergänzung: Firmenwagen, Berufe, eigene Werkstatt (Wunsch von Nils, 5. Nov. 2026)
+
+**Firmenwagen (umgesetzt)**
+
+| Art | Plätze inkl. Fahrer | Neupreis netto (Annahme) | Zweck |
+| --- | --- | --- | --- |
+| Kombi | 5 | 38.000 € | Kundenbesuche, Fahrerwechsel |
+| Kleinbus | 8 | 49.000 € | Mannschaft zu den Maschinen bringen (Ketten, Phase 4) |
+| Werkstattwagen | 3 | 68.000 € | eigener Pannendienst mit Mechaniker |
+
+- Händler „Nutzfahrzeuge Uelzen“ (fiktiv) verkauft sie neu, die Börse bietet sie gebraucht an.
+  Auf der Karte hat jede Art eine eigene Farbe.
+- Für eine Fahrt nimmt das Spiel den kleinsten freien Wagen mit genug Plätzen, den
+  Werkstattwagen nur, wenn nichts anderes frei ist. Besuch: 1 Platz. Fahrerwechsel: 2 Plätze
+  (Fahrer + Ersatz hin, Fahrer + Abgelöster zurück).
+
+**Berufe und Skills (umgesetzt)**
+
+- Stufe 0 = nicht qualifiziert, 1–5 wie bisher. Elf Tätigkeiten: Traktor (Bodenbearbeitung),
+  Saat, Gülle, Pflanzenschutz (Sachkunde), Radlader/Teleskoplader, Feldhäcksler, Mähdrescher,
+  Rübenroder, Kartoffeltechnik, Lkw/Transport, Werkstatt.
+- Berufsbilder für Bewerbungen und Zeitarbeit:
+
+  | Beruf | Anteil | Skills (Spanne) |
+  | --- | --- | --- |
+  | Traktorfahrer | 34 % | Traktor 1–5, Saat/Gülle 0–3, Radlader 0–2 |
+  | Helfer | 14 % | Traktor 1, Radlader 0–1 (günstig) |
+  | Radladerfahrer | 12 % | Radlader 2–5, Traktor 1–2 |
+  | Erntemaschinenfahrer | 12 % | Traktor 2–3, Häcksler/Drescher/Roder bis 4 (mindestens einer ab 2) |
+  | Werkstattmitarbeiter | 10 % | Werkstatt 2–5, Traktor 1–2 |
+  | Fahrer Pflanzenschutz und Düngung | 10 % | Traktor 1–3, Pflanzenschutz 1–4 |
+  | Lkw-Fahrer | 8 % | Lkw 2–4, immer Führerschein C/CE |
+
+- Der Beruf wird aus den Skills abgeleitet und überall angezeigt. Marktlohn und Gehaltswunsch
+  steigen mit der besten Tätigkeit; Mechaniker und Erntemaschinenfahrer zählen eine halbe
+  Stufe mehr (gesucht).
+- Mindeststufe je Maschine (PA-10, Tabelle `MACHINE_SKILL`): Schlepper ab Traktor 1, eigene
+  Reparatur ab Werkstatt 2. Weitere Einträge kommen mit den Maschinen:
+
+  | Maschine (geplant) | Tätigkeit | Mindeststufe | Phase |
+  | --- | --- | --- | --- |
+  | Radlader, Teleskoplader, Siloschieber | Radlader | 1 (Silo walzen 2) | 4 |
+  | Feldhäcksler | Häcksler | 2 | 4 |
+  | Mähdrescher | Drescher | 2 | 4 |
+  | Rübenroder, Rübenmaus | Roder | 2 | 4 |
+  | Feldspritze | Pflanzenschutz | 1 (Sachkundenachweis) | 4 |
+  | Lkw-Zugmaschine | Lkw + Führerschein C/CE | 1 | nach 5 |
+
+- Der Chef startet mit Traktor 3, Saat 2, Gülle 2 und je 1 in Pflanzenschutz, Radlader, Lkw
+  und Werkstatt. Er kann also selbst keine Reparaturen in eigener Regie machen.
+
+**Pannen und eigene Werkstatt (umgesetzt, inkl. Ersatzteillage)**
+
+- Bei einer Panne steht die Maschine. Der Spieler entscheidet im Reiter Fuhrpark: Händler-Service
+  rufen oder eigenen Werkstattwagen mit Mechaniker schicken. Ohne Entscheidung ruft der Fahrer
+  nach einer Stunde den Händler.
+- **Ersatzteil:**
+  - 60 % Lagerteil, häufig gebraucht und im Werkstattwagen dabei
+  - 25 % beim Händler vorrätig, muss geholt werden
+  - 15 % muss bestellt werden: vor 10 Uhr bestellt um 14 Uhr da, sonst am nächsten Morgen um
+    8 Uhr, also spätestens am nächsten Tag
+- **Händler:** Anfahrt (Hin- und Rückweg bei 50 km/h) und Reparatur 1–3,5 h, frühestens
+  wenn das Teil da ist. In der Ernte dauert es 1,5-mal so lange. Volle Kosten, mit Gewährleistung
+  kostenlos.
+- **Eigene Werkstatt:** Der Mechaniker fährt den Werkstattwagen, falls nötig zuerst zum
+  Händler (Teil abholen, 15 min), dann zur Maschine.
+  - Er folgt dem Gespann, falls es weitergefahren ist.
+  - Reparaturzeit 120 % (Stufe 2) bis 90 % (Stufe 5) der Profizeit. Kosten nur die Teile, etwa
+    45 % des Händlerpreises.
+  - Ist das Teil bestellt, wartet der Einsatz bis zur Lieferung. Ebenso, wenn Mechaniker oder
+    Werkstattwagen gerade beschäftigt sind.
+  - Zurückrufen bricht ab, dann ist die Panne wieder offen.
+
+**Noch geplant**
+
+- Kleinbus für Mannschaftsfahrten: morgens mehrere Fahrer zu Maschinen am Feld bringen und
+  abends abholen (mit Ketten in Phase 4).
+- Wartung durch den eigenen Mechaniker am Hof (günstiger, braucht später eine Werkstatthalle,
+  siehe Standorte und Gebäude).
+- Werkstattmitarbeiter senken den Verschleiß (Pflege), Schulungen heben Skills (PA-09).
+

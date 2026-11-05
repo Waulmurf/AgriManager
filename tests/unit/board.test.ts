@@ -80,8 +80,8 @@ describe('Planungsboard', () => {
     const s = withOrders(5, 2);
     const [o1, o2] = s.business.orders;
     const g = s.company.machines.find((m) => m.type === 'grubber')!;
-    runUntil(s, () => s.business.applicants.length > 0, 20 * 1440);
-    s.command({ kind: 'hire', applicantId: s.business.applicants[0].id, asKind: 'fest' });
+    runUntil(s, () => s.business.applicants.some((a) => a.person.skills.boden >= 1), 20 * 1440);
+    s.command({ kind: 'hire', applicantId: s.business.applicants.find((a) => a.person.skills.boden >= 1)!.id, asKind: 'fest' });
     const d2 = s.company.drivers[1].id;
     const far = o1.latest + 2 * 1440;
     s.command({ kind: 'plan', orderId: o1.id, driverId: 1, tractorId: 1, implementId: g.id, notBefore: far });

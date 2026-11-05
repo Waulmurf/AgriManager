@@ -3,7 +3,7 @@
  * Schlepper: große Hinterräder, Motorhaube; Firmenwagen: Pkw-Form.
  */
 import type { Map as MlMap } from 'maplibre-gl';
-import { BRANDS, COMPANY_CAR, brandKey, type BrandColors } from '../data/brands';
+import { BRANDS, CAR_COLORS, COMPANY_CAR, brandKey, type BrandColors } from '../data/brands';
 
 const SIZE = 40;
 
@@ -65,4 +65,7 @@ export function addVehicleIcons(map: MlMap): void {
     map.addImage(vehicleIconId(b.name, 'tractor'), draw(b, 'tractor', ratio), { pixelRatio: ratio });
   }
   map.addImage(vehicleIconId(COMPANY_CAR.name, 'car'), draw(COMPANY_CAR, 'car', ratio), { pixelRatio: ratio });
+  for (const c of Object.values(CAR_COLORS)) {
+    if (c !== COMPANY_CAR) map.addImage(vehicleIconId(c.name, 'car'), draw(c, 'car', ratio), { pixelRatio: ratio });
+  }
 }

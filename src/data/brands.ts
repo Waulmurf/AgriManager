@@ -20,8 +20,14 @@ export const BRANDS: BrandColors[] = [
   { name: 'Valtra', main: '#D52B1E', accent: '#F2F2F2' },
 ];
 
-/** Firmenwagen ohne Marke */
+/** Firmenwagen ohne Marke (Kombi) */
 export const COMPANY_CAR: BrandColors = { name: 'Firmenwagen', main: '#F4F4F2', accent: '#3A4A5A' };
+/** Farben je Firmenwagen-Art */
+export const CAR_COLORS: Record<string, BrandColors> = {
+  kombi: COMPANY_CAR,
+  kleinbus: { name: 'Kleinbus', main: '#C9D3DD', accent: '#2F4A66' },
+  werkstatt: { name: 'Werkstattwagen', main: '#F29F05', accent: '#3A3A3A' },
+};
 
 export function brandKey(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-');

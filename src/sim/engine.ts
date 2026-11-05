@@ -7,12 +7,13 @@
  */
 import { Rng } from './rng';
 import { PROFILES, Router, curveSpeed, edgeSpeeds, type ProfileKey, type VehicleProfile } from './astar';
-import { BRANDS, COMPANY_CAR } from '../data/brands';
+import { BRANDS, CAR_COLORS, COMPANY_CAR } from '../data/brands';
 import { fieldPattern, type FieldSet } from './fields';
 import { generateFarms, type FarmSet } from './farms';
-import { START_OFFERS, normalizeDrivers, skillDiesel, skillSpeed, startCompany, type Company, type Machine } from './economy';
-import { Business, REMIND_CALL_MINUTES, VISIT_MINUTES, fmtDay, fmtHa, type Command, type QueueCommand, type QueueItem } from './business';
-import { appendEdgePoints, nearestNode, RoadClass, unproject, type RoadGraph } from './roadgraph';
+import { MACHINE_SKILL, MECHANIC_MIN, START_OFFERS, normalizeDrivers, skillDiesel, skillSpeed, startCompany, type CarKind, type Company, type Machine } from './economy';
+import { DEALERS } from '../data/catalog';
+import { Business, REMIND_CALL_MINUTES, VISIT_MINUTES, fmtDay, fmtHa, fmtTime, type Command, type QueueCommand, type QueueItem } from './business';
+import { appendEdgePoints, nearestNode, project, RoadClass, unproject, type RoadGraph } from './roadgraph';
 import { surchargeFactor } from './calendar';
 
 export const STEP_SECONDS = 60;
@@ -149,6 +150,10 @@ export interface PlayerUnitInfo {
 
 type PlayerTask =
   | { kind: 'visit'; driverId: number; farmId: number; phase: 'to' | 'at' | 'back' }
+  | {
+      /** Eigene Reparatur: Mechaniker fährt den Werkstattwagen (ggf. erst zum Händler, Teil holen) */
+      kind: 'repair'; driverId: number; machineId: number; phase: 'fetch' | 'pickup' | 'to' | 'at' | 'back'; tries: number;
+    }
   | {
       /** Fahrerwechsel: driverId fährt den Firmenwagen und bringt passengerId zum Gespann */
       kind: 'shuttle'; driverId: number; passengerId: number; vehicle: number; phase: 'to' | 'at' | 'back'; tries: number;
@@ -298,7 +303,7 @@ export class Simulation {
     this.vehicles.push({
       id: this.vehicles.length,
       name: [m.brand, m.model].filter(Boolean).join(' '),
-      brand: profile === 'car' ? COMPANY_CAR.name : m.brand,
+      brand: profile === 'car' ? (CAR_COLORS[m.carKind ?? 'kombi'] ?? COMPANY_CAR).name : m.brand,
       profile,
       prof: PROFILES[profile],
       state: VehicleState.Waiting,
@@ -389,6 +394,7 @@ export class Simulation {
       else this.stepVehicle(v);
     }
     if (this.queue.length) this.runQueue();
+    this.checkRepairs();
   }
 
   private minutesOf(driverId: number): number {
@@ -425,6 +431,7 @@ export class Simulation {
       if (v.owner !== 'player' || !v.task || v.task.driverId !== driverId) continue;
       const who = this.driverName(driverId);
       if (v.task.kind === 'shuttle') return `${who} fährt ${this.driverName(v.task.passengerId)} zum Fahrerwechsel`;
+      if (v.task.kind === 'repair') return `${who} repariert mit dem Werkstattwagen`;
       return v.task.kind === 'visit' ? `${who} ist auf Besuch bei ${this.business.farmName(v.task.farmId)}` : `${who} fährt einen Auftrag`;
     }
     for (const v of this.vehicles) {
@@ -445,10 +452,7 @@ export class Simulation {
 
   /** Schlepper oder Gerät gerade bei einem anderen Fahrer im Einsatz? */
   private machineInUse(cmd: QueueCommand): string | null {
-    if (cmd.kind === 'visit') {
-      const car = this.vehicles.find((v) => v.owner === 'player' && v.profile === 'car');
-      return car?.task ? 'Firmenwagen ist unterwegs' : null;
-    }
+    if (cmd.kind === 'visit') return this.freeCar(1) ? null : 'Firmenwagen sind unterwegs';
     for (const id of [cmd.tractorId, cmd.implementId]) {
       const m = this.company.machines.find((x) => x.id === id);
       if (m && (m.downUntil ?? 0) > this.time) return `${m.brand} ${m.model}: ${m.downReason ?? 'in der Werkstatt'}`;
@@ -637,7 +641,9 @@ export class Simulation {
         cursor[t.driverId] = Math.max(cursor[t.driverId] ?? this.time, end);
       } else {
         const end = this.time + 30;
-        if (t.kind === 'shuttle') {
+        if (t.kind === 'repair') {
+          bars.push({ key: `r${v.id}`, driverId: t.driverId, kind: 'visit', label: 'Reparatur mit Werkstattwagen', start: this.time, end: this.time + 120, warnings: [] });
+        } else if (t.kind === 'shuttle') {
           const lbl = `Fahrerwechsel: bringt ${this.driverName(t.passengerId)}`;
           bars.push({ key: `r${v.id}`, driverId: t.driverId, kind: 'visit', label: lbl, start: this.time, end, warnings: [] });
           bars.push({ key: `p${v.id}`, driverId: t.passengerId, kind: 'visit', label: 'Fahrt zum Fahrerwechsel', start: this.time, end, warnings: [] });
@@ -702,6 +708,97 @@ export class Simulation {
     return bars;
   }
 
+  /**
+   * Freier Firmenwagen mit genug Plätzen (inkl. Fahrer). Bevorzugt den kleinsten passenden,
+   * den Werkstattwagen nur, wenn nichts anderes frei ist oder er ausdrücklich gebraucht wird.
+   */
+  private freeCar(seats: number, kind?: CarKind): Vehicle | undefined {
+    let best: Vehicle | undefined, bestScore = Infinity;
+    for (const v of this.vehicles) {
+      if (v.owner !== 'player' || v.profile !== 'car' || v.task) continue;
+      const m = this.company.machines.find((x) => x.id === v.machineId);
+      if (!m || (m.downUntil ?? 0) > this.time || (m.seats ?? 5) < seats) continue;
+      if (kind && m.carKind !== kind) continue;
+      const score = (m.seats ?? 5) + (m.carKind === 'werkstatt' && !kind ? 100 : 0);
+      if (score < bestScore) { best = v; bestScore = score; }
+    }
+    return best;
+  }
+
+  /** Fahrzeug, an dem die Maschine gerade hängt (Schlepper selbst oder Gerät im Auftrag) */
+  private vehicleOfMachine(machineId: number): Vehicle | undefined {
+    return this.vehicles.find((v) => v.owner === 'player' && (v.machineId === machineId || (v.task?.kind === 'job' && v.task.implementId === machineId)));
+  }
+
+  private dealerNode(dealerId: number): number {
+    const d = DEALERS.find((x) => x.id === dealerId);
+    if (!d) return this.homeNode;
+    const [x, y] = project(this.graph, d.lonLat[0], d.lonLat[1]);
+    return nearestNode(this.graph, x, y);
+  }
+
+  /** Reparatur-Befehl: Händler rufen oder eigene Werkstatt einplanen */
+  private repairCommand(cmd: Extract<Command, { kind: 'repair' }>): string {
+    const m = this.company.machines.find((x) => x.id === cmd.machineId);
+    const r = m?.repair;
+    if (!m || !r) return 'Keine offene Panne';
+    if (r.state !== 'wartet') return r.state === 'haendler' ? 'Händler repariert schon' : 'Eigene Werkstatt ist schon dran';
+    if (cmd.mode === 'dealer') return this.business.callDealer(m, this.time);
+    const e = this.company.drivers.find((d) => d.id === cmd.mechanicId);
+    if (!e) return 'Mechaniker wählen';
+    if ((e.skills.werkstatt ?? 0) < MECHANIC_MIN) return `${this.driverName(e.id)} ist kein Mechaniker (Werkstatt ab Stufe ${MECHANIC_MIN})`;
+    if (!this.company.machines.some((x) => x.carKind === 'werkstatt')) return 'Kein Werkstattwagen im Fuhrpark';
+    r.mechanicId = e.id;
+    this.business.version++;
+    this.tryOwnRepair(m);
+    if ((r.state as string) === 'eigen') return `${this.driverName(e.id)} fährt mit dem Werkstattwagen los${r.parts !== 'lager' ? ` (holt erst das Teil bei ${r.dealer})` : ''}`;
+    const wait = r.partsReadyAt > this.time ? `Teil kommt ${fmtDay(r.partsReadyAt)} ${fmtTime(r.partsReadyAt)}` : (this.driverBusy(e.id) ?? this.driverBlocked(e.id) ?? 'Werkstattwagen ist unterwegs');
+    return `Eigene Reparatur eingeplant – startet, sobald möglich (${wait})`;
+  }
+
+  /** Eigene Reparatur starten, wenn Teil, Mechaniker und Werkstattwagen bereit sind */
+  private tryOwnRepair(m: Machine): void {
+    const r = m.repair;
+    if (!r || r.state !== 'wartet' || r.mechanicId === undefined) return;
+    if (r.partsReadyAt > this.time) return;
+    const d = r.mechanicId;
+    if (!this.company.drivers.some((x) => x.id === d) || this.driverBusy(d) || this.driverBlocked(d)) return;
+    const van = this.freeCar(1, 'werkstatt');
+    if (!van) return;
+    this.business.startOwnRepair(m, this.time);
+    van.task = { kind: 'repair', driverId: d, machineId: m.id, phase: r.parts === 'lager' ? 'to' : 'fetch', tries: 0 };
+    this.driveRepairVan(van);
+  }
+
+  private driveRepairVan(van: Vehicle) {
+    const t = van.task;
+    if (t?.kind !== 'repair') return;
+    const m = this.company.machines.find((x) => x.id === t.machineId);
+    if (t.phase === 'fetch') { this.driveTo(van, this.dealerNode(m?.repair?.dealerId ?? 0)); return; }
+    const target = this.vehicleOfMachine(t.machineId);
+    if (target && target !== van) {
+      const [px, py] = this.position(target.id);
+      this.driveTo(van, nearestNode(this.graph, px, py));
+    } else this.driveTo(van, this.homeNode);
+  }
+
+  /** Jede Minute: offene Pannen (Händler nach 1 h automatisch, eigene Reparatur starten, Händler fertig) */
+  private checkRepairs() {
+    for (const m of this.company.machines) {
+      const r = m.repair;
+      if (!r) continue;
+      if (r.state === 'haendler' && this.time >= (m.downUntil ?? 0)) {
+        m.repair = undefined;
+        m.downReason = undefined;
+        this.business.info(this.time, `${m.brand} ${m.model} ist repariert.`);
+        continue;
+      }
+      if (r.state !== 'wartet') continue;
+      if (r.mechanicId !== undefined) this.tryOwnRepair(m);
+      else if (this.time >= r.since + 60) this.business.callDealer(m, this.time);
+    }
+  }
+
   /** Gespann steht am Hof (Rüsten oder Abstellen) */
   private atHome(v: Vehicle): boolean {
     const t = v.task;
@@ -743,6 +840,7 @@ export class Simulation {
     if (busy) return busy;
     const blocked = this.driverBlocked(driverId);
     if (blocked) return `${this.driverName(driverId)} ${blocked}`;
+    if ((this.company.drivers.find((d) => d.id === driverId)?.skills.boden ?? 0) < MACHINE_SKILL.schlepper!.min) return `${this.driverName(driverId)} ist nicht als Traktorfahrer qualifiziert`;
     if (this.vehicles.some((x) => x.task?.kind === 'shuttle' && x.task.vehicle === vehicle)) return 'Wechsel ist schon unterwegs';
     if (this.atHome(v)) {
       this.takeOverJob(v, driverId);
@@ -753,8 +851,8 @@ export class Simulation {
     if (!this.company.drivers.some((d) => d.id === chauffeurId)) return 'Fahrer für den Firmenwagen unbekannt';
     const cb = this.driverBusy(chauffeurId) ?? this.driverBlocked(chauffeurId);
     if (cb) return `${this.driverName(chauffeurId)}: ${cb}`;
-    const car = this.vehicles.find((x) => x.owner === 'player' && x.profile === 'car' && !x.task);
-    if (!car) return 'Kein freier Firmenwagen';
+    const car = this.freeCar(2); // Fahrer + Ersatz hin, Fahrer + Abgelöster zurück
+    if (!car) return 'Kein freier Firmenwagen mit zwei Plätzen';
     const [px, py] = this.position(v.id);
     car.task = { kind: 'shuttle', driverId: chauffeurId, passengerId: driverId, vehicle, phase: 'to', tries: 0 };
     if (!this.driveTo(car, nearestNode(this.graph, px, py))) return 'Gespann nicht erreichbar';
@@ -822,6 +920,8 @@ export class Simulation {
     }
     const driver = this.company.drivers.find((d) => d.id === (cmd.driverId ?? 1));
     if (!driver) return 'Fahrer gibt es nicht mehr';
+    const need = MACHINE_SKILL.schlepper!;
+    if ((driver.skills[need.skill] ?? 0) < need.min) return `${this.driverName(driver.id)} ist nicht als Traktorfahrer qualifiziert`;
     const o = b.orders.find((x) => x.id === cmd.orderId);
     if (!o || o.status !== 'offen') return 'Auftrag nicht startbar';
     const tractor = this.company.machines.find((m) => m.id === cmd.tractorId && m.type === 'schlepper');
@@ -874,7 +974,8 @@ export class Simulation {
     const t = this.time;
     if (cmd.kind === 'visit') {
       const farm = this.farms!.farms[cmd.farmId];
-      const car = this.vehicles.find((v) => v.owner === 'player' && v.profile === 'car')!;
+      const car = this.freeCar(1);
+      if (!car) return 'Kein freier Firmenwagen';
       car.task = { kind: 'visit', driverId: 1, farmId: farm.id, phase: 'to' };
       if (!this.driveTo(car, farm.homeNode)) return 'Hof nicht erreichbar';
       b.version++;
@@ -910,6 +1011,11 @@ export class Simulation {
         const t = v.task;
         const b = this.business;
         if (t?.kind === 'visit') status = t.phase === 'to' ? `fährt zu ${b.farmName(t.farmId)}` : t.phase === 'at' ? `Besuch bei ${b.farmName(t.farmId)}` : 'fährt zurück zum Hof';
+        if (t?.kind === 'repair') {
+          const m = this.company.machines.find((x) => x.id === t.machineId);
+          const what = m ? `${m.brand} ${m.model}` : 'Maschine';
+          status = { fetch: `holt Ersatzteil für ${what} beim Händler`, pickup: 'holt Ersatzteil', to: `fährt zur Panne (${what})`, at: `repariert ${what}`, back: 'fährt zurück zum Hof' }[t.phase];
+        }
         if (t?.kind === 'shuttle') status = t.phase === 'to' ? `bringt ${this.driverName(t.passengerId)} zum Fahrerwechsel` : t.phase === 'at' ? 'Fahrerwechsel' : 'fährt mit dem abgelösten Fahrer zurück';
         if (t?.kind === 'job') {
           const o = b.orders.find((x) => x.id === t.orderId);
@@ -979,6 +1085,8 @@ export class Simulation {
         return b.extendRent(cmd.employeeId, cmd.days, t);
       case 'takeOver':
         return b.takeOver(cmd.employeeId, cmd.asKind, t);
+      case 'repair':
+        return this.repairCommand(cmd);
       case 'swapDriver':
         return this.swapDriver(cmd.vehicle, cmd.driverId, cmd.chauffeurId);
       case 'vacation':
@@ -1057,6 +1165,10 @@ export class Simulation {
           task.phase = 'back';
         } else {
           if (task.phase === 'back') return 'Fahrzeug ist schon auf dem Rückweg';
+          if (task.kind === 'repair') {
+            const m = this.company.machines.find((x) => x.id === task.machineId);
+            if (m?.repair && task.phase !== 'at') { m.repair.state = 'wartet'; m.repair.mechanicId = undefined; m.repair.since = t; m.downReason = 'Panne – Reparatur offen'; }
+          }
           task.phase = 'back';
         }
         this.driveFromHere(v, this.homeNode);
@@ -1400,6 +1512,23 @@ export class Simulation {
     const b = this.business;
     this.chargeDiesel(v, false);
     if (!t) { v.state = VehicleState.Waiting; return; }
+    if (t.kind === 'repair') {
+      if (t.phase === 'fetch') { t.phase = 'pickup'; v.state = VehicleState.Waiting; v.waitMin = 15; }
+      else if (t.phase === 'to') {
+        const target = this.vehicleOfMachine(t.machineId);
+        const [cx, cy] = this.position(v.id);
+        const [px, py] = target ? this.position(target.id) : [cx, cy];
+        if ((cx - px) * (cx - px) + (cy - py) * (cy - py) > 1500 * 1500 && t.tries < 3) { t.tries++; this.driveRepairVan(v); return; }
+        const m = this.company.machines.find((x) => x.id === t.machineId);
+        const skill = this.company.drivers.find((d) => d.id === t.driverId)?.skills.werkstatt ?? 2;
+        t.phase = 'at';
+        v.state = VehicleState.Waiting;
+        v.waitMin = m ? this.business.ownRepairMinutes(m, skill) : 60;
+        if (m) m.downReason = `Panne – ${this.driverName(t.driverId)} repariert`;
+      } else { v.task = undefined; v.state = VehicleState.Waiting; }
+      b.version++;
+      return;
+    }
     if (t.kind === 'shuttle') {
       if (t.phase === 'to') this.shuttleArrive(v);
       else { v.task = undefined; v.state = VehicleState.Waiting; b.version++; }
@@ -1452,6 +1581,17 @@ export class Simulation {
   private playerWaitDone(v: Vehicle) {
     const t = v.task;
     if (!t) return;
+    if (t.kind === 'repair') {
+      if (t.phase === 'pickup') { t.phase = 'to'; this.driveRepairVan(v); }
+      else if (t.phase === 'at') {
+        const m = this.company.machines.find((x) => x.id === t.machineId);
+        if (m) this.business.finishOwnRepair(m, this.time, this.driverName(t.driverId));
+        t.phase = 'back';
+        this.driveTo(v, this.homeNode);
+      }
+      this.business.version++;
+      return;
+    }
     if (t.kind === 'shuttle' && t.phase === 'at') {
       const target = this.vehicles[t.vehicle];
       t.phase = 'back'; // abgelöster Fahrer fährt mit zurück

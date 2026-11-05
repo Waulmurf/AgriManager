@@ -27,12 +27,17 @@ function world(seed = 3) {
   return new Simulation(parseRoadGraph(buildRoadGraphBuffer(nodes, edges)), { seed, vehicleCount: 0, fields: parseFields(buildFieldsBuffer(polys, access)) });
 }
 
+const runUntil = (s: Simulation, cond: () => boolean, max = 5000) => {
+  for (let i = 0; i < max && !cond(); i++) s.step();
+};
+
 describe('Katalog und Händler', () => {
   it('jede Marke im Katalog hat einen Händler, Daten sind vollständig', () => {
     for (const m of CATALOG) {
       expect(DEALERS.some((d) => d.tractorBrands.includes(m.brand) || d.implementBrands.includes(m.brand))).toBe(true);
       expect(m.newPrice).toBeGreaterThan(0);
       if (m.type === 'schlepper') expect(m.power).toBeGreaterThan(90);
+      else if (m.type === 'firmenwagen') expect(m.seats).toBeGreaterThanOrEqual(3);
       else { expect(m.width).toBeGreaterThan(0); expect(m.powerNeed).toBeGreaterThan(0); expect(m.haPerHour).toBeGreaterThan(0); }
     }
   });
@@ -148,5 +153,88 @@ describe('Fuhrpark', () => {
     expect(b.hash()).toBe(a.hash());
     expect(b.company.machines.length).toBe(a.company.machines.length);
     expect(b.business.offers.length).toBe(a.business.offers.length);
+  });
+});
+
+describe('Firmenwagen und eigene Werkstatt', () => {
+  const mechanicWorld = (seed = 5) => {
+    const s = world(seed);
+    s.company.cash = 400_000;
+    // Werkstattwagen bestellen und liefern lassen
+    s.command({ kind: 'order', dealerId: 7, modelKey: 'car-werkstatt' });
+    s.run(s.business.deliveries[0].at - s.time + 1440);
+    const van = s.company.machines.find((m) => m.carKind === 'werkstatt')!;
+    expect(van.seats).toBe(3);
+    // Mechaniker über eine Bewerbung (notfalls Skill setzen)
+    for (let d = 0; d < 60 && !s.business.applicants.some((a) => a.person.skills.werkstatt >= 2); d++) s.run(1440);
+    const a = s.business.applicants.find((x) => x.person.skills.werkstatt >= 2) ?? s.business.applicants[0];
+    s.command({ kind: 'hire', applicantId: a.id, asKind: 'fest' });
+    const mech = s.company.drivers[s.company.drivers.length - 1];
+    mech.skills.werkstatt = Math.max(mech.skills.werkstatt, 3);
+    return { s, van, mech };
+  };
+
+  it('Katalog: Kombi 5, Kleinbus 8, Werkstattwagen 3 Plätze; eigenes Symbol', () => {
+    expect(CATALOG.find((m) => m.key === 'car-kombi')!.seats).toBe(5);
+    expect(CATALOG.find((m) => m.key === 'car-kleinbus')!.seats).toBe(8);
+    expect(CATALOG.find((m) => m.key === 'car-werkstatt')!.seats).toBe(3);
+    const s = world(5);
+    expect(s.company.machines.find((m) => m.type === 'firmenwagen')!.seats).toBe(5);
+  });
+
+  it('Panne: ohne Entscheidung ruft der Fahrer nach einer Stunde den Händler', () => {
+    const s = world(5);
+    const m = s.company.machines[0];
+    s.business.breakdown(m, s.time, s.homeLonLat, 'am Hof');
+    expect(m.repair!.state).toBe('wartet');
+    s.run(61);
+    expect(m.repair!.state).toBe('haendler');
+    s.run(m.downUntil! - s.time + 2);
+    expect(m.repair).toBeUndefined();
+    expect((m.downUntil ?? 0) <= s.time).toBe(true);
+  });
+
+  it('bestelltes Teil ist spätestens am nächsten Tag da', () => {
+    const s = world(5);
+    const m = s.company.machines[0];
+    for (let i = 0; i < 200; i++) {
+      s.business.breakdown(m, s.time, s.homeLonLat, 'test');
+      if (m.repair!.parts === 'bestellt') break;
+    }
+    const r = m.repair!;
+    expect(r.parts).toBe('bestellt');
+    expect(r.partsReadyAt - s.time).toBeLessThanOrEqual(26 * 60);
+    expect(r.partsReadyAt).toBeGreaterThan(s.time);
+    s.command({ kind: 'repair', machineId: m.id, mode: 'dealer' });
+    expect(m.downUntil!).toBeGreaterThan(r.partsReadyAt);
+  });
+
+  it('eigene Werkstatt: Mechaniker fährt mit dem Werkstattwagen hin (Teil ggf. erst holen) und repariert günstiger', () => {
+    const { s, mech } = mechanicWorld();
+    const m = s.company.machines.find((x) => x.type === 'schlepper')!;
+    let r;
+    for (let i = 0; i < 200; i++) {
+      s.business.breakdown(m, s.time, s.homeLonLat, 'test');
+      r = m.repair!;
+      if (r.parts === 'haendler' && r.cost > 0) break;
+    }
+    const cost = r!.cost;
+    const cash = s.company.cash;
+    runUntil(s, () => s.time % 1440 > 30 && s.time % 1440 < 300 && !s.driverBusy(mech.id), 1440);
+    m.repair!.since = s.time;
+    expect(s.command({ kind: 'repair', machineId: m.id, mode: 'own', mechanicId: mech.id })).toMatch(/holt erst das Teil/);
+    expect(s.driverBusy(mech.id)).toMatch(/Werkstattwagen/);
+    expect(cash - s.company.cash).toBeCloseTo(Math.round((cost * 0.45) / 10) * 10, 0);
+    runUntil(s, () => !m.repair, 1440);
+    expect(m.repair).toBeUndefined();
+    runUntil(s, () => !s.driverBusy(mech.id), 600);
+    expect(s.driverBusy(mech.id)).toBeNull();
+  });
+
+  it('kein Mechaniker: eigene Reparatur abgelehnt', () => {
+    const s = world(5);
+    const m = s.company.machines[0];
+    s.business.breakdown(m, s.time, s.homeLonLat, 'test');
+    expect(s.command({ kind: 'repair', machineId: m.id, mode: 'own', mechanicId: 1 })).toMatch(/kein Mechaniker/);
   });
 });
