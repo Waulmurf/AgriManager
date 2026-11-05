@@ -10,6 +10,7 @@ import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
 import { assetBase, mapDataUrl } from '../platform';
 import { addFallbackImages, BASEMAP_SOURCE, buildStyle, circlePolygon } from '../map/style';
 import { addVehicleIcons, vehicleIconId } from '../map/icons';
+import { DEALERS } from '../data/catalog';
 import { VehicleInterpolator, type VehicleSample } from '../map/interpolator';
 import type { BusinessState, FarmSummary, FromWorker, Speed, ToWorker, WorkerStats } from '../sim/protocol';
 import type { Command, GameEvent } from '../sim/business';
@@ -601,6 +602,36 @@ export class GameController {
         'text-anchor': 'top',
       },
       paint: { 'text-color': '#7a2f12', 'text-halo-color': '#fff', 'text-halo-width': 1.5 },
+    });
+    // Händler (HM-04): Standort mit Namen, Klick zeigt die Marken
+    map.addSource('dealers', {
+      type: 'geojson',
+      data: {
+        type: 'FeatureCollection',
+        features: DEALERS.map((d) => ({ type: 'Feature', id: d.id, properties: { id: d.id, name: d.name }, geometry: { type: 'Point', coordinates: d.lonLat } })),
+      },
+    });
+    map.addLayer({
+      id: 'dealers-dot',
+      type: 'circle',
+      source: 'dealers',
+      paint: { 'circle-radius': 6, 'circle-color': '#3a4a5a', 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 },
+    });
+    map.addLayer({
+      id: 'dealers-label',
+      type: 'symbol',
+      source: 'dealers',
+      minzoom: 9,
+      layout: { 'text-field': ['get', 'name'], 'text-font': ['Noto Sans Medium'], 'text-size': 11, 'text-offset': [0, 1.1], 'text-anchor': 'top', 'text-optional': true },
+      paint: { 'text-color': '#2b3a48', 'text-halo-color': '#fff', 'text-halo-width': 1.4 },
+    });
+    map.on('click', 'dealers-dot', (e) => {
+      const d = DEALERS.find((x) => x.id === Number(e.features?.[0]?.properties?.id));
+      if (!d) return;
+      e.preventDefault();
+      const brands = [...d.tractorBrands, ...d.implementBrands].join(', ');
+      new maplibregl.Popup({ maxWidth: '260px' }).setLngLat(d.lonLat)
+        .setHTML(`<strong>${d.name}</strong><br><small>${d.town} · ${brands}</small><br><small>Kauf, Bestellung und Werkstatt – Reiter Markt bzw. Fuhrpark</small>`).addTo(map);
     });
     map.addSource('farms', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
     map.addLayer({

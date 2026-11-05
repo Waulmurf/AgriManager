@@ -2,7 +2,7 @@
 import type { JobEstimate, PlayerUnitInfo, SaveState, VehicleInfo } from './engine';
 import type { Company } from './economy';
 import type { ContactPreference } from './farms';
-import type { Applicant, Command, GameEvent, Invoice, LedgerEntry, Order, QueueItem, Request } from './business';
+import type { Applicant, Command, Delivery, GameEvent, Invoice, LedgerEntry, Order, QueueItem, Request } from './business';
 import type { MarketOffer } from './economy';
 
 /** Spielminuten pro Sekunde Echtzeit bei 1x. 10x/100x vervielfachen die Schrittzahl. */
@@ -65,6 +65,12 @@ export interface BusinessState {
   driverMinutes: Record<number, number>;
   driverStatus: Record<number, string | null>;
   applicants: Applicant[];
+  /** bestellte Neumaschinen, Rabatt je Händler, aktueller Wert je eigener Maschine */
+  deliveries: Delivery[];
+  discounts: Record<number, number>;
+  machineValues: Record<number, number>;
+  /** Maschinen gerade im Einsatz */
+  busyMachines: number[];
   /** Zeitschätzung je offener Anfrage bzw. offenem Auftrag (Schlüssel = ID) */
   estimates: Record<number, JobEstimate>;
   /** Kunden bei der Konkurrenz bzw. in der Probephase (nur kleine Aufträge) */

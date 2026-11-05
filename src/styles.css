@@ -57,8 +57,8 @@ html, body, #root { margin: 0; height: 100%; }
 .machines small, .hint { color: var(--muted); font-size: 12px; }
 .hint { margin: 6px 0 0; }
 .maplibregl-popup-content { font-size: 13px; line-height: 1.4; }
-.tabs { display: flex; gap: 2px; margin: -12px -16px 10px; padding: 0 8px; border-bottom: 1px solid var(--line); background: #f3f1ea; position: sticky; top: -12px; z-index: 1; }
-.tabs button { font: inherit; font-size: 12px; padding: 9px 7px; border: 0; background: none; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; position: relative; }
+.tabs { display: flex; flex-wrap: wrap; gap: 0 2px; margin: -12px -16px 10px; padding: 0 8px; border-bottom: 1px solid var(--line); background: #f3f1ea; position: sticky; top: -12px; z-index: 1; }
+.tabs button { font: inherit; font-size: 12px; padding: 7px 6px; border: 0; background: none; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; position: relative; }
 .tabs button.active { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
 .tabs .dot { margin-left: 4px; background: var(--warn); color: #fff; border-radius: 8px; padding: 0 5px; font-size: 10px; }
 .panel { width: 340px; }

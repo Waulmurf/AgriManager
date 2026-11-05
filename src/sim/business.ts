@@ -9,9 +9,10 @@ import { Rng } from './rng';
 import { Crop, SURNAMES, type FarmSet } from './farms';
 import type { FieldSet } from './fields';
 import {
-  EMPLOYER_SV, MIN_WAGE, MONTH_HOURS, SKILLS, XP_MINUTES_PER_LEVEL, baseSkills, gameDate, START_OFFERS,
-  type Company, type Employee, type MarketOffer, type Skill,
+  EMPLOYER_SV, MIN_WAGE, MONTH_HOURS, SKILLS, XP_MINUTES_PER_LEVEL, baseSkills, gameDate, marketValue,
+  serviceInterval, START_OFFERS, type Company, type Employee, type Machine, type MarketOffer, type Skill,
 } from './economy';
+import { CATALOG, DEALERS, dealersFor, type CatalogModel } from '../data/catalog';
 
 const FIRST_NAMES = [
   'Jan', 'Lars', 'Timo', 'Sven', 'Hauke', 'Malte', 'Jonas', 'Niklas', 'Lukas', 'Finn', 'Ole', 'Tobias',
@@ -137,7 +138,21 @@ export interface Invoice {
   status: InvoiceStatus;
 }
 
-export type LedgerCategory = 'Rechnung' | 'Diesel' | 'Maschinenkauf' | 'Personal' | 'Sonstiges';
+export type LedgerCategory = 'Rechnung' | 'Diesel' | 'Maschinenkauf' | 'Personal' | 'Werkstatt' | 'Sonstiges';
+
+/** Bestellte Neumaschine (HM-06: Lieferzeit) */
+export interface Delivery {
+  id: number;
+  machine: Omit<Machine, 'id'>;
+  dealerId: number;
+  at: number;
+  price: number;
+}
+
+/** Werkstattcheck vor dem Kauf auf der Gebrauchtbörse (MZ-11) */
+export const CHECK_COST = 180;
+/** Inzahlungnahme: Anteil am Marktwert (MZ-12), privat 95–105 % nach 5–25 Tagen */
+export const TRADE_IN_SHARE = 0.8;
 
 /** Buchung auf dem Konto (WF-08) */
 export interface LedgerEntry {
@@ -161,6 +176,10 @@ export type Command =
   | { kind: 'buy'; offerId: number }
   | { kind: 'recall'; vehicle: number }
   | { kind: 'remind'; invoiceId: number }
+  | { kind: 'order'; dealerId: number; modelKey: string }
+  | { kind: 'check'; offerId: number }
+  | { kind: 'sell'; machineId: number; mode: 'tradein' | 'privat' }
+  | { kind: 'service'; machineId: number }
   | { kind: 'hire'; applicantId: number; asKind: 'fest' | 'saison' }
   | { kind: 'fire'; employeeId: number }
   | { kind: 'dequeue'; queueId: number }
@@ -182,6 +201,9 @@ export class Business {
   readonly invoices: Invoice[] = [];
   readonly ledger: LedgerEntry[] = [];
   readonly applicants: Applicant[] = [];
+  readonly deliveries: Delivery[] = [];
+  /** Umsatz je Händler (Rabatt und Werkstattvorrang, HM-07) */
+  readonly dealerSpend: Record<number, number> = {};
   /** aufgelaufene Lohnkosten des laufenden Monats (wird am Monatsersten gebucht) */
   private payrollAccrued = 0;
   /** heute verbrauchter Diesel, wird täglich als eine Buchung zusammengefasst */
@@ -220,6 +242,8 @@ export class Business {
       dieselTodayEur: this.dieselTodayEur,
       applicants: this.applicants,
       payrollAccrued: this.payrollAccrued,
+      deliveries: this.deliveries,
+      dealerSpend: this.dealerSpend,
     };
   }
 
@@ -236,6 +260,9 @@ export class Business {
     this.dieselTodayL = s.dieselTodayL;
     this.dieselTodayEur = s.dieselTodayEur;
     put(this.applicants, s.applicants ?? []);
+    put(this.deliveries, s.deliveries ?? []);
+    for (const k of Object.keys(this.dealerSpend)) delete this.dealerSpend[Number(k)];
+    Object.assign(this.dealerSpend, s.dealerSpend ?? {});
     this.payrollAccrued = s.payrollAccrued ?? 0;
     this.events = [];
     this.version++;
@@ -366,6 +393,14 @@ export class Business {
     this.bookDiesel(time);
     this.payroll(time, workedMinutes);
     this.updateApplicants(time);
+    this.updateMarket(time);
+    this.arriveDeliveries(time);
+    // Auftrag steht wegen Panne: Kunde wartet und wird unzufriedener (MZ-07)
+    for (const o of this.orders) {
+      if (o.status !== 'läuft') continue;
+      const down = this.company.machines.some((m) => (m.id === o.tractorId || m.id === o.implementId) && (m.downUntil ?? 0) > time);
+      if (down) this.satisfy(o.farmId, -1, time);
+    }
     this.checkInvoices(time);
     for (const r of this.requests) {
       if (r.status === 'offen' && time >= r.replyBy) {
@@ -443,12 +478,263 @@ export class Business {
     const o = this.offers[idx];
     if (this.company.cash < o.price) return 'Nicht genug Geld auf dem Konto';
     this.company.cash -= o.price;
-    const id = this.company.machines.reduce((m, x) => Math.max(m, x.id), 0) + 1;
-    this.company.machines.push({ id, ...o.machine });
+    const id = this.nextMachineId();
+    const m: Machine = {
+      id, ...structuredClone(o.machine), boughtAt: time, dealerId: o.dealerId || undefined,
+      serviceAtH: o.machine.serviceAtH ?? o.machine.hours + serviceInterval(o.machine),
+    };
+    if (o.warrantyMonths) m.warrantyUntil = time + o.warrantyMonths * 30 * 1440;
+    // versteckter Mangel: Zustand ist tatsächlich schlechter als angegeben
+    if (m.defect) m.condition = Math.max(10, m.condition - 20);
+    this.company.machines.push(m);
     this.offers.splice(idx, 1);
+    if (o.dealerId) this.dealerSpend[o.dealerId] = (this.dealerSpend[o.dealerId] ?? 0) + o.price;
     this.ledger.push({ time, text: `Kauf ${o.machine.brand} ${o.machine.model}`, amount: -o.price, category: 'Maschinenkauf' });
-    this.emit(time, 'info', `Gekauft: ${o.machine.brand} ${o.machine.model} für ${fmtEur(o.price)}.`);
+    this.emit(time, 'info', `Gekauft: ${o.machine.brand} ${o.machine.model} für ${fmtEur(o.price)}.${m.defect ? ' Beim ersten Einsatz zeigt sich ein Mangel – Zustand schlechter als angegeben.' : ''}`);
     return 'gekauft';
+  }
+
+  private nextMachineId(): number {
+    let id = this.company.machines.reduce((m, x) => Math.max(m, x.id), 0);
+    for (const d of this.deliveries) id = Math.max(id, d.id);
+    return id + 1;
+  }
+
+  // ---------- Fuhrpark: Händler, Börse, Verkauf, Werkstatt ----------
+
+  /** Rabatt beim Händler (HM-07): 5 % plus 1 % je 50.000 € Umsatz, höchstens 12 % */
+  dealerDiscount(dealerId: number): number {
+    return Math.min(0.12, 0.05 + Math.floor((this.dealerSpend[dealerId] ?? 0) / 50_000) * 0.01);
+  }
+
+  /** Neupreis beim Händler nach Rabatt */
+  newPrice(dealerId: number, model: CatalogModel): number {
+    return Math.round((model.newPrice * (1 - this.dealerDiscount(dealerId))) / 100) * 100;
+  }
+
+  /** Neumaschine bestellen (HM-06): Anzahlung entfällt, bezahlt wird bei Lieferung */
+  order(dealerId: number, modelKey: string, time: number): string {
+    const d = DEALERS.find((x) => x.id === dealerId);
+    const m = CATALOG.find((x) => x.key === modelKey);
+    if (!d || !m) return 'Modell nicht lieferbar';
+    if (![...d.tractorBrands, ...d.implementBrands].includes(m.brand)) return `${d.name} führt ${m.brand} nicht`;
+    const price = this.newPrice(dealerId, m);
+    const committed = this.deliveries.reduce((a, x) => a + x.price, 0);
+    if (this.company.cash - committed < price) return 'Nicht genug Geld für Bestellung und Lieferung';
+    const weeks = m.deliveryWeeks + (this.rng.int(3) - 1);
+    const del: Delivery = {
+      id: this.nextMachineId(),
+      machine: {
+        type: m.type, brand: m.brand, model: m.model, year: gameDate(time).year, hours: 0, condition: 100,
+        newPrice: m.newPrice, power: m.power, width: m.width, powerNeed: m.powerNeed, haPerHour: m.haPerHour,
+        workKmh: m.workKmh, dieselLHa: m.dieselLHa, serviceAtH: serviceInterval(m),
+      },
+      dealerId,
+      at: time + weeks * 7 * 1440,
+      price,
+    };
+    this.deliveries.push(del);
+    this.emit(time, 'info', `Bestellt bei ${d.name}: ${m.brand} ${m.model} für ${fmtEur(price)}, Lieferung etwa ${fmtDay(del.at)}.`);
+    return `bestellt, Lieferung etwa ${fmtDay(del.at)}`;
+  }
+
+  private arriveDeliveries(time: number) {
+    for (let i = this.deliveries.length - 1; i >= 0; i--) {
+      const d = this.deliveries[i];
+      if (d.at > time) continue;
+      this.deliveries.splice(i, 1);
+      this.company.cash = Math.round((this.company.cash - d.price) * 100) / 100;
+      this.company.machines.push({ id: d.id, ...d.machine, boughtAt: time, dealerId: d.dealerId, warrantyUntil: time + 24 * 30 * 1440 });
+      this.dealerSpend[d.dealerId] = (this.dealerSpend[d.dealerId] ?? 0) + d.price;
+      this.ledger.push({ time, text: `Lieferung ${d.machine.brand} ${d.machine.model}`, amount: -d.price, category: 'Maschinenkauf' });
+      this.emit(time, 'info', `Geliefert: ${d.machine.brand} ${d.machine.model} steht am Hof (${fmtEur(d.price)} bezahlt, 24 Monate Gewährleistung).`);
+    }
+  }
+
+  /** Gebrauchtangebote bei Händlern (mit Gewährleistung) und auf der Börse (privat) erneuern */
+  private updateMarket(time: number) {
+    for (let i = this.offers.length - 1; i >= 0; i--) {
+      const u = this.offers[i].until;
+      if (u !== undefined && u <= time) this.offers.splice(i, 1);
+    }
+    for (const d of DEALERS) {
+      const brands = [...d.tractorBrands, ...d.implementBrands];
+      const models = CATALOG.filter((m) => brands.includes(m.brand));
+      if (!models.length) continue;
+      const have = this.offers.filter((o) => o.dealerId === d.id).length;
+      if (have < 3 && this.rng.next() < 0.3) this.offers.push(this.usedOffer(models[this.rng.int(models.length)], time, d.id));
+    }
+    const priv = this.offers.filter((o) => o.dealerId === 0).length;
+    if (priv < 6 && this.rng.next() < 0.4) this.offers.push(this.usedOffer(CATALOG[this.rng.int(CATALOG.length)], time, 0));
+  }
+
+  private usedOffer(m: CatalogModel, time: number, dealerId: number): MarketOffer {
+    const r = this.rng;
+    const year = gameDate(time).year;
+    const age = 2 + r.int(13);
+    const tractor = m.type === 'schlepper';
+    const hours = Math.round(age * (tractor ? 350 + r.int(450) : 80 + r.int(120)) / 10) * 10;
+    let condition = Math.round(100 - age * 2 - hours / (tractor ? 250 : 60) + r.int(11) - 5);
+    condition = Math.max(25, Math.min(95, condition));
+    const value = marketValue(m.newPrice, age, hours) * (0.9 + condition / 500);
+    const dealer = DEALERS.find((x) => x.id === dealerId);
+    const factor = dealer ? 1.05 + r.next() * 0.1 : 0.85 + r.next() * 0.15;
+    const price = Math.round((value * factor) / 100) * 100;
+    const towns = ['Bad Bevensen', 'Bienenbüttel', 'Ebstorf', 'Bodenteich', 'Rosche', 'Clenze', 'Hankensbüttel', 'Dannenberg', 'Gifhorn', 'Lüchow'];
+    return {
+      id: 1000 + this.nextId++,
+      machine: {
+        type: m.type, brand: m.brand, model: m.model, year: year - age, hours, condition, newPrice: m.newPrice,
+        power: m.power, width: m.width, powerNeed: m.powerNeed, haPerHour: m.haPerHour, workKmh: m.workKmh, dieselLHa: m.dieselLHa,
+        serviceAtH: hours + (r.next() < 0.3 ? -50 : serviceInterval(m) - r.int(200)),
+        // privat: jeder vierte mit verstecktem Mangel
+        defect: !dealer && r.next() < 0.25 ? true : undefined,
+      },
+      price,
+      seller: dealer ? `${dealer.name} (Händler)` : `Privat, ${towns[r.int(towns.length)]}`,
+      note: dealer ? 'Gebraucht vom Händler, Gewährleistung 6 Monate' : 'Gebrauchtbörse, ohne Gewährleistung',
+      dealerId,
+      warrantyMonths: dealer ? 6 : 0,
+      until: time + (14 + r.int(30)) * 1440,
+    };
+  }
+
+  /** Werkstattcheck vor dem Kauf: kostet Geld, deckt versteckte Mängel auf (MZ-11) */
+  check(offerId: number, time: number): string {
+    const o = this.offers.find((x) => x.id === offerId);
+    if (!o) return 'Angebot nicht mehr verfügbar';
+    if (o.checked) return 'Schon geprüft';
+    if (o.dealerId) return 'Händlermaschinen sind geprüft';
+    this.payWorkshop(time, CHECK_COST, `Werkstattcheck ${o.machine.brand} ${o.machine.model}`);
+    o.checked = true;
+    this.version++;
+    return o.machine.defect ? `Mangel gefunden: Zustand eher ${Math.max(10, o.machine.condition - 20)} % statt ${o.machine.condition} %` : 'Keine Mängel gefunden';
+  }
+
+  private payWorkshop(time: number, amount: number, text: string, m?: Machine) {
+    const a = Math.round(amount * 100) / 100;
+    this.company.cash = Math.round((this.company.cash - a) * 100) / 100;
+    this.ledger.push({ time, text, amount: -a, category: 'Werkstatt' });
+    if (m) m.costTotal = Math.round(((m.costTotal ?? 0) + a) * 100) / 100;
+  }
+
+  /** Marktwert einer eigenen Maschine (Startformel, Zustand verschiebt ±) */
+  machineValueNow(m: Machine, time: number): number {
+    const age = Math.max(0, gameDate(time).year - m.year);
+    return Math.round(marketValue(m.newPrice, age, m.hours) * (0.9 + m.condition / 500));
+  }
+
+  /** Verkaufen: Inzahlungnahme sofort, privat nach einigen Tagen zu besserem Preis (MZ-12) */
+  sell(machineId: number, mode: 'tradein' | 'privat', time: number): string {
+    const m = this.company.machines.find((x) => x.id === machineId);
+    if (!m) return 'Maschine unbekannt';
+    if (m.type === 'firmenwagen' && this.company.machines.filter((x) => x.type === 'firmenwagen').length < 2) return 'Ohne Firmenwagen sind keine Besuche möglich';
+    const value = this.machineValueNow(m, time);
+    if (mode === 'tradein') {
+      const price = Math.round((value * TRADE_IN_SHARE) / 100) * 100;
+      this.removeMachine(m, price, time, 'in Zahlung gegeben');
+      return `in Zahlung gegeben für ${fmtEur(price)}`;
+    }
+    if (m.saleAt !== undefined) return 'Ist schon inseriert';
+    m.saleAt = time + (5 + this.rng.int(21)) * 1440;
+    m.salePrice = Math.round((value * (0.95 + this.rng.next() * 0.1)) / 100) * 100;
+    this.version++;
+    this.emit(time, 'info', `${m.brand} ${m.model} auf der Gebrauchtbörse inseriert (Wert etwa ${fmtEur(value)}).`);
+    return 'inseriert – Käufer meldet sich in einigen Tagen';
+  }
+
+  /** Privatverkäufe abschließen, sobald ein Käufer da und die Maschine frei ist */
+  completeSales(time: number, inUse: Set<number>): number[] {
+    const sold: number[] = [];
+    for (const m of [...this.company.machines]) {
+      if (m.saleAt === undefined || m.saleAt > time || inUse.has(m.id)) continue;
+      sold.push(m.id);
+      this.removeMachine(m, m.salePrice ?? 0, time, 'privat verkauft');
+    }
+    return sold;
+  }
+
+  private removeMachine(m: Machine, price: number, time: number, how: string) {
+    const i = this.company.machines.indexOf(m);
+    if (i >= 0) this.company.machines.splice(i, 1);
+    this.company.cash = Math.round((this.company.cash + price) * 100) / 100;
+    this.ledger.push({ time, text: `Verkauf ${m.brand} ${m.model}`, amount: price, category: 'Maschinenkauf' });
+    this.emit(time, 'info', `${m.brand} ${m.model} ${how}: ${fmtEur(price)}.`);
+  }
+
+  /** Entfernung (km, Luftlinie × 1,3) zum nächsten Händler der Marke; ohne Händler 60 km */
+  dealerKm(brand: string, home: [number, number]): { km: number; name: string; id: number } {
+    let best = { km: 60, name: 'Fremdwerkstatt', id: 0 };
+    for (const d of dealersFor(brand)) {
+      const dx = (d.lonLat[0] - home[0]) * 67, dy = (d.lonLat[1] - home[1]) * 111;
+      const km = Math.sqrt(dx * dx + dy * dy) * 1.3;
+      if (km < best.km) best = { km, name: d.name, id: d.id };
+    }
+    return best;
+  }
+
+  /** Ernte und Herbst: Werkstätten ausgelastet (HM-08) */
+  private workshopBusy(time: number): boolean {
+    const mo = gameDate(time).month;
+    return mo >= 7 && mo <= 10;
+  }
+
+  /** Wartung beim Händler (MZ-05): Maschine einen Arbeitstag weg, Zustand +3, Intervall neu */
+  service(m: Machine, time: number, home: [number, number]): string {
+    const d = this.dealerKm(m.brand, home);
+    const tractor = m.type === 'schlepper' || m.type === 'firmenwagen';
+    const cost = Math.round((tractor ? 400 + 0.004 * m.newPrice : 150 + 0.003 * m.newPrice) / 10) * 10;
+    // Termin: nach Werkstattlast; Stammkunden kommen schneller dran (HM-07)
+    let wait = this.workshopBusy(time) ? 2 : 0;
+    if ((this.dealerSpend[d.id] ?? 0) >= 50_000) wait = Math.max(0, wait - 1);
+    const hours = 6 + (2 * d.km) / 40;
+    m.downUntil = time + wait * 1440 + Math.round(hours * 60);
+    m.downReason = `Wartung bei ${d.name}`;
+    m.serviceAtH = m.hours + serviceInterval(m);
+    m.condition = Math.min(100, m.condition + 3);
+    this.payWorkshop(time, cost, `Wartung ${m.brand} ${m.model}`, m);
+    this.emit(time, 'info', `${m.brand} ${m.model} zur Wartung bei ${d.name} (${fmtEur(cost)}), zurück etwa ${fmtDay(m.downUntil)} ${fmtTime(m.downUntil)}.`);
+    return `Wartung beauftragt, zurück etwa ${fmtDay(m.downUntil)} ${fmtTime(m.downUntil)}`;
+  }
+
+  /**
+   * Pannenrisiko je Betriebsminute (MZ-04): Grundrate 0,2 % je Stunde, steigt mit sinkendem
+   * Zustand, dreifach bei überfälliger Wartung und bei verstecktem Mangel.
+   */
+  rollBreakdown(m: Machine): boolean {
+    let perHour = 0.002 * (1 + (100 - m.condition) / 25);
+    if (m.serviceAtH !== undefined && m.hours > m.serviceAtH) perHour *= 3;
+    if (m.defect) perHour *= 3;
+    return this.rng.next() < perHour / 60;
+  }
+
+  /** Panne: Händler-Service kommt, Dauer nach Entfernung und Ersatzteillage (MZ-06, HM-05) */
+  breakdown(m: Machine, time: number, home: [number, number], where: string): void {
+    const d = this.dealerKm(m.brand, home);
+    const r = this.rng.next();
+    const parts = r < 0.6 ? 0 : r < 0.85 ? 4 : 24 + this.rng.int(25); // Stunden Ersatzteilwartezeit
+    let hours = 1.5 + (2 * d.km) / 50 + parts;
+    if (this.workshopBusy(time)) hours *= 1.5;
+    m.downUntil = time + Math.round(hours * 60);
+    m.downReason = `Panne – ${d.name} repariert`;
+    m.breakdowns = (m.breakdowns ?? 0) + 1;
+    const warranty = (m.warrantyUntil ?? 0) > time;
+    const cost = warranty ? 0 : Math.round((200 + 0.004 * m.newPrice * (0.5 + this.rng.next() * 1.5)) * (1 + (100 - m.condition) / 100) / 10) * 10;
+    if (cost) this.payWorkshop(time, cost, `Reparatur ${m.brand} ${m.model}`, m);
+    m.defect = undefined; // Mangel ist damit behoben
+    this.emit(time, 'warnung', `Panne: ${m.brand} ${m.model} ${where}. ${d.name} kommt, Reparatur etwa ${hours.toLocaleString('de-DE', { maximumFractionDigits: 0 })} h${parts >= 24 ? ' (Ersatzteil muss bestellt werden)' : ''}, ${warranty ? 'Gewährleistung' : fmtEur(cost)}.`);
+  }
+
+  /** Verschleiß je Betriebsstunde (MZ-03): Schlepper 0,6 %/100 h, Geräte 2 %/100 h, doppelt bei überfälliger Wartung */
+  wear(m: Machine, hours: number): void {
+    let rate = m.type === 'schlepper' || m.type === 'firmenwagen' ? 0.006 : 0.02;
+    if (m.serviceAtH !== undefined && m.hours > m.serviceAtH) rate *= 2;
+    m.condition = Math.max(0, Math.round((m.condition - rate * hours) * 100) / 100);
+  }
+
+  /** Reparaturkosten je Schlepperstunde für die Auswertung (steigen mit den Stunden, MZ-03) */
+  repairPerHour(m?: Machine): number {
+    return Math.round((4 + ((m?.hours ?? 9000) / 1000) * 0.5) * 100) / 100;
   }
 
   orderStarted(o: Order, tractorId: number, implementId: number, time: number, driver = 'Chef') {
@@ -572,7 +858,9 @@ export class Business {
   /** Auswertung eines Auftrags (WF-09): Erlös minus Diesel minus kalkulatorische Maschinenkosten */
   orderResult(o: Order): { revenue: number; diesel: number; machines: number; margin: number } {
     const revenue = Math.round(o.priceHa * o.areaHa * 100) / 100;
-    const machines = Math.round((o.tractorHours * REPAIR_TRACTOR_EUR_H + o.areaHa * WEAR_GRUBBER_EUR_HA) * 100) / 100;
+    const tractor = this.company.machines.find((m) => m.id === o.tractorId);
+    const perH = tractor ? this.repairPerHour(tractor) : REPAIR_TRACTOR_EUR_H;
+    const machines = Math.round((o.tractorHours * perH + o.areaHa * WEAR_GRUBBER_EUR_HA) * 100) / 100;
     return { revenue, diesel: o.dieselCost, machines, margin: Math.round((revenue - o.dieselCost - machines) * 100) / 100 };
   }
 
@@ -693,6 +981,10 @@ export function fmtEur(v: number): string {
 }
 export function fmtHa(v: number): string {
   return v.toLocaleString('de-DE', { maximumFractionDigits: 1 }) + ' ha';
+}
+export function fmtTime(minutes: number): string {
+  const d = gameDate(minutes);
+  return `${String(d.hour).padStart(2, '0')}:${String(d.minute).padStart(2, '0')}`;
 }
 export function fmtDay(minutes: number): string {
   const d = gameDate(minutes);

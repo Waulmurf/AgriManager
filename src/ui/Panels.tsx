@@ -5,7 +5,8 @@ import { useState } from 'react';
 import type { GameController, GameStatus } from '../game/controller';
 import type { JobEstimate } from '../sim/engine';
 import { SKILLS, employerHourCost, employerMonthCost, machineValue, type Employee, type Machine } from '../sim/economy';
-import { SERVICE_NAMES, fmtDay, type Invoice, type Request, type Order } from '../sim/business';
+import { SERVICE_NAMES, fmtDay, fmtTime, CHECK_COST, type Invoice, type Request, type Order } from '../sim/business';
+import { CATALOG, DEALERS } from '../data/catalog';
 import { formatGameTime } from '../game/clock';
 
 export const eur = (v: number) => v.toLocaleString('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
@@ -67,7 +68,7 @@ export function BusinessTab({ status, game }: { status: GameStatus; game: GameCo
             </span>
             <small>
               Bj. {m.year}
-              {m.hours ? ` · ${m.hours.toLocaleString('de-DE')} h` : ''} · Zustand {m.condition} % · Wert {eur(machineValue(m))}
+              {m.hours ? ` · ${m.hours.toLocaleString('de-DE')} h` : ''} · Zustand {Math.round(m.condition)} % · Wert {eur(machineValue(m))}
             </small>
             {unitStatus(m.id) && <small className="unit-status">{unitStatus(m.id)}</small>}
           </li>
@@ -340,30 +341,142 @@ export function StaffTab({ status, game }: { status: GameStatus; game: GameContr
   );
 }
 
+const TYPE_NAMES: Record<string, string> = { schlepper: 'Schlepper', grubber: 'Grubber', kurzscheibenegge: 'Kurzscheibenegge', firmenwagen: 'Firmenwagen' };
+
+function machineSpecs(m: Pick<Machine, 'type' | 'power' | 'width' | 'powerNeed' | 'haPerHour'>): string {
+  if (m.type === 'schlepper') return `${m.power} PS`;
+  if (m.width) return `${m.width.toLocaleString('de-DE')} m · ab ${m.powerNeed} PS · ${m.haPerHour?.toLocaleString('de-DE')} ha/h`;
+  return '';
+}
+
+/** Markt (HM-04 bis HM-07, MZ-10, MZ-11): Gebrauchte bei Händlern und auf der Börse, Neubestellung */
 export function MarketTab({ status, game }: { status: GameStatus; game: GameController | null }) {
   const b = status.business;
   const fb = useFeedback();
+  const [view, setView] = useState<'gebraucht' | 'neu'>('gebraucht');
+  const [type, setType] = useState<string>('alle');
+  const [dealer, setDealer] = useState(1);
   if (!b) return <p className="hint">–</p>;
+  const offers = b.offers.filter((o) => type === 'alle' || o.machine.type === type);
+  const send = async (cmd: Parameters<GameController['command']>[0]) => fb.show(await game!.command(cmd));
+  const d = DEALERS.find((x) => x.id === dealer)!;
+  const brands = [...d.tractorBrands, ...d.implementBrands];
+  const models = CATALOG.filter((m) => brands.includes(m.brand) && (type === 'alle' || m.type === type));
+  const disc = b.discounts[dealer] ?? 0.05;
   return (
     <>
-      <h2>Gebrauchtgeräte</h2>
-      <p className="hint">Startangebote (Preise angelehnt an reale Inserate). Der Händlermarkt folgt in Phase 3.</p>
-      <ul className="cards">
-        {b.offers.map((o) => (
-          <li className="card" key={o.id} data-testid="offer">
-            <div className="card-head">
-              <strong>{o.machine.brand} {o.machine.model}</strong>
-              <strong>{eur(o.price)}</strong>
-            </div>
-            <small>Bj. {o.machine.year} · {o.machine.width} m · ab {o.machine.powerNeed} PS · {o.machine.haPerHour?.toLocaleString('de-DE')} ha/h · Zustand {o.machine.condition} %</small>
-            <small className="hint">{o.seller} – {o.note}</small>
-            <div className="card-actions">
-              <button onClick={async () => fb.show(await game!.command({ kind: 'buy', offerId: o.id }))} disabled={status.company!.cash < o.price} data-testid="buy">Kaufen</button>
-            </div>
-          </li>
-        ))}
+      <div className="card-actions">
+        <button className={view === 'gebraucht' ? 'active' : ''} onClick={() => setView('gebraucht')} data-testid="market-used">Gebraucht</button>
+        <button className={view === 'neu' ? 'active' : ''} onClick={() => setView('neu')} data-testid="market-new">Neu bestellen</button>
+        <select value={type} onChange={(e) => setType(e.target.value)} aria-label="Maschinenart">
+          <option value="alle">alle Arten</option>
+          <option value="schlepper">Schlepper</option>
+          <option value="grubber">Grubber</option>
+          <option value="kurzscheibenegge">Kurzscheibenegge</option>
+        </select>
+      </div>
+      {view === 'gebraucht' ? (
+        <>
+          <p className="hint">Händler: geprüft, 6 Monate Gewährleistung. Gebrauchtbörse: günstiger, ohne Gewährleistung, versteckte Mängel möglich – Werkstattcheck {eur(CHECK_COST)}.</p>
+          <ul className="cards">
+            {offers.map((o) => (
+              <li className="card" key={o.id} data-testid="offer">
+                <div className="card-head">
+                  <strong>{o.machine.brand} {o.machine.model}</strong>
+                  <strong>{eur(o.price)}</strong>
+                </div>
+                <small>{TYPE_NAMES[o.machine.type]} · {machineSpecs(o.machine)} · Bj. {o.machine.year}{o.machine.hours ? ` · ${o.machine.hours.toLocaleString('de-DE')} h` : ''} · Zustand {o.machine.condition} %</small>
+                <small className="hint">{o.seller} – {o.note}{o.until !== undefined ? ` · bis ${fmtDay(o.until)}` : ''}</small>
+                {o.checked && <small className={o.machine.defect ? 'warn' : 'hint'}>Werkstattcheck: {o.machine.defect ? `Mangel gefunden – Zustand eher ${Math.max(10, o.machine.condition - 20)} %` : 'keine Mängel'}</small>}
+                <div className="card-actions">
+                  <button onClick={() => send({ kind: 'buy', offerId: o.id })} disabled={status.company!.cash < o.price} data-testid="buy">Kaufen</button>
+                  {!o.dealerId && !o.checked && <button onClick={() => send({ kind: 'check', offerId: o.id })}>Werkstattcheck</button>}
+                </div>
+              </li>
+            ))}
+          </ul>
+          {!offers.length && <p className="hint">Gerade keine passenden Angebote. Neue kommen fast täglich.</p>}
+        </>
+      ) : (
+        <>
+          <select value={dealer} onChange={(e) => setDealer(Number(e.target.value))} aria-label="Händler" data-testid="dealer">
+            {DEALERS.map((x) => <option key={x.id} value={x.id}>{x.name} ({x.town})</option>)}
+          </select>
+          <p className="hint">{d.name}: {brands.join(', ')} · Rabatt {Math.round(disc * 100)} % (steigt mit dem Umsatz) · Bezahlung bei Lieferung, 24 Monate Gewährleistung.</p>
+          <ul className="cards">
+            {models.map((m) => (
+              <li className="card" key={m.key}>
+                <div className="card-head">
+                  <strong>{m.brand} {m.model}</strong>
+                  <strong>{eur(Math.round((m.newPrice * (1 - disc)) / 100) * 100)}</strong>
+                </div>
+                <small>{TYPE_NAMES[m.type]} · {machineSpecs(m)} · Liste {eur(m.newPrice)} · Lieferzeit etwa {m.deliveryWeeks} Wochen</small>
+                <div className="card-actions">
+                  <button onClick={() => send({ kind: 'order', dealerId: dealer, modelKey: m.key })} data-testid="order-new">Bestellen</button>
+                </div>
+              </li>
+            ))}
+          </ul>
+          {!models.length && <p className="hint">Dieser Händler führt keine passenden Maschinen (z. B. Rüben- und Kartoffeltechnik kommt mit Phase 4).</p>}
+        </>
+      )}
+      {b.deliveries.length > 0 && (
+        <>
+          <h3>Bestellt</h3>
+          <ul className="list">
+            {b.deliveries.map((x) => <li key={x.id}><span>{x.machine.brand} {x.machine.model}</span><small>Lieferung etwa {fmtDay(x.at)} · {eur(x.price)}</small></li>)}
+          </ul>
+        </>
+      )}
+      {fb.msg && <p className="feedback">{fb.msg}</p>}
+    </>
+  );
+}
+
+/** Fuhrpark (MF-07, MZ-01, MZ-05, MZ-09, MZ-12): Zustand, Wartung, Kosten, Verkauf */
+export function FleetTab({ status, game }: { status: GameStatus; game: GameController | null }) {
+  const b = status.business;
+  const c = status.company;
+  const fb = useFeedback();
+  if (!b || !c) return <p className="hint">–</p>;
+  const send = async (cmd: Parameters<GameController['command']>[0]) => fb.show(await game!.command(cmd));
+  return (
+    <>
+      <h2>Fuhrpark ({c.machines.length})</h2>
+      <ul className="cards" data-testid="fleet">
+        {c.machines.map((m) => {
+          const busy = b.busyMachines.includes(m.id);
+          const down = (m.downUntil ?? 0) > b.time;
+          const due = m.serviceAtH !== undefined && m.hours >= m.serviceAtH - 20;
+          const unit = b.units.find((u) => u.machineId === m.id);
+          return (
+            <li className="card" key={m.id}>
+              <div className="card-head">
+                <strong>{machineName(m)}</strong>
+                <small>Wert {eur(b.machineValues[m.id] ?? 0)}</small>
+              </div>
+              <small>{TYPE_NAMES[m.type]}{machineSpecs(m) ? ` · ${machineSpecs(m)}` : ''} · Bj. {m.year} · {m.hours.toLocaleString('de-DE')} h · Zustand {Math.round(m.condition)} %</small>
+              <small className={down ? 'warn' : busy ? 'unit-status' : 'hint'}>
+                {down ? `${m.downReason}, bis ${fmtDay(m.downUntil!)} ${fmtTime(m.downUntil!)}` : busy ? (unit?.status ?? 'im Einsatz') : 'am Hof'}
+              </small>
+              <small className={due ? 'warn' : 'hint'}>
+                {m.serviceAtH !== undefined ? (m.hours > m.serviceAtH ? `Wartung überfällig (seit ${Math.round(m.hours - m.serviceAtH)} h) – höheres Pannenrisiko` : `nächste Wartung bei ${m.serviceAtH.toLocaleString('de-DE')} h`) : ''}
+                {m.breakdowns ? ` · ${m.breakdowns} Pannen` : ''}
+                {m.costTotal ? ` · Werkstatt ${eur(m.costTotal)}` : ''}
+                {m.downMinutes ? ` · Ausfall ${(m.downMinutes / 60).toLocaleString('de-DE', { maximumFractionDigits: 0 })} h` : ''}
+                {(m.warrantyUntil ?? 0) > b.time ? ` · Gewährleistung bis ${fmtDay(m.warrantyUntil!)}` : ''}
+              </small>
+              {m.saleAt !== undefined && <small className="hint">inseriert – Käufer meldet sich bis etwa {fmtDay(m.saleAt)}</small>}
+              <div className="card-actions">
+                <button onClick={() => send({ kind: 'service', machineId: m.id })} disabled={busy || down} data-testid="service">Wartung</button>
+                <button onClick={() => send({ kind: 'sell', machineId: m.id, mode: 'tradein' })} disabled={busy}>In Zahlung geben ({eur(Math.round(((b.machineValues[m.id] ?? 0) * 0.8) / 100) * 100)})</button>
+                {m.saleAt === undefined && <button onClick={() => send({ kind: 'sell', machineId: m.id, mode: 'privat' })} disabled={busy}>Privat inserieren</button>}
+              </div>
+            </li>
+          );
+        })}
       </ul>
-      {!b.offers.length && <p className="hint">Alle Angebote verkauft.</p>}
+      <p className="hint">Zustand sinkt mit den Betriebsstunden, schneller bei überfälliger Wartung. Schlechter Zustand und überfällige Wartung erhöhen das Pannenrisiko. Bei einer Panne kommt der Service des nächsten Markenhändlers – je weiter weg, desto länger dauert es.</p>
       {fb.msg && <p className="feedback">{fb.msg}</p>}
     </>
   );
@@ -441,7 +554,7 @@ export function VehicleMenu({ status, game }: { status: GameStatus; game: GameCo
   );
 }
 
-const CATEGORIES = ['Rechnung', 'Diesel', 'Maschinenkauf', 'Personal', 'Sonstiges'] as const;
+const CATEGORIES = ['Rechnung', 'Diesel', 'Maschinenkauf', 'Personal', 'Werkstatt', 'Sonstiges'] as const;
 
 /** Finanzen: Konto, Monatsübersicht, Rechnungen, Auswertung je Auftrag (WF-08, WF-09) */
 function invoiceState(i: Invoice): string {

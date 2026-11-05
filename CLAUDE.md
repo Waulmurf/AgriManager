@@ -66,6 +66,8 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
 - Phase 3 läuft (Schritte in docs/plan.md). Schritt 1 Personal fertig: `Employee` in `economy.ts`,
   Bewerbungen/Löhne/Erfahrung in `business.ts`, je Fahrer `driverMinutes` und Warteschlange in
   `engine.ts`, Reiter Personal. Spielerfahrzeuge entstehen dynamisch (`addPlayerVehicle`, Meldung `vehicles`).
+- Schritt 2 Fuhrpark fertig: Katalog und Händler `src/data/catalog.ts`, Markt/Bestellung/Verkauf/Wartung/Pannen
+  in `business.ts`, Pannen-Stillstand in `engine.ts` (`stepPlayer`), Reiter Fuhrpark und Markt.
 
 ## CI (GitHub Actions)
 

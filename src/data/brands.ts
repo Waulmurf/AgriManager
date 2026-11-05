@@ -1,7 +1,7 @@
 /**
  * Markenfarben für die Kartendarstellung (HM-02, HM-03: nur Name und Farben,
  * keine Logos). Werte und Quellen: docs/maschinen.md, Abschnitt „Markenfarben“.
- * Marken ohne gesicherte Farbwerte (z. B. Deutz-Fahr, Valtra) fehlen hier noch.
+ * Deutz-Fahr und Valtra: Farbwerte angenommen (Lacknäherung), vor der Grafik prüfen.
  */
 export interface BrandColors {
   name: string;
@@ -16,6 +16,8 @@ export const BRANDS: BrandColors[] = [
   { name: 'Case IH', main: '#D0002D', accent: '#1A1A1A' },
   { name: 'New Holland', main: '#003F7D', accent: '#FECD1A' },
   { name: 'Massey Ferguson', main: '#C71121', accent: '#606163' },
+  { name: 'Deutz-Fahr', main: '#7AB51D', accent: '#2B2B2B' },
+  { name: 'Valtra', main: '#D52B1E', accent: '#F2F2F2' },
 ];
 
 /** Firmenwagen ohne Marke */

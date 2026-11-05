@@ -205,3 +205,48 @@ Schritte:
   - Fendt 516 Vario, 165 PS, Bj. 2016, 69.500 €
   - John Deere 6130R, 130 PS, Bj. 2015, 44.000 €
 
+### Schritt 2: Fuhrpark (Annahmen)
+
+- **Katalog** (`src/data/catalog.ts`, HM-09): 20 Schlepper in den Klassen S, M und L von acht
+  Marken, 6 Grubber (3–6 m) und 2 Kurzscheibeneggen.
+  - Neupreise: Anker aus `docs/maschinen.md`, die übrigen als Annahme bei etwa 1.000–1.150 € je
+    PS.
+  - Geräteleistung nach LWK, größere Breiten hochgerechnet.
+  - Deutz-Fahr und Valtra haben angenommene Farben (in `src/data/brands.ts` markiert).
+- **Händler** (HM-04): sechs fiktive Händler an echten Orten, Markenmix laut
+  `docs/maschinen.md`, als Punkte auf der Karte.
+  - Neu bestellen: Lieferzeit Schlepper 8 Wochen (L 12), Geräte 4 Wochen, jeweils ±1 Woche.
+    Bezahlt wird bei Lieferung, dazu 24 Monate Gewährleistung.
+  - Rabatt 5 %, plus 1 % je 50.000 € Umsatz beim Händler, höchstens 12 % (HM-07).
+  - Ab 50.000 € Umsatz kommt man bei der Wartung schneller dran.
+- **Gebrauchtmarkt** (MZ-10, MZ-11):
+  - Händler: bis 3 Angebote der eigenen Marken, Preis 105–115 % des Marktwerts, 6 Monate
+    Gewährleistung.
+  - Börse: bis 6 private Angebote, 85–100 % des Marktwerts, ohne Gewährleistung.
+  - Jedes vierte Börsenangebot hat einen versteckten Mangel: Der Zustand ist 20 Punkte
+    schlechter, die Pannengefahr dreifach. Ein Werkstattcheck für 180 € deckt ihn auf.
+  - Angebote laufen nach 14–43 Tagen aus.
+  - Marktwert nach Startformel × (0,9 + Zustand/500).
+- **Verkauf** (MZ-12): Inzahlungnahme sofort zu 80 % des Werts. Privat inseriert verkauft sich
+  die Maschine nach 5–25 Tagen zu 95–105 %. Der letzte Firmenwagen ist nicht verkäuflich.
+- **Verschleiß** (MZ-03): Zustand je Betriebsstunde −0,006 Punkte beim Schlepper und −0,02
+  Punkte beim Gerät, doppelt bei überfälliger Wartung. Reparaturkosten je Stunde in der
+  Auswertung: 4 € + 0,50 € je 1.000 h.
+- **Wartung** (MZ-05): Intervall Schlepper 500 h, Geräte 250 h.
+  - Kosten: Schlepper 400 € + 0,4 % des Neupreises, Gerät 150 € + 0,3 %.
+  - Dauer: 6 h plus Hin- und Rückfahrt zum Markenhändler (40 km/h). Von Juli bis Oktober
+    warten Maschinen 2 Tage auf einen Termin (HM-08).
+  - Wirkung: Zustand +3.
+- **Pannen** (MZ-04, MZ-06, MZ-07, HM-05):
+  - Risiko je Betriebsstunde: 0,2 % × (1 + (100 − Zustand)/25), dreifach bei überfälliger
+    Wartung und dreifach bei Mangel.
+  - Reparatur durch den Service des nächsten Markenhändlers: 1,5 h + Anfahrt (50 km/h) +
+    Ersatzteil (60 % sofort, 25 % 4 h, 15 % 1–2 Tage), in der Ernte ×1,5.
+  - Kosten: (200 € + 0,2–0,8 % des Neupreises) × Zustandsfaktor; mit Gewährleistung kostenlos.
+  - Solange das Gespann steht, steht der Auftrag. Je angefangenem Tag sinkt die Zufriedenheit
+    des Kunden um 1.
+- **Anzeige** (MF-07, MZ-09): Reiter Fuhrpark mit Wert, Zustand, Stunden, nächster Wartung,
+  Pannen, Werkstattkosten, Ausfallzeit und Gewährleistung.
+- **Offen** (MZ-08, Phase 4): Leih- und Mietmaschinen, eigene Werkstatt, Kredit und Leasing für
+  Neukäufe.
+

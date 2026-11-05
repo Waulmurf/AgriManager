@@ -40,6 +40,31 @@ export interface Machine {
   workKmh?: number;
   /** Geräte: Dieselverbrauch des Gespanns bei der Arbeit (l/ha) */
   dieselLHa?: number;
+  /** nächste Wartung fällig bei diesen Betriebsstunden (MZ-05) */
+  serviceAtH?: number;
+  /** in der Werkstatt bzw. ausgefallen bis Spielminute (MZ-06) */
+  downUntil?: number;
+  downReason?: string;
+  /** Gewährleistung bis Spielminute (Händlerkauf) */
+  warrantyUntil?: number;
+  /** versteckter Mangel (MZ-11): höhere Pannengefahr, Zustand schlechter als angegeben */
+  defect?: boolean;
+  /** Kosten für Wartung und Reparaturen gesamt (€) und Zahl der Pannen */
+  costTotal?: number;
+  breakdowns?: number;
+  /** Ausfallzeit gesamt (min) */
+  downMinutes?: number;
+  /** privat zum Verkauf inseriert: verkauft am, zum Preis */
+  saleAt?: number;
+  salePrice?: number;
+  /** gekauft am (Spielminute) und bei Händler */
+  boughtAt?: number;
+  dealerId?: number;
+}
+
+/** Wartungsintervall (Betriebsstunden): Schlepper 500 h, Geräte 250 h (Annahme) */
+export function serviceInterval(m: Pick<Machine, 'type'>): number {
+  return m.type === 'schlepper' || m.type === 'firmenwagen' ? 500 : 250;
 }
 
 export interface MarketOffer {
@@ -49,6 +74,14 @@ export interface MarketOffer {
   price: number;
   seller: string;
   note: string;
+  /** Händler (0 = Gebrauchtbörse, privat) */
+  dealerId?: number;
+  /** Gewährleistung in Monaten (privat 0) */
+  warrantyMonths?: number;
+  /** Angebot gilt bis (Spielminute); ohne = unbefristet */
+  until?: number;
+  /** Werkstattcheck gemacht (MZ-11); Ergebnis: Mangel ja/nein */
+  checked?: boolean;
 }
 
 /**
@@ -63,8 +96,10 @@ export const START_OFFERS: MarketOffer[] = [
     id: 1,
     machine: { type: 'grubber', brand: 'Horsch', model: 'Terrano 4 FX', year: 2017, hours: 0, condition: 70, newPrice: 23_500, width: 4, powerNeed: 160, haPerHour: 1.7, workKmh: 10, dieselLHa: 9 },
     price: 12_500,
-    seller: 'Landtechnik Uelzen (Händler)',
+    seller: 'Landmaschinen Suhlendorf (Händler)',
     note: 'Grubber 4 m, Gewährleistung 6 Monate',
+    dealerId: 4,
+    warrantyMonths: 6,
   },
   {
     id: 2,
@@ -72,13 +107,17 @@ export const START_OFFERS: MarketOffer[] = [
     price: 7_900,
     seller: 'Privat, Bad Bevensen',
     note: 'Grubber 3 m, ohne Gewährleistung',
+    dealerId: 0,
+    warrantyMonths: 0,
   },
   {
     id: 3,
     machine: { type: 'kurzscheibenegge', brand: 'Horsch', model: 'Joker 3 CT', year: 2016, hours: 0, condition: 65, newPrice: 21_000, width: 3, powerNeed: 110, haPerHour: 2.0, workKmh: 12, dieselLHa: 6 },
     price: 11_900,
-    seller: 'Landtechnik Uelzen (Händler)',
+    seller: 'Landmaschinen Suhlendorf (Händler)',
     note: 'Kurzscheibenegge 3 m – für Grubber-Aufträge nicht geeignet',
+    dealerId: 4,
+    warrantyMonths: 6,
   },
   {
     // Wert nach Startformel: 185.000 € · 0,9 · 0,94^11 · (1 − 0,025 · 6,5) ≈ 70.600 €
@@ -87,6 +126,8 @@ export const START_OFFERS: MarketOffer[] = [
     price: 69_500,
     seller: 'Landtechnik Uelzen (Händler)',
     note: 'Schlepper 165 PS, Gewährleistung 6 Monate',
+    dealerId: 1,
+    warrantyMonths: 6,
   },
   {
     // Wert nach Startformel: 140.000 € · 0,9 · 0,94^12 · (1 − 0,025 · 8) ≈ 48.000 €
@@ -95,6 +136,8 @@ export const START_OFFERS: MarketOffer[] = [
     price: 44_000,
     seller: 'Privat, Suderburg',
     note: 'Schlepper 130 PS, ohne Gewährleistung – reicht für den 3-m-Grubber',
+    dealerId: 0,
+    warrantyMonths: 0,
   },
 ];
 
@@ -196,8 +239,8 @@ export function startCompany(homeNode: number): Company {
     homeNode,
     site: 'Unbefestigter Abstellplatz, Büro im Wohnhaus',
     machines: [
-      { id: 1, type: 'schlepper', brand: 'Fendt', model: '720 Vario', year: 2014, hours: 9000, condition: 68, newPrice: 225_000, power: 200 },
-      { id: 2, type: 'firmenwagen', brand: '', model: 'Firmenwagen (Kombi)', year: 2018, hours: 2800, condition: 75, newPrice: 38_000 },
+      { id: 1, type: 'schlepper', brand: 'Fendt', model: '720 Vario', year: 2014, hours: 9000, condition: 68, newPrice: 225_000, power: 200, serviceAtH: 9200 },
+      { id: 2, type: 'firmenwagen', brand: '', model: 'Firmenwagen (Kombi)', year: 2018, hours: 2800, condition: 75, newPrice: 38_000, serviceAtH: 3000 },
     ],
     drivers: [chefEmployee()],
   };

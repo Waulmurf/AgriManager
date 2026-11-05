@@ -12,7 +12,7 @@ import { fieldPattern, type FieldSet } from './fields';
 import { generateFarms, type FarmSet } from './farms';
 import { START_OFFERS, normalizeDrivers, skillDiesel, skillSpeed, startCompany, type Company, type Machine } from './economy';
 import { Business, REMIND_CALL_MINUTES, VISIT_MINUTES, fmtHa, type Command, type QueueCommand, type QueueItem } from './business';
-import { appendEdgePoints, nearestNode, RoadClass, type RoadGraph } from './roadgraph';
+import { appendEdgePoints, nearestNode, RoadClass, unproject, type RoadGraph } from './roadgraph';
 
 export const STEP_SECONDS = 60;
 /** Werte je Fahrzeug im Positions-Schnappschuss */
@@ -288,12 +288,41 @@ export class Simulation {
     this.pending.push(v.route);
   }
 
+  /** Maschine gerade bei einer Aufgabe (Schlepper/Wagen mit Aufgabe oder Gerät im Auftrag) */
+  private machineBusy(machineId: number): boolean {
+    return this.vehicles.some((v) => v.owner === 'player' && !!v.task && (v.machineId === machineId || (v.task.kind === 'job' && v.task.implementId === machineId)));
+  }
+
+  busyMachineIds(): number[] {
+    return this.company.machines.filter((m) => this.machineBusy(m.id)).map((m) => m.id);
+  }
+
+  /** Spielerfahrzeuge an den Fuhrpark anpassen: neue dazu, verkaufte weg (IDs = Index neu) */
+  private syncPlayerVehicles() {
+    const ids = new Set(this.company.machines.map((m) => m.id));
+    const before = this.vehicles.length;
+    this.vehicles = this.vehicles.filter((v) => v.owner !== 'player' || ids.has(v.machineId!));
+    if (this.vehicles.length !== before) {
+      this.vehicles.forEach((v, i) => (v.id = i));
+      this.vehiclesVersion++;
+    }
+    for (const m of this.company.machines) this.addPlayerVehicle(m);
+  }
+
+  /** Hof als [lon, lat] (Entfernung zu Händlern) */
+  get homeLonLat(): [number, number] {
+    return unproject(this.graph, this.graph.x[this.homeNode], this.graph.y[this.homeNode]);
+  }
+
   /** Ein Schritt = 1 Spielminute. */
   step(): void {
     this.time++;
     if (this.time % 1440 === 0) {
       this.business.daily(this.time, this.driverMinutes); // täglich 06:00
       this.driverMinutes = {};
+      const inUse = new Set(this.company.machines.filter((m) => this.machineBusy(m.id)).map((m) => m.id));
+      this.business.completeSales(this.time, inUse);
+      this.syncPlayerVehicles(); // Lieferungen und Verkäufe
     }
     // Arbeitszeit je Fahrer: zählt, solange er unterwegs ist (nicht im Feierabend)
     for (const v of this.vehicles) {
@@ -343,6 +372,10 @@ export class Simulation {
     if (cmd.kind === 'visit') {
       const car = this.vehicles.find((v) => v.owner === 'player' && v.profile === 'car');
       return car?.task ? 'Firmenwagen ist unterwegs' : null;
+    }
+    for (const id of [cmd.tractorId, cmd.implementId]) {
+      const m = this.company.machines.find((x) => x.id === id);
+      if (m && (m.downUntil ?? 0) > this.time) return `${m.brand} ${m.model}: ${m.downReason ?? 'in der Werkstatt'}`;
     }
     for (const v of this.vehicles) {
       if (v.owner !== 'player' || !v.task) continue;
@@ -621,7 +654,7 @@ export class Simulation {
         return b.respond(cmd.requestId, cmd.action, t, cmd.priceHa);
       case 'buy': {
         const r = b.buy(cmd.offerId, t);
-        for (const m of this.company.machines) this.addPlayerVehicle(m);
+        this.syncPlayerVehicles();
         return r;
       }
       case 'remind': {
@@ -630,6 +663,23 @@ export class Simulation {
         const r = b.remind(cmd.invoiceId, t);
         if (r === 'Kunde angerufen') this.driverMinutes[1] = this.chefMinutes + REMIND_CALL_MINUTES;
         return r;
+      }
+      case 'order':
+        return b.order(cmd.dealerId, cmd.modelKey, t);
+      case 'check':
+        return b.check(cmd.offerId, t);
+      case 'sell': {
+        if (this.machineBusy(cmd.machineId)) return 'Maschine ist im Einsatz';
+        const r = b.sell(cmd.machineId, cmd.mode, t);
+        this.syncPlayerVehicles();
+        return r;
+      }
+      case 'service': {
+        const m = this.company.machines.find((x) => x.id === cmd.machineId);
+        if (!m) return 'Maschine unbekannt';
+        if (this.machineBusy(m.id)) return 'Maschine ist im Einsatz';
+        if ((m.downUntil ?? 0) > t) return `Schon in der Werkstatt (${m.downReason})`;
+        return b.service(m, t, this.homeLonLat);
       }
       case 'hire':
         return b.hire(cmd.applicantId, cmd.asKind, t);
@@ -949,6 +999,22 @@ export class Simulation {
       this.business.warn(this.time, `${v.name}: Feierabend – Höchstarbeitszeit (${this.driverName(t.driverId)}) erreicht, weiter morgen um 06:00.`);
       return;
     }
+    if (t?.kind === 'job' && (t.phase === 'to' || t.phase === 'work' || t.phase === 'back')) {
+      // Panne: Gespann steht, bis der Händler-Service repariert hat (MZ-07)
+      const machines = [this.company.machines.find((m) => m.id === v.machineId), this.company.machines.find((m) => m.id === t.implementId)];
+      let down = false;
+      for (const m of machines) {
+        if (!m) continue;
+        if ((m.downUntil ?? 0) > this.time) { down = true; m.downMinutes = (m.downMinutes ?? 0) + 1; continue; }
+        if (this.business.rollBreakdown(m)) {
+          const o = this.business.orders.find((x) => x.id === t.orderId);
+          const where = t.phase === 'work' && o ? `auf dem Feld (${this.business.farmName(o.farmId)})` : 'unterwegs';
+          this.business.breakdown(m, this.time, this.homeLonLat, where);
+          down = true;
+        }
+      }
+      if (down) return;
+    }
     let budget = STEP_SECONDS;
     for (let guard = 0; budget > 0 && guard < 8; guard++) {
       if (v.state === VehicleState.Waiting) {
@@ -1094,9 +1160,11 @@ export class Simulation {
     const hours = this.fields!.areaHa[fi] / t.haPerHour;
     const o = this.business.orders.find((x) => x.id === t.orderId);
     if (o) o.tractorHours = Math.round((o.tractorHours + hours) * 100) / 100;
-    for (const id of [v.machineId, o?.implementId]) {
+    for (const id of [v.machineId, t.implementId]) {
       const m = this.company.machines.find((x) => x.id === id);
-      if (m) m.hours = Math.round((m.hours + hours) * 10) / 10;
+      if (!m) continue;
+      m.hours = Math.round((m.hours + hours) * 10) / 10;
+      this.business.wear(m, hours);
     }
   }
 

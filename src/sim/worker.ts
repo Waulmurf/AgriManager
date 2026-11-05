@@ -5,6 +5,7 @@
  * Positionen gehen höchstens 10-mal pro Sekunde als übertragbares Zahlenfeld
  * an die Oberfläche, neue Routen einmalig mit Geometrie.
  */
+import { DEALERS } from '../data/catalog';
 import { CHEF_MAX_MINUTES, Simulation, type RouteGeom } from './engine';
 import { parseRoadGraph, unproject, type RoadGraph } from './roadgraph';
 import { parseFields } from './fields';
@@ -113,6 +114,10 @@ function sendBusiness(force = false) {
     driverMinutes: { ...sim.driverMinutes },
     driverStatus: Object.fromEntries(sim.company.drivers.map((d) => [d.id, sim!.driverBusy(d.id)])),
     applicants: structuredClone(b.applicants),
+    deliveries: structuredClone(b.deliveries),
+    discounts: Object.fromEntries(DEALERS.map((d) => [d.id, b.dealerDiscount(d.id)])),
+    machineValues: Object.fromEntries(sim.company.machines.map((m) => [m.id, b.machineValueNow(m, sim!.time)])),
+    busyMachines: sim.busyMachineIds(),
     rivalFarms,
     trialFarms,
     knownFarms: known,
