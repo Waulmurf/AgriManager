@@ -68,6 +68,7 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
   `engine.ts`, Reiter Personal. Spielerfahrzeuge entstehen dynamisch (`addPlayerVehicle`, Meldung `vehicles`).
 - Schritt 2 Fuhrpark fertig: Katalog und Händler `src/data/catalog.ts`, Markt/Bestellung/Verkauf/Wartung/Pannen
   in `business.ts`, Pannen-Stillstand in `engine.ts` (`stepPlayer`), Reiter Fuhrpark und Markt.
+- Schritt 3 Planungsboard fertig: `src/ui/Board.tsx`, `Simulation.planBoard()`, Befehle `plan`/`queueEdit`.
 
 ## CI (GitHub Actions)
 

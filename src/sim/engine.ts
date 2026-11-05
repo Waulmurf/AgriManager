@@ -11,7 +11,7 @@ import { BRANDS, COMPANY_CAR } from '../data/brands';
 import { fieldPattern, type FieldSet } from './fields';
 import { generateFarms, type FarmSet } from './farms';
 import { START_OFFERS, normalizeDrivers, skillDiesel, skillSpeed, startCompany, type Company, type Machine } from './economy';
-import { Business, REMIND_CALL_MINUTES, VISIT_MINUTES, fmtHa, type Command, type QueueCommand, type QueueItem } from './business';
+import { Business, REMIND_CALL_MINUTES, VISIT_MINUTES, fmtDay, fmtHa, type Command, type QueueCommand, type QueueItem } from './business';
 import { appendEdgePoints, nearestNode, RoadClass, unproject, type RoadGraph } from './roadgraph';
 
 export const STEP_SECONDS = 60;
@@ -91,6 +91,24 @@ export interface SaveState {
   /** Warteschlange des Chefs (ab Phase 3 je Mitarbeiter) */
   queue?: QueueItem[];
   nextQueueId?: number;
+}
+
+/** Balken im Planungsboard (abgeleitet, nicht Teil des Spielzustands) */
+export interface PlanBar {
+  key: string;
+  driverId: number;
+  kind: 'running' | 'visit' | 'queued';
+  queueId?: number;
+  orderId?: number;
+  farmId?: number;
+  label: string;
+  start: number;
+  end: number;
+  tractorId?: number;
+  implementId?: number;
+  latest?: number;
+  notBefore?: number;
+  warnings: string[];
 }
 
 /** Grobe Zeitschätzung für die Planung (nicht Teil des Spielzustands) */
@@ -402,6 +420,7 @@ export class Simulation {
       if (tried.has(d)) continue;
       tried.add(d);
       if (this.driverBusy(d) || this.minutesOf(d) >= CHEF_MAX_MINUTES) continue;
+      if ((item.notBefore ?? 0) > this.time) continue; // geplanter Starttermin noch nicht erreicht
       const err = this.checkQueueCommand(item.cmd, item.id);
       if (!err && this.machineInUse(item.cmd)) continue; // wartet auf die Maschine
       this.queue.splice(k, 1);
@@ -458,9 +477,10 @@ export class Simulation {
   }
 
   /** Ende, wenn ab jetzt `need` Minuten Chef-Arbeitszeit anfallen (10 h je Tag, Start 06:00) */
-  private finishAfter(need: number, driverId = 1): number {
-    let t = this.time;
-    let left = Math.max(0, CHEF_MAX_MINUTES - this.minutesOf(driverId));
+  private finishAfter(need: number, driverId = 1, from = this.time): number {
+    let t = Math.max(from, this.time);
+    const today = Math.floor(this.time / 1440) === Math.floor(t / 1440);
+    let left = Math.max(0, CHEF_MAX_MINUTES - (today ? this.minutesOf(driverId) : 0));
     // nach 20:00 beginnt nichts Neues mehr
     if (t % 1440 >= QUEUE_LAST_START) left = 0;
     while (need > left) {
@@ -525,6 +545,101 @@ export class Simulation {
   private driverHaPerHour(driverId: number): number {
     const d = this.company.drivers.find((x) => x.id === driverId);
     return this.estimateHaPerHour() * skillSpeed(d?.skills.boden ?? 3);
+  }
+
+  /** Frühester tatsächlicher Start ab `t`: nach 20:00 erst am nächsten Morgen */
+  private workStart(t: number): number {
+    return t % 1440 >= QUEUE_LAST_START ? (Math.floor(t / 1440) + 1) * 1440 : t;
+  }
+
+  /**
+   * Planungsboard: Balken je Fahrer (laufende Aufgabe, dann die Warteschlange) mit geschätztem
+   * Start und Ende sowie Warnungen (Termin, Maschine doppelt belegt oder in der Werkstatt, Leistung).
+   */
+  planBoard(): PlanBar[] {
+    const bars: PlanBar[] = [];
+    const cursor: Record<number, number> = {};
+    for (const d of this.company.drivers) cursor[d.id] = this.time;
+    const b = this.business;
+    for (const v of this.vehicles) {
+      const t = v.task;
+      if (v.owner !== 'player' || !t) continue;
+      if (t.kind === 'job') {
+        const o = b.orders.find((x) => x.id === t.orderId);
+        const left = t.queue.slice(t.current + (t.phase === 'work' ? 1 : 0));
+        const m = this.estimateJobMinutes(left, t.haPerHour).minutes + (t.phase === 'work' ? 30 : 0);
+        const end = this.finishAfter(m, t.driverId);
+        const warnings: string[] = [];
+        const down = [v.machineId, t.implementId].map((id) => this.company.machines.find((x) => x.id === id)).find((x) => (x?.downUntil ?? 0) > this.time);
+        if (down) warnings.push(`${down.brand} ${down.model}: ${down.downReason}`);
+        if (o && end > o.latest) warnings.push(`Termin ${fmtDay(o.latest)} wird überschritten`);
+        bars.push({ key: `r${v.id}`, driverId: t.driverId, kind: 'running', orderId: t.orderId, farmId: o?.farmId, label: o ? `Grubbern ${b.farmName(o.farmId)}` : 'Auftrag', start: o?.startedAt ?? this.time, end, tractorId: v.machineId, implementId: t.implementId, latest: o?.latest, warnings });
+        cursor[t.driverId] = Math.max(cursor[t.driverId] ?? this.time, end);
+      } else {
+        const end = this.time + 30;
+        bars.push({ key: `r${v.id}`, driverId: t.driverId, kind: 'visit', farmId: t.farmId, label: `Besuch ${b.farmName(t.farmId)}`, start: this.time, end, warnings: [] });
+        cursor[t.driverId] = Math.max(cursor[t.driverId] ?? this.time, end);
+      }
+    }
+    for (const q of this.queue) {
+      const d = q.driverId;
+      const start = this.workStart(Math.max(cursor[d] ?? this.time, q.notBefore ?? 0));
+      const need = this.estimateQueueItem(q.cmd);
+      const end = this.finishAfter(need, d, start);
+      cursor[d] = end;
+      const warnings: string[] = [];
+      const err = this.checkQueueCommand(q.cmd, q.id);
+      if (err) warnings.push(err);
+      if (q.cmd.kind === 'startJob') {
+        const c = q.cmd;
+        const o = b.orders.find((x) => x.id === c.orderId);
+        for (const id of [c.tractorId, c.implementId]) {
+          const m = this.company.machines.find((x) => x.id === id);
+          if (m && (m.downUntil ?? 0) > start) warnings.push(`${m.brand} ${m.model} bis ${fmtDay(m.downUntil!)} in der Werkstatt`);
+        }
+        if (o && end > o.latest) warnings.push(`Termin des Kunden (${fmtDay(o.latest)}) wird überschritten`);
+        bars.push({ key: `q${q.id}`, driverId: d, kind: 'queued', queueId: q.id, orderId: c.orderId, farmId: o?.farmId, label: q.label, start, end, tractorId: c.tractorId, implementId: c.implementId, latest: o?.latest, notBefore: q.notBefore, warnings });
+      } else {
+        bars.push({ key: `q${q.id}`, driverId: d, kind: 'queued', queueId: q.id, farmId: q.cmd.farmId, label: q.label, start, end, notBefore: q.notBefore, warnings });
+      }
+    }
+    // Maschine bei zwei Fahrern zur selben Zeit eingeplant (der spätere wartet)
+    for (const x of bars) {
+      for (const y of bars) {
+        if (x === y || x.driverId === y.driverId || x.start >= y.end || y.start >= x.end) continue;
+        if (x.tractorId !== undefined && x.tractorId === y.tractorId) x.warnings.push('Schlepper zur selben Zeit bei einem anderen Fahrer – wartet');
+        else if (x.implementId !== undefined && x.implementId === y.implementId) x.warnings.push('Gerät zur selben Zeit bei einem anderen Fahrer – wartet');
+      }
+    }
+    return bars;
+  }
+
+  /** Auftrag aus dem Board einplanen bzw. umplanen (ersetzt einen bestehenden Eintrag) */
+  private planJob(cmd: Extract<Command, { kind: 'plan' }>): string {
+    const existing = this.queue.find((q) => q.cmd.kind === 'startJob' && q.cmd.orderId === cmd.orderId);
+    const job: QueueCommand = { kind: 'startJob', orderId: cmd.orderId, tractorId: cmd.tractorId, implementId: cmd.implementId, driverId: cmd.driverId };
+    const err = this.checkQueueCommand(job, existing?.id);
+    if (err) return err;
+    if (!this.company.drivers.some((d) => d.id === cmd.driverId)) return 'Fahrer unbekannt';
+    if (existing) this.queue.splice(this.queue.indexOf(existing), 1);
+    const item: QueueItem = { id: existing?.id ?? this.nextQueueId++, driverId: cmd.driverId, cmd: job, label: this.queueLabel(job) };
+    if (cmd.notBefore !== undefined && cmd.notBefore > this.time) item.notBefore = cmd.notBefore;
+    this.insertQueue(item);
+    this.business.version++;
+    return `Eingeplant für ${this.driverName(cmd.driverId)}${item.notBefore ? ` ab ${fmtDay(item.notBefore)}` : ''}`;
+  }
+
+  /** In die Warteschlange des Fahrers einsortieren: nach Starttermin, sonst hinten an */
+  private insertQueue(item: QueueItem) {
+    const nb = item.notBefore ?? 0;
+    let at = this.queue.length;
+    for (let i = this.queue.length - 1; i >= 0; i--) {
+      const q = this.queue[i];
+      if (q.driverId !== item.driverId) continue;
+      if ((q.notBefore ?? 0) > nb) at = i;
+      else break;
+    }
+    this.queue.splice(at, 0, item);
   }
 
   /** Prüfungen, die unabhängig davon gelten, ob der Fahrer gerade frei ist; null = in Ordnung */
@@ -696,6 +811,29 @@ export class Simulation {
       case 'visit':
       case 'startJob':
         return this.startOrQueue(cmd);
+      case 'plan':
+        return this.planJob(cmd);
+      case 'queueEdit': {
+        const q = this.queue.find((x) => x.id === cmd.queueId);
+        if (!q) return 'Nicht mehr geplant';
+        if (q.cmd.kind === 'visit') {
+          if (cmd.driverId !== undefined && cmd.driverId !== 1) return 'Besuche macht der Chef';
+          this.queue.splice(this.queue.indexOf(q), 1);
+          if (cmd.notBefore === null) delete q.notBefore;
+          else if (cmd.notBefore !== undefined) q.notBefore = cmd.notBefore > t ? cmd.notBefore : undefined;
+          this.insertQueue(q);
+          b.version++;
+          return 'Besuch umgeplant';
+        }
+        const c = q.cmd;
+        let nb: number | undefined = q.notBefore;
+        if (cmd.notBefore === null) nb = undefined;
+        else if (cmd.notBefore !== undefined) nb = cmd.notBefore;
+        return this.planJob({
+          kind: 'plan', orderId: c.orderId, driverId: cmd.driverId ?? q.driverId,
+          tractorId: cmd.tractorId ?? c.tractorId, implementId: cmd.implementId ?? c.implementId, notBefore: nb,
+        });
+      }
       case 'dequeue': {
         const i = this.queue.findIndex((q) => q.id === cmd.queueId);
         if (i < 0) return 'Nicht mehr geplant';

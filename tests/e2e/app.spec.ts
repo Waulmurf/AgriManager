@@ -204,3 +204,40 @@ test('Personal: Bewerber einstellen, zweiten Schlepper kaufen – erscheint auf 
     return pos.length >= g.status.business.units.length + 30 && pos.every((p: any) => Math.abs(p.lon) > 1);
   }, null, { timeout: 15_000 });
 });
+
+test('Planungsboard: Auftrag auf Fahrer und Tag ziehen', async ({ page }) => {
+  await page.goto('./?neu');
+  await waitForGame(page);
+  const fields = await page.evaluate(() => (window as any).__game.status.fieldCount);
+  test.skip(!fields, 'keine Felddaten');
+  await page.getByTestId('speed-100').click();
+  // Kunden in der Nähe besuchen, bis eine Anfrage kommt
+  const near: number[] = await page.evaluate(() => {
+    const g = (window as any).__game;
+    const r = g.status.region;
+    return g.farmList()
+      .map((f: any) => ({ id: f.id, d: Math.hypot(f.home[0] - r.center.lon, f.home[1] - r.center.lat) }))
+      .sort((a: any, b: any) => a.d - b.d).slice(0, 20).map((x: any) => x.id);
+  });
+  for (const id of near) {
+    await page.evaluate((id) => (window as any).__game.command({ kind: 'visit', farmId: id }), id);
+    await page.waitForFunction(() => { const b = (window as any).__game.status.business; return b && !b.chefBusy && b.queue.length === 0; }, null, { timeout: 90_000 });
+    await page.waitForTimeout(200);
+    if (await page.evaluate(() => (window as any).__game.status.business.requests.some((r: any) => r.status === 'offen'))) break;
+  }
+  await page.getByTestId('speed-0').click();
+  await page.evaluate(async () => {
+    const g = (window as any).__game;
+    const r = g.status.business.requests.find((x: any) => x.status === 'offen');
+    await g.command({ kind: 'respond', requestId: r.id, action: 'accept' });
+    await g.command({ kind: 'buy', offerId: 1 });
+  });
+  await page.getByTestId('board-open').click();
+  await expect(page.getByTestId('board')).toBeVisible();
+  await expect(page.getByTestId('board-order')).toHaveCount(1);
+  await page.getByTestId('board-order').first().dragTo(page.getByTestId('cell-1-2'));
+  await expect(page.getByTestId('board-bar').first()).toBeVisible();
+  await expect(page.getByTestId('board-order')).toHaveCount(0);
+  await page.getByTestId('board-bar').first().click();
+  await expect(page.getByTestId('board-detail')).toContainText('geplant');
+});

@@ -118,6 +118,7 @@ function sendBusiness(force = false) {
     discounts: Object.fromEntries(DEALERS.map((d) => [d.id, b.dealerDiscount(d.id)])),
     machineValues: Object.fromEntries(sim.company.machines.map((m) => [m.id, b.machineValueNow(m, sim!.time)])),
     busyMachines: sim.busyMachineIds(),
+    plan: sim.planBoard(),
     rivalFarms,
     trialFarms,
     knownFarms: known,

@@ -250,3 +250,31 @@ Schritte:
 - **Offen** (MZ-08, Phase 4): Leih- und Mietmaschinen, eigene Werkstatt, Kredit und Leasing für
   Neukäufe.
 
+### Schritt 3: Planungsboard (umgesetzt)
+
+- Knopf „Planung“ in der oberen Leiste öffnet das Board über der Karte, Esc schließt es.
+- Zeitleiste: eine Zeile je Fahrer, sieben Tage je Seite, blätterbar. Jeder Tag zeigt
+  06–22 Uhr, eine rote Linie markiert die aktuelle Zeit.
+  - Balken: laufender Auftrag (dunkelgrün), Besuch (blau), geplant (hellgrün). Mehrtägige
+    Aufträge werden je Tag geteilt.
+  - Länge aus der Zeitschätzung, mit 10 h Arbeitszeit am Tag und Start neuer Aufgaben bis 20:00.
+- Ziehen und Ablegen:
+  - Ungeplanten Auftrag auf Fahrer und Tag ziehen. Das Spiel wählt das Gespann mit der höchsten
+    Flächenleistung, das zusammenpasst.
+  - Geplante Balken auf einen anderen Fahrer oder Tag ziehen. Ablegen auf heute heißt
+    „sofort“, auf einen späteren Tag „nicht vor 06:00 dieses Tages“.
+- Auswahl: Klick auf einen Balken zeigt Zeitraum, Termin und Warnungen. Dort lassen sich Fahrer,
+  Schlepper, Gerät und „Start frühestens“ ändern oder der Eintrag streichen.
+- Warnungen am Balken (rote Umrandung, ⚠):
+  - Termin des Kunden wird überschritten
+  - Schlepper oder Gerät zur selben Zeit bei einem anderen Fahrer (der spätere wartet)
+  - Maschine in der Werkstatt
+  - Gerät zu schwer für den Schlepper oder Auftrag nicht mehr startbar
+- Offene Anfragen stehen mit geschätztem Fertigtermin und ✓/⚠ daneben und lassen sich direkt
+  annehmen oder ablehnen.
+- Technik: Das Board schreibt nur in die Warteschlangen der Fahrer (Befehle `plan` und
+  `queueEdit`, Feld `notBefore`). Die Balken berechnet `Simulation.planBoard()` und schickt
+  sie mit dem Geschäftszustand.
+- Später: Startzeit auf die Stunde genau, Ketten mit mehreren Rollen (Phase 4), Urlaub und
+  Krankheit als gesperrte Zeiten (Schritt 4).
+

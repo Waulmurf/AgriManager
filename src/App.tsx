@@ -6,6 +6,7 @@ import { forwardLogsToHost, platformName, selftestConfig } from './platform';
 import type { Speed } from './sim/protocol';
 import { BusinessTab, FinanceTab, FleetTab, MarketTab, NewsTab, OrdersTab, SavePanel, StaffTab, VehicleMenu } from './ui/Panels';
 import { AUTOSAVE } from './game/savegame';
+import { PlanningBoard } from './ui/Board';
 
 const TABS = [
   { id: 'betrieb', label: 'Betrieb' },
@@ -33,6 +34,7 @@ export function App() {
   const [selftest, setSelftest] = useState<string | null>(null);
   const [tab, setTab] = useState<TabId>('betrieb');
   const [saveOpen, setSaveOpen] = useState(false);
+  const [boardOpen, setBoardOpen] = useState(false);
 
   useEffect(() => {
     const g = new GameController();
@@ -70,7 +72,7 @@ export function App() {
     if (!game) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement) return;
-      if (e.key === 'Escape') game.closeMenu();
+      if (e.key === 'Escape') { game.closeMenu(); setBoardOpen(false); }
       if (e.code === 'Space') {
         e.preventDefault();
         game.setSpeed(game.status.speed === 0 ? 1 : 0);
@@ -104,6 +106,7 @@ export function App() {
             {overdue === 1 ? '1 Rechnung überfällig' : `${overdue} Rechnungen überfällig`}
           </button>
         )}
+        <button className="planning-btn" onClick={() => setBoardOpen((o) => !o)} data-testid="board-open" disabled={status?.phase !== 'running'}>Planung</button>
         <div className="save-wrap">
           <button className="save-btn" onClick={() => { setSaveOpen((o) => !o); void game?.refreshSaves(); }} data-testid="save-menu">
             Spielstand{status?.saveName ? `: ${status.saveName}` : ''}
@@ -129,6 +132,7 @@ export function App() {
       <main className="main">
         <div ref={mapRef} className="map" data-testid="map" />
         {status && <VehicleMenu status={status} game={game} />}
+        {boardOpen && status && <PlanningBoard status={status} game={game} onClose={() => setBoardOpen(false)} />}
         {status?.phase === 'loading' && <div className="overlay">Karte und Straßengraph werden geladen …</div>}
         {status?.phase === 'error' && (
           <div className="overlay error" role="alert">

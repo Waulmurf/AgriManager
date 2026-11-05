@@ -182,6 +182,8 @@ export type Command =
   | { kind: 'service'; machineId: number }
   | { kind: 'hire'; applicantId: number; asKind: 'fest' | 'saison' }
   | { kind: 'fire'; employeeId: number }
+  | { kind: 'plan'; orderId: number; driverId: number; tractorId: number; implementId: number; notBefore?: number }
+  | { kind: 'queueEdit'; queueId: number; driverId?: number; tractorId?: number; implementId?: number; notBefore?: number | null }
   | { kind: 'dequeue'; queueId: number }
   | { kind: 'queueMove'; queueId: number; dir: -1 | 1 };
 
@@ -193,6 +195,8 @@ export interface QueueItem {
   driverId: number;
   cmd: QueueCommand;
   label: string;
+  /** frühester Start (Planungsboard); ohne = so bald wie möglich */
+  notBefore?: number;
 }
 
 export class Business {

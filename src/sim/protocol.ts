@@ -1,5 +1,5 @@
 /** Nachrichten zwischen Oberfläche und Simulations-Worker. */
-import type { JobEstimate, PlayerUnitInfo, SaveState, VehicleInfo } from './engine';
+import type { JobEstimate, PlanBar, PlayerUnitInfo, SaveState, VehicleInfo } from './engine';
 import type { Company } from './economy';
 import type { ContactPreference } from './farms';
 import type { Applicant, Command, Delivery, GameEvent, Invoice, LedgerEntry, Order, QueueItem, Request } from './business';
@@ -69,6 +69,8 @@ export interface BusinessState {
   deliveries: Delivery[];
   discounts: Record<number, number>;
   machineValues: Record<number, number>;
+  /** Planungsboard: Balken je Fahrer */
+  plan: PlanBar[];
   /** Maschinen gerade im Einsatz */
   busyMachines: number[];
   /** Zeitschätzung je offener Anfrage bzw. offenem Auftrag (Schlüssel = ID) */
