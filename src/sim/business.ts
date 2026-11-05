@@ -9,7 +9,7 @@ import { Rng } from './rng';
 import { Crop, SURNAMES, type FarmSet } from './farms';
 import type { FieldSet } from './fields';
 import {
-  EMPLOYER_SV, MIN_WAGE, MONTH_HOURS, SKILLS, VACATION_DAYS, marketWage, XP_MINUTES_PER_LEVEL, baseSkills, gameDate, marketValue,
+  EMPLOYER_SV, MIN_WAGE, MONTH_HOURS, SKILLS, VACATION_DAYS, marketWage, agencyRate, takeOverFee, AGENCY_MIN_HOURS, XP_MINUTES_PER_LEVEL, baseSkills, gameDate, marketValue,
   serviceInterval, START_OFFERS, type Company, type Employee, type Machine, type MarketOffer, type Skill,
 } from './economy';
 import { CATALOG, DEALERS, dealersFor, type CatalogModel } from '../data/catalog';
@@ -183,6 +183,10 @@ export type Command =
   | { kind: 'hire'; applicantId: number; asKind: 'fest' | 'saison' }
   | { kind: 'fire'; employeeId: number }
   | { kind: 'vacation'; employeeId: number; fromDay: number; days: number }
+  | { kind: 'rent'; poolId: number; days: number }
+  | { kind: 'extendRent'; employeeId: number; days: number }
+  | { kind: 'takeOver'; employeeId: number; asKind: 'fest' | 'saison' }
+  | { kind: 'swapDriver'; vehicle: number; driverId: number }
   | { kind: 'staffAnswer'; requestId: number; accept: boolean }
   | { kind: 'setWage'; employeeId: number; wage: number }
   | { kind: 'plan'; orderId: number; driverId: number; tractorId: number; implementId: number; notBefore?: number }
@@ -221,6 +225,8 @@ export class Business {
   readonly applicants: Applicant[] = [];
   readonly deliveries: Delivery[] = [];
   readonly staffRequests: StaffRequest[] = [];
+  /** Zeitarbeitsfirma: verfügbare Leiharbeiter (Anfrage morgens, ab nächstem Tag im Einsatz) */
+  readonly agencyPool: Applicant[] = [];
   /** Umsatz je Händler (Rabatt und Werkstattvorrang, HM-07) */
   readonly dealerSpend: Record<number, number> = {};
   /** aufgelaufene Lohnkosten des laufenden Monats (wird am Monatsersten gebucht) */
@@ -263,6 +269,7 @@ export class Business {
       payrollAccrued: this.payrollAccrued,
       deliveries: this.deliveries,
       staffRequests: this.staffRequests,
+      agencyPool: this.agencyPool,
       dealerSpend: this.dealerSpend,
     };
   }
@@ -282,6 +289,7 @@ export class Business {
     put(this.applicants, s.applicants ?? []);
     put(this.deliveries, s.deliveries ?? []);
     put(this.staffRequests, s.staffRequests ?? []);
+    put(this.agencyPool, s.agencyPool ?? []);
     for (const k of Object.keys(this.dealerSpend)) delete this.dealerSpend[Number(k)];
     Object.assign(this.dealerSpend, s.dealerSpend ?? {});
     this.payrollAccrued = s.payrollAccrued ?? 0;
@@ -907,6 +915,15 @@ export class Business {
       const over = Math.max(0, w - 480); // über 8 h: Überstundenzuschlag 25 % (ZU-03)
       // Zuschläge (ZU-01): gewichtete Minuten aus dem Rechenkern
       let pay = ((surcharge[e.id] ?? 0) / 60) * e.wage + (over / 60) * e.wage * 0.25;
+      if (e.kind === 'leih') {
+        // Zeitarbeit: Rechnung der Firma nach Stunden, mindestens 4 h je gebuchtem Einsatztag;
+        // Zuschläge berechnet die Firma mit (ohne Arbeitgeberanteil, den trägt sie)
+        const yesterday = time - 1440;
+        const booked = yesterday >= (e.availableFrom ?? 0) && yesterday < (e.contractUntil ?? 0) && !this.absence(e.id, yesterday);
+        const hours = Math.max(w / 60, booked ? AGENCY_MIN_HOURS : 0);
+        day += hours * (e.agencyRate ?? 30) + ((surcharge[e.id] ?? 0) / 60) * (e.agencyRate ?? 30) * 0.5;
+        continue;
+      }
       if (e.kind === 'fest') pay += (e.wage * MONTH_HOURS) / 30 + (over / 60) * e.wage;
       else pay += (w / 60) * e.wage;
       day += pay * (1 + EMPLOYER_SV);
@@ -998,6 +1015,12 @@ export class Business {
     if (i < 0) return 'Mitarbeiter unbekannt';
     const e = this.company.drivers[i];
     if (e.isPlayer) return 'Den Chef kann man nicht entlassen';
+    if (e.kind === 'leih' && !immediate) {
+      // Leiharbeit endet zum nächsten Morgen (Abbestellung bei der Firma)
+      e.contractUntil = Math.min(e.contractUntil ?? time, (Math.floor(time / 1440) + 1) * 1440);
+      this.version++;
+      return `abbestellt zum ${fmtDay(e.contractUntil)}`;
+    }
     if (e.kind === 'fest' && !immediate) {
       if (e.leavesAt !== undefined) return `Ist schon gekündigt (geht am ${fmtDay(e.leavesAt)})`;
       e.leavesAt = (Math.floor(time / 1440) + 28) * 1440;
@@ -1011,6 +1034,67 @@ export class Business {
   }
 
   // ---------- Abwesenheit, Zufriedenheit, Wünsche (Schritt 4) ----------
+
+  /** Angebot der Zeitarbeitsfirma: meist 2–4 Leute, Stufe 1–3, wechselt laufend */
+  private updateAgency(time: number) {
+    for (let i = this.agencyPool.length - 1; i >= 0; i--) if (this.agencyPool[i].until <= time) this.agencyPool.splice(i, 1);
+    while (this.agencyPool.length < 2 || (this.agencyPool.length < 4 && this.rng.next() < 0.2)) {
+      const a = this.makeApplicant(time);
+      a.person.skills.boden = Math.min(a.person.skills.boden, 1 + this.rng.int(3));
+      a.person.kind = 'leih';
+      a.person.agencyRate = agencyRate(a.person);
+      a.person.wage = marketWage(a.person); // Lohn bei Übernahme
+      a.note = 'Zeitarbeit, einsatzbereit ab morgen 06:00';
+      a.until = time + (3 + this.rng.int(8)) * 1440;
+      this.agencyPool.push(a);
+    }
+  }
+
+  /** Leiharbeiter für einige Tage buchen (befristet, ab nächstem Tag im Einsatz) */
+  rent(poolId: number, days: number, time: number): string {
+    const i = this.agencyPool.findIndex((a) => a.id === poolId);
+    if (i < 0) return 'Nicht mehr verfügbar';
+    if (!(days >= 1 && days <= 180)) return 'Buchung 1 bis 180 Tage';
+    const a = this.agencyPool[i];
+    const id = this.company.drivers.reduce((m, d) => Math.max(m, d.id), 0) + 1;
+    const from = (Math.floor(time / 1440) + 1) * 1440;
+    this.company.drivers.push({ ...structuredClone(a.person), id, kind: 'leih', hiredAt: from, availableFrom: from, contractUntil: from + days * 1440, satisfaction: 70, absences: [] });
+    this.agencyPool.splice(i, 1);
+    this.emit(time, 'info', `Leiharbeiter ${a.person.name} gebucht: ${days} Tage ab ${fmtDay(from)}, ${fmtEur(a.person.agencyRate ?? 0)}/h.`);
+    return `gebucht bis ${fmtDay(from + days * 1440 - 1)}`;
+  }
+
+  extendRent(employeeId: number, days: number, time: number): string {
+    const e = this.company.drivers.find((d) => d.id === employeeId);
+    if (!e || e.kind !== 'leih') return 'Kein Leiharbeiter';
+    if (!(days >= 1 && days <= 180)) return 'Verlängerung 1 bis 180 Tage';
+    e.contractUntil = Math.max(e.contractUntil ?? time, (Math.floor(time / 1440) + 1) * 1440) + days * 1440;
+    this.version++;
+    return `verlängert bis ${fmtDay(e.contractUntil - 1)}`;
+  }
+
+  /** Leiharbeiter übernehmen (fest oder Saison) gegen Provision je nach Einsatzdauer */
+  takeOver(employeeId: number, asKind: 'fest' | 'saison', time: number): string {
+    const e = this.company.drivers.find((d) => d.id === employeeId);
+    if (!e || e.kind !== 'leih') return 'Kein Leiharbeiter';
+    const deployed = Math.max(0, Math.floor((time - (e.availableFrom ?? time)) / 1440));
+    const wage = Math.max(MIN_WAGE, asKind === 'saison' ? Math.round(marketWage(e) * 1.08 * 10) / 10 : marketWage(e));
+    const fee = takeOverFee(wage, deployed);
+    if (this.company.cash < fee) return `Provision ${fmtEur(fee)} – nicht genug Geld`;
+    if (fee) {
+      this.company.cash = Math.round((this.company.cash - fee) * 100) / 100;
+      this.ledger.push({ time, text: `Übernahmeprovision ${e.name}`, amount: -fee, category: 'Personal' });
+    }
+    e.kind = asKind;
+    e.wage = wage;
+    e.hiredAt = time;
+    delete e.agencyRate; delete e.contractUntil; delete e.availableFrom;
+    const monthsLeft = 12 - gameDate(time).month + 1;
+    e.vacationLeft = asKind === 'fest' ? Math.round((VACATION_DAYS * monthsLeft) / 12) : 0;
+    this.version++;
+    this.emit(time, 'info', `${e.name} übernommen (${asKind === 'fest' ? 'fest' : 'Saison'}, ${fmtEur(wage)}/h${fee ? `, Provision ${fmtEur(fee)}` : ', ohne Provision'}).`);
+    return `übernommen${fee ? ` (Provision ${fmtEur(fee)})` : ''}`;
+  }
 
   /** Mitarbeiter heute bzw. zu dieser Minute abwesend (Urlaub, krank)? */
   absence(employeeId: number, time: number): 'urlaub' | 'krank' | null {
@@ -1093,6 +1177,21 @@ export class Business {
         continue;
       }
       e.absences = (e.absences ?? []).filter((a) => a.to > time - 30 * 1440);
+      if (e.kind === 'leih') {
+        // Einsatz endet: zurück zur Zeitarbeitsfirma (sobald nicht mehr unterwegs)
+        if (time >= (e.contractUntil ?? 0) && !busy.has(e.id)) {
+          this.company.drivers.splice(this.company.drivers.indexOf(e), 1);
+          this.emit(time, 'info', `Leiharbeit von ${e.name} beendet.`);
+          continue;
+        }
+        // auch Leiharbeiter werden krank; die Firma schickt dann niemanden
+        if (!this.absence(e.id, time) && this.rng.next() < 0.008 * (1.6 - (e.reliability ?? 0.75))) {
+          const days = 1 + this.rng.int(3);
+          (e.absences ??= []).push({ from: time, to: time + days * 1440, kind: 'krank' });
+          this.emit(time, 'warnung', `Leiharbeiter ${e.name} ist krank (etwa ${days} ${days === 1 ? 'Tag' : 'Tage'}).`);
+        }
+        continue;
+      }
       // Überstunden gleitend über 30 Tage (über 8 h am Tag)
       const over = Math.max(0, (worked[e.id] ?? 0) - 480);
       e.overtime30 = Math.round(((e.overtime30 ?? 0) * 29) / 30 + over);
@@ -1143,6 +1242,7 @@ export class Business {
       if (e && !(r.kind === 'gehalt' && e.wage >= (r.wage ?? 0))) e.grudge = (e.grudge ?? 0) + (r.kind === 'gehalt' ? 15 : 8);
       this.staffRequests.splice(i, 1);
     }
+    this.updateAgency(time);
     // Jahreswechsel: neuer Urlaubsanspruch
     const d = gameDate(time);
     if (d.month === 1 && d.day === 1) for (const e of this.company.drivers) if (e.kind === 'fest') e.vacationLeft = Math.min(VACATION_DAYS + 10, (e.vacationLeft ?? 0) + VACATION_DAYS);

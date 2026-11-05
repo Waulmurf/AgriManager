@@ -65,6 +65,8 @@ interface Vehicle extends VehicleInfo {
   task?: PlayerTask;
   /** Feierabend bis Spielminute (Arbeitszeit des Chefs) */
   restUntil: number;
+  /** Fahrerwechsel: Gespann steht bis Spielminute */
+  handoverUntil?: number;
   /** zuletzt für Diesel abgerechnete Route */
   chargedRoute: number;
 }
@@ -88,6 +90,7 @@ export interface SaveState {
   vehicles: {
     state: VehicleState; node: number; seg: number; segOff: number; dist: number; waitMin: number;
     next: 'field' | 'home' | 'leave-field'; fieldNode: number; trips: number; restUntil: number; chargedRoute: number;
+    handoverUntil?: number;
     task: PlayerTask | null;
     route: { id: number; kind: RouteGeom['kind']; xs: number[]; ys: number[]; speed: number[] } | null;
   }[];
@@ -102,6 +105,8 @@ export interface PlanBar {
   driverId: number;
   kind: 'running' | 'visit' | 'queued' | 'absence';
   queueId?: number;
+  /** laufende Aufgabe: Fahrzeug (für Fahrerwechsel) */
+  vehicle?: number;
   orderId?: number;
   farmId?: number;
   label: string;
@@ -388,6 +393,9 @@ export class Simulation {
    * 10 h, nicht vor Ablauf der Ruhezeit von 11 h nach dem letzten Arbeitstag (PA-04).
    */
   private driverBlocked(d: number): string | null {
+    const e = this.company.drivers.find((x) => x.id === d);
+    if (e?.kind === 'leih' && this.time < (e.availableFrom ?? 0)) return `kommt ab ${fmtDay(e.availableFrom!)}`;
+    if (e?.kind === 'leih' && this.time >= (e.contractUntil ?? Infinity)) return 'Einsatz beendet';
     const abs = this.business.absence(d, this.time);
     if (abs) return abs === 'urlaub' ? 'hat Urlaub' : 'ist krank';
     if (this.minutesOf(d) >= CHEF_MAX_MINUTES) return 'Arbeitszeit für heute erreicht';
@@ -607,7 +615,9 @@ export class Simulation {
         const down = [v.machineId, t.implementId].map((id) => this.company.machines.find((x) => x.id === id)).find((x) => (x?.downUntil ?? 0) > this.time);
         if (down) warnings.push(`${down.brand} ${down.model}: ${down.downReason}`);
         if (o && end > o.latest) warnings.push(`Termin ${fmtDay(o.latest)} wird überschritten`);
-        bars.push({ key: `r${v.id}`, driverId: t.driverId, kind: 'running', orderId: t.orderId, farmId: o?.farmId, label: o ? `Grubbern ${b.farmName(o.farmId)}` : 'Auftrag', start: o?.startedAt ?? this.time, end, tractorId: v.machineId, implementId: t.implementId, latest: o?.latest, warnings });
+        const ab = this.business.absence(t.driverId, this.time);
+        if (ab) warnings.push(`${this.driverName(t.driverId)} ist ${ab === 'krank' ? 'krank' : 'im Urlaub'} – Fahrer wechseln`);
+        bars.push({ key: `r${v.id}`, driverId: t.driverId, kind: 'running', vehicle: v.id, orderId: t.orderId, farmId: o?.farmId, label: o ? `Grubbern ${b.farmName(o.farmId)}` : 'Auftrag', start: o?.startedAt ?? this.time, end, tractorId: v.machineId, implementId: t.implementId, latest: o?.latest, warnings });
         cursor[t.driverId] = Math.max(cursor[t.driverId] ?? this.time, end);
       } else {
         const end = this.time + 30;
@@ -624,6 +634,7 @@ export class Simulation {
     }
     const available = (d: number, t: number) => {
       const e = this.company.drivers.find((x) => x.id === d);
+      if (e?.kind === 'leih') t = Math.max(t, e.availableFrom ?? 0);
       for (let k = 0; k < 4; k++) {
         const a = (e?.absences ?? []).find((x) => t >= x.from && t < x.to);
         if (!a) break;
@@ -643,6 +654,7 @@ export class Simulation {
       const dr = this.company.drivers.find((x) => x.id === d);
       if ((dr?.absences ?? []).some((a) => a.from < end && start < a.to)) warnings.push(`${this.driverName(d)} ist in der Zeit abwesend`);
       if (dr?.leavesAt !== undefined && end > dr.leavesAt) warnings.push(`${this.driverName(d)} hat dann den Betrieb verlassen`);
+      if (dr?.kind === 'leih' && end > (dr.contractUntil ?? 0)) warnings.push(`Leiharbeit von ${this.driverName(d)} endet vorher (${fmtDay((dr.contractUntil ?? 0) - 1)})`);
       if (q.cmd.kind === 'startJob') {
         const c = q.cmd;
         const o = b.orders.find((x) => x.id === c.orderId);
@@ -665,6 +677,37 @@ export class Simulation {
       }
     }
     return bars;
+  }
+
+  /**
+   * Fahrerwechsel bei einem laufenden Auftrag (Ersatz bei Krankheit oder Feierabend): Der neue
+   * Fahrer wird mit dem Firmenwagen hingebracht (KK-03), das Gespann steht so lange.
+   */
+  private swapDriver(vehicle: number, driverId: number): string {
+    const v = this.vehicles[vehicle];
+    if (!v || v.owner !== 'player' || v.task?.kind !== 'job') return 'Nur bei laufenden Aufträgen';
+    const t = v.task;
+    if (t.driverId === driverId) return 'Fährt schon';
+    if (!this.company.drivers.some((d) => d.id === driverId)) return 'Fahrer unbekannt';
+    const busy = this.driverBusy(driverId);
+    if (busy) return busy;
+    const blocked = this.driverBlocked(driverId);
+    if (blocked) return `${this.driverName(driverId)} ${blocked}`;
+    const old = t.driverId;
+    const [px, py] = this.position(v.id);
+    const dx = px - this.graph.x[this.homeNode], dy = py - this.graph.y[this.homeNode];
+    const travel = Math.round((Math.sqrt(dx * dx + dy * dy) * EST_DETOUR) / EST_CAR_M_MIN) + 5;
+    const skill = this.company.drivers.find((d) => d.id === driverId)?.skills.boden ?? 1;
+    const f = skillSpeed(skill) / skillSpeed(t.skill);
+    t.haPerHour *= f;
+    t.workKmh *= f;
+    t.dieselLHa *= skillDiesel(skill) / skillDiesel(t.skill);
+    t.skill = skill;
+    t.driverId = driverId;
+    v.handoverUntil = this.time + travel;
+    this.business.version++;
+    this.business.info(this.time, `${v.name}: ${this.driverName(driverId)} übernimmt von ${this.driverName(old)} (Übergabe in etwa ${travel} min).`);
+    return `${this.driverName(driverId)} übernimmt in etwa ${travel} min`;
   }
 
   /** Auftrag aus dem Board einplanen bzw. umplanen (ersetzt einen bestehenden Eintrag) */
@@ -807,6 +850,9 @@ export class Simulation {
           }[t.phase];
         }
         if (v.restUntil > this.time) status = `Feierabend (Arbeitszeit erreicht), weiter um 06:00 – ${status}`;
+        if ((v.handoverUntil ?? 0) > this.time) status = `Fahrerwechsel – ${status}`;
+        if (t && this.business.absence(t.driverId, this.time)) status = `Fahrer krank, Gespann wartet – ${status}`;
+        if (t) status = `${this.driverName(t.driverId)}: ${status}`;
         const moving = v.route && v.seg < v.route.speed.length && (v.state === VehicleState.Driving || v.state === VehicleState.Working) && v.restUntil <= this.time;
         const kmh = moving ? Math.round(v.route!.speed[v.seg] * 3.6) : 0;
         const m = this.company.machines.find((x) => x.id === v.machineId);
@@ -852,6 +898,14 @@ export class Simulation {
       }
       case 'hire':
         return b.hire(cmd.applicantId, cmd.asKind, t);
+      case 'rent':
+        return b.rent(cmd.poolId, cmd.days, t);
+      case 'extendRent':
+        return b.extendRent(cmd.employeeId, cmd.days, t);
+      case 'takeOver':
+        return b.takeOver(cmd.employeeId, cmd.asKind, t);
+      case 'swapDriver':
+        return this.swapDriver(cmd.vehicle, cmd.driverId);
       case 'vacation':
         return b.grantVacation(cmd.employeeId, cmd.fromDay, cmd.days, t);
       case 'staffAnswer':
@@ -860,7 +914,7 @@ export class Simulation {
         return b.setWage(cmd.employeeId, cmd.wage, t);
       case 'fire': {
         const e = this.company.drivers.find((d) => d.id === cmd.employeeId);
-        if (e?.kind !== 'fest' && this.driverBusy(cmd.employeeId)) return 'Mitarbeiter ist gerade unterwegs – erst zurückrufen';
+        if (e?.kind === 'saison' && this.driverBusy(cmd.employeeId)) return 'Mitarbeiter ist gerade unterwegs – erst zurückrufen';
         const r = b.fire(cmd.employeeId, t);
         if (r === 'entlassen') {
           const before = this.queue.length;
@@ -960,6 +1014,7 @@ export class Simulation {
         state: v.state, node: v.node, route: route(v.route), seg: v.seg, segOff: v.segOff, dist: v.dist,
         waitMin: v.waitMin, next: v.next, fieldNode: v.fieldNode, trips: v.trips,
         task: v.task ? structuredClone(v.task) : null, restUntil: v.restUntil, chargedRoute: v.chargedRoute,
+        handoverUntil: v.handoverUntil,
       })),
       queue: structuredClone(this.queue),
       nextQueueId: this.nextQueueId,
@@ -994,7 +1049,7 @@ export class Simulation {
       Object.assign(v, {
         state: d.state, node: d.node, seg: d.seg, segOff: d.segOff, dist: d.dist, waitMin: d.waitMin,
         next: d.next, fieldNode: d.fieldNode, trips: d.trips, task: d.task ? structuredClone(d.task) : undefined,
-        restUntil: d.restUntil, chargedRoute: d.chargedRoute,
+        restUntil: d.restUntil, chargedRoute: d.chargedRoute, handoverUntil: d.handoverUntil,
       });
       if (d.route) {
         const r = d.route;
@@ -1198,6 +1253,7 @@ export class Simulation {
     if (v.restUntil > this.time) return;
     const t = v.task;
     if (t && this.business.absence(t.driverId, this.time)) return; // Fahrer krank: Gespann wartet
+    if ((v.handoverUntil ?? 0) > this.time) return; // Fahrerwechsel
     if (t?.kind === 'job' && (t.phase === 'to' || t.phase === 'setup' || t.phase === 'work') && this.minutesOf(t.driverId) >= CHEF_MAX_MINUTES) {
       v.restUntil = Math.max(this.time + (1440 - (this.time % 1440)), this.time + 11 * 60);
       this.business.warn(this.time, `${v.name}: Feierabend – Höchstarbeitszeit (${this.driverName(t.driverId)}) erreicht, weiter morgen um 06:00.`);

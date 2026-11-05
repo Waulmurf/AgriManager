@@ -170,7 +170,11 @@ export interface Employee {
   name: string;
   isPlayer: boolean;
   /** fest = Monatsgehalt, saison = Stundenlohn nur für geleistete Stunden */
-  kind: 'chef' | 'fest' | 'saison';
+  kind: 'chef' | 'fest' | 'saison' | 'leih';
+  /** Leiharbeit: Stundensatz der Zeitarbeitsfirma (netto, ohne SV), einsatzbereit ab, gebucht bis */
+  agencyRate?: number;
+  availableFrom?: number;
+  contractUntil?: number;
   /** Stundenlohn brutto (€/h); Monatsgehalt = Lohn × 173 h */
   wage: number;
   /** Skillstufe 1–5 je Tätigkeit (PA-07) */
@@ -197,6 +201,25 @@ export interface Employee {
   overtime30?: number;
   /** Ärger über abgelehnte Wünsche (klingt ab) */
   grudge?: number;
+}
+
+/**
+ * Zeitarbeit (Annahme, Größenordnung Verrechnungssätze für Fahrer/Maschinenführer 2026):
+ * 27 € netto je Stunde bei Stufe 1, +3 € je weitere Stufe der Bodenbearbeitung, mindestens
+ * 4 Stunden je gebuchtem Tag.
+ */
+export function agencyRate(e: Pick<Employee, 'skills' | 'licenseC'>): number {
+  return 27 + (e.skills.boden - 1) * 3 + (e.licenseC ? 2 : 0);
+}
+export const AGENCY_MIN_HOURS = 4;
+
+/**
+ * Übernahmeprovision der Zeitarbeitsfirma (übliche Staffel, Annahme): unter 3 Monaten Einsatz
+ * zwei Bruttomonatslöhne, dann je Quartal ein halber weniger, ab 12 Monaten frei.
+ */
+export function takeOverFee(wage: number, deployedDays: number): number {
+  const months = [2, 1.5, 1, 0.5][Math.floor(deployedDays / 90)] ?? 0;
+  return Math.round(wage * MONTH_HOURS * months);
 }
 
 /** Jahresurlaub fester Mitarbeiter (Tage, Annahme; gesetzlich mindestens 20 bei 5-Tage-Woche) */

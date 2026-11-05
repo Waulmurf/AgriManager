@@ -195,6 +195,15 @@ export function PlanningBoard({ status, game, onClose }: { status: GameStatus; g
               <strong>{selected.label}</strong>
               <small className="hint">{selected.kind === 'running' ? 'läuft' : selected.kind === 'visit' ? 'Besuch läuft' : 'geplant'} · {fmtDay(selected.start)} {fmtTime(selected.start)} – {fmtDay(selected.end)} {fmtTime(selected.end)}{selected.latest !== undefined ? ` · Termin ${fmtDay(selected.latest)}` : ''}</small>
               {selected.warnings.map((w, i) => <small key={i} className="warn">⚠ {w}</small>)}
+              {selected.kind === 'running' && selected.vehicle !== undefined && (
+                <div className="board-form">
+                  <label>Fahrer wechseln
+                    <select value={selected.driverId} onChange={(e) => send({ kind: 'swapDriver', vehicle: selected.vehicle!, driverId: Number(e.target.value) })}>
+                      {c.drivers.map((d) => <option key={d.id} value={d.id} disabled={d.id !== selected.driverId && !!b.driverStatus[d.id]}>{d.isPlayer ? 'Chef' : d.name}{b.driverStatus[d.id] && d.id !== selected.driverId ? ` (${b.driverStatus[d.id]})` : ''}</option>)}
+                    </select>
+                  </label>
+                </div>
+              )}
               {selected.kind === 'queued' && selected.queueId !== undefined && (
                 <div className="board-form">
                   {selected.orderId !== undefined && (

@@ -317,3 +317,26 @@ Schritte:
 - **Planungsboard:** Urlaub und Krankheit erscheinen als schraffierte Balken. Geplante
   Aufträge rücken hinter die Abwesenheit, Warnung bei Überschneidung oder Abgang.
 
+### Ergänzung: Zeitarbeit und Fahrerwechsel (Wunsch von Nils, 5. Nov. 2026)
+
+- **Zeitarbeitsfirma:** Morgens bietet sie 2–4 Leiharbeiter an, mit Skills Stufe 1–3 und
+  einem Angebot, das 3–10 Tage gilt.
+  - Buchung für 1–180 Tage, Einsatz ab dem nächsten Morgen 06:00. Verlängern oder
+    abbestellen (zum nächsten Morgen) geht jederzeit.
+  - Stundensatz (Annahme): 27 € netto bei Stufe 1, +3 € je Stufe, +2 € mit Führerschein C/CE.
+    Die Firma rechnet mindestens 4 h je gebuchtem Einsatztag ab, Nacht- und Sonntagsarbeit
+    mit halbem Zuschlag auf den Satz. Arbeitgeberanteil fällt nicht an, Buchung unter Personal.
+  - Leiharbeiter werden auch krank; die Firma schickt dann keinen Ersatz.
+- **Übernahme:** Ein bewährter Leiharbeiter lässt sich fest oder als Saisonkraft übernehmen,
+  zum Marktlohn für seine Skills. Provision der Zeitarbeitsfirma nach Einsatzdauer: unter 3
+  Monaten zwei Bruttomonatslöhne, 3–6 Monate 1,5, 6–9 Monate 1, 9–12 Monate 0,5, danach frei
+  (übliche Staffel, Annahme).
+- **Fahrerwechsel:** Ein laufender Auftrag lässt sich an einen freien Fahrer übergeben, z. B.
+  wenn der Fahrer krank wird oder Feierabend hat.
+  - Weg: Rechtsklick aufs Fahrzeug oder Balken im Planungsboard.
+  - Der Ersatz wird mit dem Firmenwagen hingebracht (KK-03), so lange steht das Gespann. Dauer:
+    Luftlinie × 1,35 bei 60 km/h, plus 5 min.
+  - Tempo und Diesel richten sich ab dann nach dem Skill des neuen Fahrers.
+  - Ist der Fahrer eines laufenden Auftrags krank, steht das Gespann. Am Balken erscheint die
+    Warnung „Fahrer wechseln“.
+

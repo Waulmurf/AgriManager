@@ -117,6 +117,7 @@ function sendBusiness(force = false) {
       return [d.id, sim!.driverBusy(d.id) ?? (abs === 'urlaub' ? 'im Urlaub' : abs === 'krank' ? 'krank' : null)];
     })),
     staffRequests: structuredClone(b.staffRequests),
+    agencyPool: structuredClone(b.agencyPool),
     applicants: structuredClone(b.applicants),
     deliveries: structuredClone(b.deliveries),
     discounts: Object.fromEntries(DEALERS.map((d) => [d.id, b.dealerDiscount(d.id)])),

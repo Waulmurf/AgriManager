@@ -4,7 +4,7 @@
 import { useState } from 'react';
 import type { GameController, GameStatus } from '../game/controller';
 import type { JobEstimate } from '../sim/engine';
-import { SKILLS, employerHourCost, employerMonthCost, machineValue, marketWage, type Employee, type Machine } from '../sim/economy';
+import { SKILLS, employerHourCost, employerMonthCost, machineValue, marketWage, takeOverFee, type Employee, type Machine } from '../sim/economy';
 import { SERVICE_NAMES, fmtDay, fmtTime, CHECK_COST, type Invoice, type Request, type Order } from '../sim/business';
 import { CATALOG, DEALERS } from '../data/catalog';
 import { formatGameTime } from '../game/clock';
@@ -297,11 +297,12 @@ function EmployeeCard({ e, status, game, show }: { e: Employee; status: GameStat
     <li className="card" data-testid="employee">
       <div className="card-head">
         <strong>{e.isPlayer ? 'Chef (du)' : e.name}</strong>
-        <small>{e.kind === 'chef' ? 'kein Lohn' : e.kind === 'fest' ? `fest · ${eur(employerMonthCost(e))}/Monat` : `Saison · ${eur(employerHourCost(e))}/h`}</small>
+        <small>{e.kind === 'chef' ? 'kein Lohn' : e.kind === 'fest' ? `fest · ${eur(employerMonthCost(e))}/Monat` : e.kind === 'leih' ? `Leiharbeit · ${eur(e.agencyRate ?? 0)}/h` : `Saison · ${eur(employerHourCost(e))}/h`}</small>
       </div>
-      <small className="hint">{skillShort(e)}{e.licenseC ? ' · Führerschein C/CE' : ''}{!e.isPlayer ? ` · ${e.age} Jahre · ${e.wage.toLocaleString('de-DE')} €/h brutto (Markt ${marketWage(e).toLocaleString('de-DE')} €)` : ''}</small>
-      <small>{b.driverStatus[e.id] ?? 'frei'} · heute {((b.driverMinutes[e.id] ?? 0) / 60).toLocaleString('de-DE', { maximumFractionDigits: 1 })} von 10 h</small>
-      {!e.isPlayer && (
+      <small className="hint">{skillShort(e)}{e.licenseC ? ' · Führerschein C/CE' : ''}{!e.isPlayer && e.kind !== 'leih' ? ` · ${e.age} Jahre · ${e.wage.toLocaleString('de-DE')} €/h brutto (Markt ${marketWage(e).toLocaleString('de-DE')} €)` : ''}</small>
+      <small>{b.driverStatus[e.id] ?? (e.kind === 'leih' && b.time < (e.availableFrom ?? 0) ? `kommt ${fmtDay(e.availableFrom!)} 06:00` : 'frei')} · heute {((b.driverMinutes[e.id] ?? 0) / 60).toLocaleString('de-DE', { maximumFractionDigits: 1 })} von 10 h</small>
+      {e.kind === 'leih' && <LeihActions e={e} status={status} send={send} />}
+      {!e.isPlayer && e.kind !== 'leih' && (
         <>
           <small className={sat < 40 ? 'warn' : 'hint'}>
             Zufriedenheit {Math.round(sat)} %
@@ -329,6 +330,46 @@ function EmployeeCard({ e, status, game, show }: { e: Employee; status: GameStat
           </div>
         </>
       )}
+    </li>
+  );
+}
+
+function LeihActions({ e, status, send }: { e: Employee; status: GameStatus; send: (cmd: Parameters<GameController['command']>[0]) => void }) {
+  const b = status.business!;
+  const [days, setDays] = useState('7');
+  const deployed = Math.max(0, Math.floor((b.time - (e.availableFrom ?? b.time)) / 1440));
+  const fee = takeOverFee(marketWage(e), deployed);
+  return (
+    <>
+      <small className="hint">gebucht bis {fmtDay((e.contractUntil ?? b.time) - 1)} · {deployed} Tage im Einsatz · Übernahme {fee ? `gegen Provision ${eur(fee)}` : 'ohne Provision'}, Lohn dann etwa {marketWage(e).toLocaleString('de-DE')} €/h</small>
+      <div className="card-actions">
+        <span className="counter">
+          <input value={days} onChange={(x) => setDays(x.target.value)} aria-label="Tage verlängern" style={{ width: 36 }} />
+          <button onClick={() => send({ kind: 'extendRent', employeeId: e.id, days: Number(days) })}>Tage verlängern</button>
+        </span>
+        <button onClick={() => send({ kind: 'takeOver', employeeId: e.id, asKind: 'fest' })} data-testid="take-over">Fest übernehmen</button>
+        <button onClick={() => send({ kind: 'takeOver', employeeId: e.id, asKind: 'saison' })}>Als Saisonkraft</button>
+        <button onClick={() => send({ kind: 'fire', employeeId: e.id })}>Abbestellen</button>
+      </div>
+    </>
+  );
+}
+
+function AgencyOffer({ a, send }: { a: { id: number; person: Omit<Employee, 'id' | 'hiredAt'>; until: number }; send: (cmd: Parameters<GameController['command']>[0]) => void }) {
+  const [days, setDays] = useState('7');
+  return (
+    <li className="card" data-testid="agency-offer">
+      <div className="card-head">
+        <strong>{a.person.name}</strong>
+        <strong>{eur(a.person.agencyRate ?? 0)}/h</strong>
+      </div>
+      <small className="hint">{skillShort(a.person)}{a.person.licenseC ? ' · Führerschein C/CE' : ''} · mindestens 4 h je Einsatztag · verfügbar bis {fmtDay(a.until)}</small>
+      <div className="card-actions">
+        <span className="counter">
+          <input value={days} onChange={(x) => setDays(x.target.value)} aria-label="Tage" style={{ width: 36 }} />
+          <button onClick={() => send({ kind: 'rent', poolId: a.id, days: Number(days) })} data-testid="rent">Tage buchen (ab morgen)</button>
+        </span>
+      </div>
     </li>
   );
 }
@@ -368,6 +409,11 @@ export function StaffTab({ status, game }: { status: GameStatus; game: GameContr
         <dt>Lohnkosten fest</dt><dd>{eur(monthly)} je Monat</dd>
       </dl>
       <p className="hint">Löhne inkl. Arbeitgeberanteil (21 %) werden am Monatsersten gebucht, dazu Zuschläge für Nacht (25 %, 0–4 Uhr 40 %), Sonntag (50 %), Feiertage (125–150 %) und Überstunden über 8 h (25 %). Feste haben 4 Wochen Kündigungsfrist und 26 Tage Urlaub. Unzufriedene Mitarbeiter fordern mehr Lohn und kündigen sonst.</p>
+      <h2>Zeitarbeit ({b.agencyPool.length})</h2>
+      <p className="hint">Leiharbeiter als Ersatz bei Krankheit oder für Spitzen: befristet buchbar, ab dem nächsten Morgen im Einsatz, teurer als eigene Leute. Wer sich bewährt, lässt sich übernehmen – die Provision der Zeitarbeitsfirma sinkt mit der Einsatzdauer (unter 3 Monaten zwei Monatslöhne, ab 12 Monaten frei).</p>
+      {b.agencyPool.length ? (
+        <ul className="cards">{b.agencyPool.map((a) => <AgencyOffer key={a.id} a={a} send={async (cmd) => fb.show(await game!.command(cmd))} />)}</ul>
+      ) : <p className="hint">Die Zeitarbeitsfirma meldet sich morgen früh mit Angeboten.</p>}
       <h2>Bewerbungen ({b.applicants.length})</h2>
       {b.applicants.length ? (
         <ul className="cards" data-testid="applicants">
@@ -595,6 +641,14 @@ export function VehicleMenu({ status, game }: { status: GameStatus; game: GameCo
             </button>
             <button onClick={() => game.flyToVehicle(menu.vehicle)}>Hinzoomen</button>
           </div>
+          {unit.orderId !== undefined && unit.busy && (
+            <div className="card-actions">
+              <select defaultValue="" onChange={async (e) => { if (e.target.value) fb.show(await game.command({ kind: 'swapDriver', vehicle: menu.vehicle, driverId: Number(e.target.value) })); }} aria-label="Fahrer wechseln" data-testid="swap-driver">
+                <option value="">Fahrer wechseln …</option>
+                {(status.company?.drivers ?? []).filter((x) => !status.business?.driverStatus[x.id]).map((x) => <option key={x.id} value={x.id}>{x.isPlayer ? 'Chef' : x.name}</option>)}
+              </select>
+            </div>
+          )}
         </>
       ) : (
         <>

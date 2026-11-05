@@ -66,6 +66,7 @@ export interface BusinessState {
   driverStatus: Record<number, string | null>;
   applicants: Applicant[];
   staffRequests: StaffRequest[];
+  agencyPool: Applicant[];
   /** bestellte Neumaschinen, Rabatt je Händler, aktueller Wert je eigener Maschine */
   deliveries: Delivery[];
   discounts: Record<number, number>;

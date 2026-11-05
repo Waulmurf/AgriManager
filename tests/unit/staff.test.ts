@@ -228,3 +228,63 @@ describe('Urlaub, Krankheit, Zufriedenheit, Zuschläge', () => {
     expect(b.payrollAccrued - plain).toBeCloseTo(1 * e.wage * 1.21, 2);
   });
 });
+
+describe('Zeitarbeit und Fahrerwechsel', () => {
+  it('Leiharbeiter buchen: ab morgen im Einsatz, Kosten nach Stunden, endet nach der Buchung', () => {
+    const s = world(5);
+    runUntil(s, () => s.business.agencyPool.length > 0, 2 * 1440);
+    const a = s.business.agencyPool[0];
+    expect(a.person.agencyRate).toBeGreaterThanOrEqual(27);
+    expect(s.command({ kind: 'rent', poolId: a.id, days: 3 })).toMatch(/gebucht bis/);
+    const e = s.company.drivers.find((d) => d.kind === 'leih')!;
+    expect(e).toBeDefined();
+    expect(e.availableFrom! - s.time).toBeLessThanOrEqual(1440);
+    // vor dem Einsatz: kein Start möglich
+    const g = s.company.drivers.length;
+    expect(g).toBe(2);
+    // drei Tage später ist er wieder weg, abgerechnet sind mindestens 3 × 4 h
+    s.run(5 * 1440);
+    expect(s.company.drivers.some((d) => d.id === e.id)).toBe(false);
+    const b = s.business as unknown as { payrollAccrued: number };
+    expect(b.payrollAccrued).toBeGreaterThanOrEqual(3 * 4 * a.person.agencyRate! - 1);
+  });
+
+  it('Leiharbeiter übernehmen: Provision nach Einsatzdauer', () => {
+    const s = world(5);
+    runUntil(s, () => s.business.agencyPool.length > 0, 2 * 1440);
+    s.command({ kind: 'rent', poolId: s.business.agencyPool[0].id, days: 30 });
+    const e = s.company.drivers.find((d) => d.kind === 'leih')!;
+    s.run(10 * 1440);
+    const cash = s.company.cash;
+    expect(s.command({ kind: 'takeOver', employeeId: e.id, asKind: 'fest' })).toMatch(/übernommen \(Provision/);
+    expect(e.kind).toBe('fest');
+    expect(e.agencyRate).toBeUndefined();
+    expect(cash - s.company.cash).toBeCloseTo(Math.round(e.wage * 173 * 2), 0);
+    expect(s.business.ledger.some((l) => l.text.startsWith('Übernahmeprovision'))).toBe(true);
+  });
+
+  it('Fahrerwechsel: Ersatzfahrer übernimmt das Gespann, wenn der Fahrer krank ist', () => {
+    const s = twoOrders(5);
+    runUntil(s, () => s.business.agencyPool.length > 0, 3 * 1440);
+    s.command({ kind: 'rent', poolId: s.business.agencyPool[0].id, days: 10 });
+    const leih = s.company.drivers.find((d) => d.kind === 'leih')!;
+    runUntil(s, () => s.business.applicants.length > 0, 20 * 1440);
+    s.command({ kind: 'hire', applicantId: s.business.applicants[0].id, asKind: 'fest' });
+    const fest = s.company.drivers.find((d) => d.kind === 'fest')!;
+    s.command({ kind: 'buy', offerId: 1 });
+    const g = s.company.machines.find((m) => m.type === 'grubber')!;
+    const o = s.business.orders.find((x) => x.status === 'offen')!;
+    runUntil(s, () => s.time % 1440 > 10 && s.time % 1440 < 60 && s.time >= leih.availableFrom!, 3 * 1440);
+    expect(s.command({ kind: 'startJob', orderId: o.id, tractorId: 1, implementId: g.id, driverId: fest.id })).toMatch(/gestartet/);
+    s.run(60);
+    // Festangestellter wird krank
+    (fest.absences ??= []).push({ from: s.time, to: s.time + 3 * 1440, kind: 'krank' });
+    const unit = s.playerUnits().find((u) => u.machineId === 1)!;
+    expect(unit.status).toMatch(/krank/);
+    const bar = s.planBoard().find((x) => x.kind === 'running')!;
+    expect(bar.warnings.some((w) => w.includes('Fahrer wechseln'))).toBe(true);
+    expect(s.command({ kind: 'swapDriver', vehicle: unit.vehicle, driverId: leih.id })).toMatch(/übernimmt/);
+    runUntil(s, () => o.status === 'fertig', 4 * 1440);
+    expect(o.status).toBe('fertig');
+  });
+});

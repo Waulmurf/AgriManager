@@ -71,6 +71,7 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
 - Schritt 3 Planungsboard fertig: `src/ui/Board.tsx`, `Simulation.planBoard()`, Befehle `plan`/`queueEdit`.
 - Schritt 4 fertig: Kalender/Zuschläge `src/sim/calendar.ts`, Abwesenheit/Zufriedenheit/Wünsche in
   `business.ts` (`staffDaily`), Ruhezeit und Abwesenheit in `engine.ts` (`driverBlocked`).
+- Zeitarbeit (Leiharbeiter buchen/übernehmen) und Fahrerwechsel (`swapDriver`) ergänzt.
 - Phase 3 damit komplett → nächste Phase 4 (Wirtschaft: Finanzen, Kredit, Wetter, Jahreslauf).
 
 ## CI (GitHub Actions)
