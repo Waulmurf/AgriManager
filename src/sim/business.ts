@@ -20,8 +20,12 @@ export const REPLY_MINUTES = 2 * 1440;
 export const MAX_REQUEST_FIELD_HA = 60;
 /** Dieselpreis netto (Annahme, Agrardiesel nach Rückvergütung, €/l) */
 export const DIESEL_PRICE = 1.35;
-/** Zahlungsziel für Rechnungen (Tage) */
-export const PAYMENT_TERM_DAYS = 14;
+/** Zahlungsziel für Rechnungen (Tage): Der Kunde zahlt an einem beliebigen Tag darin */
+export const PAYMENT_TERM_DAYS = 30;
+/** Frist für den Kontakt nach Überfälligkeit (Tage); ohne Kontakt verfällt die Rechnung */
+export const REMIND_DAYS = 14;
+/** Telefonat zur Zahlungserinnerung (Arbeitszeit des Chefs, Minuten) */
+export const REMIND_CALL_MINUTES = 10;
 /** kalkulatorische Maschinenkosten für die Auswertung (Annahmen, LWK-Größenordnung) */
 export const REPAIR_TRACTOR_EUR_H = 8;
 export const WEAR_GRUBBER_EUR_HA = 3;
@@ -75,7 +79,7 @@ export interface Order {
   invoiceId?: number;
 }
 
-export type InvoiceStatus = 'offen' | 'bezahlt';
+export type InvoiceStatus = 'offen' | 'überfällig' | 'bezahlt' | 'verfallen';
 
 /** Rechnung (AK-09), netto */
 export interface Invoice {
@@ -88,9 +92,14 @@ export interface Invoice {
   issuedAt: number;
   /** Zahlungsziel */
   dueAt: number;
-  /** wann der Kunde tatsächlich zahlt (intern, hängt von der Zufriedenheit ab) */
+  /** wann der Kunde tatsächlich zahlt (intern); -1 = zahlt erst nach Erinnerung */
   payAt: number;
   paidAt?: number;
+  /** überfällig seit; bis contactBy muss der Spieler den Kunden kontaktieren */
+  overdueAt?: number;
+  contactBy?: number;
+  /** Zeitpunkt der Erinnerung (Anruf oder Besuch) */
+  remindedAt?: number;
   status: InvoiceStatus;
 }
 
@@ -116,7 +125,8 @@ export type Command =
   | { kind: 'respond'; requestId: number; action: 'accept' | 'reject' | 'counter'; priceHa?: number }
   | { kind: 'startJob'; orderId: number; tractorId: number; implementId: number }
   | { kind: 'buy'; offerId: number }
-  | { kind: 'recall'; vehicle: number };
+  | { kind: 'recall'; vehicle: number }
+  | { kind: 'remind'; invoiceId: number };
 
 export class Business {
   readonly requests: Request[] = [];
@@ -257,6 +267,8 @@ export class Business {
     const first = !farm.known;
     farm.known = true;
     if (!first) farm.satisfaction = Math.min(100, farm.satisfaction + 2); // Beziehung pflegen
+    // Ein Besuch zählt als Kontakt für überfällige Rechnungen
+    for (const inv of this.invoices) if (inv.farmId === farmId && inv.status === 'überfällig' && inv.remindedAt === undefined) this.remindInvoice(inv, time, 'besuch');
     const req = this.maybeRequest(farmId, time, 0.2 + 0.7 * (1 - farm.mechanization), 'besuch');
     if (req) {
       this.emit(time, 'anfrage', `${farm.name}: Grubbern auf ${req.fields.length} ${req.fields.length === 1 ? 'Feld' : 'Feldern'}, ${fmtHa(req.areaHa)} für ${fmtEur(req.priceHa)}/ha`, farmId);
@@ -268,16 +280,7 @@ export class Business {
   /** Täglich um 06:00: Anfragen per Anruf/Nachricht von bekannten Betrieben, Fristen prüfen */
   daily(time: number) {
     this.bookDiesel(time);
-    for (const inv of this.invoices) {
-      if (inv.status === 'offen' && time >= inv.payAt) {
-        inv.status = 'bezahlt';
-        inv.paidAt = time;
-        this.company.cash = Math.round((this.company.cash + inv.amount) * 100) / 100;
-        this.ledger.push({ time, text: `Zahlung ${inv.number} ${this.farmName(inv.farmId)}`, amount: inv.amount, category: 'Rechnung' });
-        const late = time > inv.dueAt;
-        this.emit(time, 'info', `${this.farmName(inv.farmId)} hat Rechnung ${inv.number} bezahlt: ${fmtEur(inv.amount)}${late ? ' (verspätet)' : ''}.`, inv.farmId);
-      }
-    }
+    this.checkInvoices(time);
     for (const r of this.requests) {
       if (r.status === 'offen' && time >= r.replyBy) {
         r.status = 'abgelaufen';
@@ -410,11 +413,16 @@ export class Business {
     this.dieselTodayEur = 0;
   }
 
-  /** Rechnung nach Abschluss (AK-09); Zahltag hängt von der Zufriedenheit ab */
+  /**
+   * Rechnung nach Abschluss (AK-09). Der Kunde zahlt an einem beliebigen Tag innerhalb
+   * des Zahlungsziels – oder gar nicht, bis man ihn erinnert (Wahrscheinlichkeit steigt
+   * mit sinkender Zufriedenheit).
+   */
   private issueInvoice(o: Order, time: number) {
     const farm = this.farms?.farms[o.farmId];
     const sat = farm?.satisfaction ?? 50;
-    const delay = sat >= 60 ? 3 + this.rng.int(10) : sat >= 40 ? 10 + this.rng.int(11) : 18 + this.rng.int(18);
+    const late = this.rng.next() < 0.05 + (0.35 * (100 - sat)) / 100;
+    const payAt = late ? -1 : time + 1 + this.rng.int(PAYMENT_TERM_DAYS * 1440 - 1);
     const d = gameDate(time);
     const inv: Invoice = {
       id: this.nextId++,
@@ -425,12 +433,54 @@ export class Business {
       amount: Math.round(o.priceHa * o.areaHa * 100) / 100,
       issuedAt: time,
       dueAt: time + PAYMENT_TERM_DAYS * 1440,
-      payAt: time + delay * 1440,
+      payAt,
       status: 'offen',
     };
     this.invoices.push(inv);
     o.invoiceId = inv.id;
     this.emit(time, 'info', `Rechnung ${inv.number} an ${this.farmName(o.farmId)}: ${fmtEur(inv.amount)}, zahlbar bis ${fmtDay(inv.dueAt)}.`, o.farmId);
+  }
+
+  /** Täglich: Zahlungseingänge, Überfälligkeit (Warnung), Verfall ohne Kontakt */
+  private checkInvoices(time: number) {
+    for (const inv of this.invoices) {
+      const open = inv.status === 'offen' || inv.status === 'überfällig';
+      if (!open) continue;
+      if (inv.payAt >= 0 && time >= inv.payAt) {
+        inv.status = 'bezahlt';
+        inv.paidAt = time;
+        this.company.cash = Math.round((this.company.cash + inv.amount) * 100) / 100;
+        this.ledger.push({ time, text: `Zahlung ${inv.number} ${this.farmName(inv.farmId)}`, amount: inv.amount, category: 'Rechnung' });
+        this.emit(time, 'info', `${this.farmName(inv.farmId)} hat Rechnung ${inv.number} bezahlt: ${fmtEur(inv.amount)}${inv.overdueAt !== undefined ? ' (nach Erinnerung)' : ''}.`, inv.farmId);
+      } else if (inv.status === 'offen' && time >= inv.dueAt) {
+        inv.status = 'überfällig';
+        inv.overdueAt = time;
+        inv.contactBy = time + REMIND_DAYS * 1440;
+        this.emit(time, 'warnung', `Zahlung überfällig: ${this.farmName(inv.farmId)}, Rechnung ${inv.number} (${fmtEur(inv.amount)}). Kunden bis ${fmtDay(inv.contactBy)} kontaktieren, sonst verfällt die Forderung.`, inv.farmId);
+      } else if (inv.status === 'überfällig' && inv.remindedAt === undefined && time >= inv.contactBy!) {
+        inv.status = 'verfallen';
+        this.emit(time, 'warnung', `Forderung verfallen: Rechnung ${inv.number} an ${this.farmName(inv.farmId)} (${fmtEur(inv.amount)}) – Kunde nicht rechtzeitig kontaktiert.`, inv.farmId);
+      }
+    }
+  }
+
+  /** Kunde wegen überfälliger Rechnung kontaktiert: zahlt in 1–10 Tagen, etwas verstimmt */
+  private remindInvoice(inv: Invoice, time: number, how: 'anruf' | 'besuch') {
+    inv.remindedAt = time;
+    inv.payAt = time + (1 + this.rng.int(10)) * 1440;
+    const farm = this.farms?.farms[inv.farmId];
+    if (farm) farm.satisfaction = Math.max(0, farm.satisfaction - 3);
+    this.emit(time, 'info', `${how === 'anruf' ? 'Angerufen' : 'Beim Besuch angesprochen'}: ${this.farmName(inv.farmId)} sagt die Zahlung von ${inv.number} in den nächsten Tagen zu.`, inv.farmId);
+  }
+
+  /** Zahlungserinnerung per Telefon (Befehl „remind“) */
+  remind(invoiceId: number, time: number): string {
+    const inv = this.invoices.find((i) => i.id === invoiceId);
+    if (!inv) return 'Rechnung unbekannt';
+    if (inv.status !== 'überfällig') return 'Rechnung ist nicht überfällig';
+    if (inv.remindedAt !== undefined) return 'Kunde wurde schon erinnert';
+    this.remindInvoice(inv, time, 'anruf');
+    return 'Kunde angerufen';
   }
 
   /** Auswertung eines Auftrags (WF-09): Erlös minus Diesel minus kalkulatorische Maschinenkosten */

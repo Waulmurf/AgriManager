@@ -11,7 +11,7 @@ import { BRANDS, COMPANY_CAR } from '../data/brands';
 import { fieldPattern, type FieldSet } from './fields';
 import { generateFarms, type FarmSet } from './farms';
 import { startCompany, type Company } from './economy';
-import { Business, VISIT_MINUTES, type Command } from './business';
+import { Business, REMIND_CALL_MINUTES, VISIT_MINUTES, type Command } from './business';
 import { appendEdgePoints, nearestNode, RoadClass, type RoadGraph } from './roadgraph';
 
 export const STEP_SECONDS = 60;
@@ -303,6 +303,13 @@ export class Simulation {
         return b.respond(cmd.requestId, cmd.action, t, cmd.priceHa);
       case 'buy':
         return b.buy(cmd.offerId, t);
+      case 'remind': {
+        // Anruf geht auch unterwegs, kostet aber Arbeitszeit des Chefs
+        if (this.chefMinutes >= CHEF_MAX_MINUTES) return 'Arbeitszeit des Chefs für heute erreicht (ab 06:00 wieder)';
+        const r = b.remind(cmd.invoiceId, t);
+        if (r === 'Kunde angerufen') this.chefMinutes += REMIND_CALL_MINUTES;
+        return r;
+      }
       case 'visit': {
         const farm = this.farms?.farms[cmd.farmId];
         if (!farm) return 'Betrieb unbekannt';

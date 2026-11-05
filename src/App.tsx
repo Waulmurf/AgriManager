@@ -83,6 +83,8 @@ export function App() {
   const clock = formatGameTime(status?.time ?? 0);
   const st = status?.stats;
   const openRequests = status?.business?.requests.filter((r) => r.status === 'offen').length ?? 0;
+  // überfällige Rechnungen ohne Kontakt: aktive Benachrichtigung in der oberen Leiste
+  const overdue = status?.business?.invoices.filter((i) => i.status === 'überfällig' && i.remindedAt === undefined).length ?? 0;
 
   return (
     <div className="app">
@@ -95,6 +97,11 @@ export function App() {
           <span className="date">{clock.date}</span>
           <span className="time">{clock.time}</span>
         </div>
+        {overdue > 0 && (
+          <button className="alert-btn" onClick={() => setTab('finanzen')} data-testid="overdue-alert" title="Kunden anrufen oder besuchen, sonst verfällt die Forderung">
+            {overdue === 1 ? '1 Rechnung überfällig' : `${overdue} Rechnungen überfällig`}
+          </button>
+        )}
         <div className="save-wrap">
           <button className="save-btn" onClick={() => { setSaveOpen((o) => !o); void game?.refreshSaves(); }} data-testid="save-menu">
             Spielstand{status?.saveName ? `: ${status.saveName}` : ''}
@@ -134,6 +141,7 @@ export function App() {
               <button key={t.id} role="tab" aria-selected={tab === t.id} className={tab === t.id ? 'active' : ''} onClick={() => setTab(t.id)} data-testid={`tab-${t.id}`}>
                 {t.label}
                 {t.id === 'auftraege' && openRequests > 0 ? <span className="dot">{openRequests}</span> : null}
+                {t.id === 'finanzen' && overdue > 0 ? <span className="dot">{overdue}</span> : null}
               </button>
             ))}
           </nav>

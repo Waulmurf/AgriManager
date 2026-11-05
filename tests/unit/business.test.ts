@@ -238,9 +238,11 @@ describe('Rechnung, Zahlung, Buchungen', () => {
     expect(inv).toBeDefined();
     expect(inv.amount).toBeCloseTo(order.priceHa * order.areaHa, 2);
     expect(inv.number).toMatch(/^RE-2027-0001$/);
-    expect(inv.dueAt - inv.issuedAt).toBe(14 * 1440);
+    expect(inv.dueAt - inv.issuedAt).toBe(30 * 1440);
     const cash = s.company.cash;
-    runUntil(s, () => inv.status === 'bezahlt', 40 * 1440);
+    runUntil(s, () => inv.status !== 'offen', 32 * 1440);
+    if (inv.status === 'überfällig') expect(s.command({ kind: 'remind', invoiceId: inv.id })).toBe('Kunde angerufen');
+    runUntil(s, () => inv.status === 'bezahlt', 12 * 1440);
     expect(inv.status).toBe('bezahlt');
     expect(s.company.cash).toBeGreaterThan(cash + inv.amount - 50); // abzüglich weiterer Dieselbuchungen
     const cats = new Set(s.business.ledger.map((l) => l.category));
@@ -252,6 +254,89 @@ describe('Rechnung, Zahlung, Buchungen', () => {
     expect(r.revenue).toBeCloseTo(inv.amount, 2);
     expect(r.margin).toBeCloseTo(r.revenue - r.diesel - r.machines, 2);
     expect(r.margin).toBeGreaterThan(0);
+  });
+});
+
+/** Auftrag fertig fahren und die Rechnung zurückgeben */
+function finishedInvoice(seed: number) {
+  const s = world(seed);
+  for (const farm of s.farms!.farms) {
+    s.command({ kind: 'visit', farmId: farm.id });
+    runUntil(s, () => !s.chefBusy);
+    if (s.business.requests.some((r) => r.status === 'offen')) break;
+  }
+  const req = s.business.requests.find((r) => r.status === 'offen')!;
+  s.command({ kind: 'respond', requestId: req.id, action: 'accept' });
+  s.command({ kind: 'buy', offerId: 1 });
+  const order = s.business.orders[0];
+  const grubber = s.company.machines.find((m) => m.type === 'grubber')!;
+  s.command({ kind: 'startJob', orderId: order.id, tractorId: 1, implementId: grubber.id });
+  runUntil(s, () => order.status === 'fertig', 20000);
+  const inv = s.business.invoices[0];
+  return { s, inv };
+}
+
+describe('Zahlungsmoral', () => {
+  it('zahlt innerhalb von 30 Tagen an einem beliebigen Tag oder wird überfällig', () => {
+    const days = new Set<number>();
+    let late = 0;
+    for (const seed of [5, 7, 11, 13, 17, 19]) {
+      const { s, inv } = finishedInvoice(seed);
+      runUntil(s, () => inv.status !== 'offen', 32 * 1440);
+      if (inv.status === 'bezahlt') {
+        expect(inv.paidAt!).toBeLessThanOrEqual(inv.dueAt + 1440);
+        days.add(Math.floor((inv.paidAt! - inv.issuedAt) / 1440));
+      } else {
+        expect(inv.status).toBe('überfällig');
+        late++;
+      }
+    }
+    expect(days.size + late).toBeGreaterThan(1); // nicht alle am selben Tag
+  });
+
+  it('warnt bei Überfälligkeit; ohne Kontakt verfällt die Rechnung nach 14 Tagen', () => {
+    const { s, inv } = finishedInvoice(5);
+    inv.payAt = -1; // Kunde zahlt nicht von selbst
+    const cash = s.company.cash;
+    const events: string[] = [];
+    runUntil(s, () => { events.push(...s.business.drainEvents().filter((e) => e.kind === 'warnung').map((e) => e.text)); return inv.status === 'überfällig'; }, 32 * 1440);
+    expect(inv.status).toBe('überfällig');
+    expect(events.some((t) => t.includes('Zahlung überfällig') && t.includes(inv.number))).toBe(true);
+    expect(inv.contactBy! - inv.overdueAt!).toBe(14 * 1440);
+    runUntil(s, () => inv.status !== 'überfällig', 15 * 1440);
+    expect(inv.status).toBe('verfallen');
+    expect(s.business.drainEvents().some((e) => e.text.includes('Forderung verfallen'))).toBe(true);
+    expect(s.company.cash).toBeLessThanOrEqual(cash); // kein Geldeingang
+    expect(s.command({ kind: 'remind', invoiceId: inv.id })).toBe('Rechnung ist nicht überfällig');
+  });
+
+  it('nach Anruf zahlt der Kunde in 1–10 Tagen, Zufriedenheit sinkt etwas', () => {
+    const { s, inv } = finishedInvoice(5);
+    inv.payAt = -1;
+    runUntil(s, () => inv.status === 'überfällig', 32 * 1440);
+    const farm = s.farms!.farms[inv.farmId];
+    const sat = farm.satisfaction;
+    const chef = s.chefMinutes;
+    expect(s.command({ kind: 'remind', invoiceId: inv.id })).toBe('Kunde angerufen');
+    expect(s.command({ kind: 'remind', invoiceId: inv.id })).toBe('Kunde wurde schon erinnert');
+    expect(farm.satisfaction).toBe(sat - 3);
+    expect(s.chefMinutes).toBe(chef + 10);
+    const t0 = s.time;
+    runUntil(s, () => inv.status === 'bezahlt', 12 * 1440);
+    expect(inv.status).toBe('bezahlt');
+    expect(inv.paidAt! - t0).toBeLessThanOrEqual(11 * 1440);
+  });
+
+  it('ein Besuch zählt als Kontakt', () => {
+    const { s, inv } = finishedInvoice(5);
+    inv.payAt = -1;
+    runUntil(s, () => inv.status === 'überfällig', 32 * 1440);
+    runUntil(s, () => !s.chefBusy && s.chefMinutes < 500 && s.time % 1440 > 60 && s.time % 1440 < 300, 3000);
+    expect(s.command({ kind: 'visit', farmId: inv.farmId })).toMatch(/^Fahrt zu/);
+    runUntil(s, () => inv.remindedAt !== undefined, 1440);
+    expect(inv.remindedAt).toBeDefined();
+    runUntil(s, () => inv.status === 'bezahlt', 12 * 1440);
+    expect(inv.status).toBe('bezahlt');
   });
 });
 

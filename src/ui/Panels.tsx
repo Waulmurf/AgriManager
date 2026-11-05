@@ -4,7 +4,7 @@
 import { useState } from 'react';
 import type { GameController, GameStatus } from '../game/controller';
 import { machineValue, type Machine } from '../sim/economy';
-import { SERVICE_NAMES, fmtDay, type Request, type Order } from '../sim/business';
+import { SERVICE_NAMES, fmtDay, type Invoice, type Request, type Order } from '../sim/business';
 import { formatGameTime } from '../game/clock';
 
 export const eur = (v: number) => v.toLocaleString('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
@@ -307,7 +307,17 @@ export function VehicleMenu({ status, game }: { status: GameStatus; game: GameCo
 const CATEGORIES = ['Rechnung', 'Diesel', 'Maschinenkauf', 'Sonstiges'] as const;
 
 /** Finanzen: Konto, Monatsübersicht, Rechnungen, Auswertung je Auftrag (WF-08, WF-09) */
+function invoiceState(i: Invoice): string {
+  switch (i.status) {
+    case 'bezahlt': return `bezahlt am ${fmtDay(i.paidAt!)}`;
+    case 'verfallen': return 'verfallen (Kunde nicht kontaktiert)';
+    case 'überfällig': return i.remindedAt !== undefined ? `überfällig, erinnert am ${fmtDay(i.remindedAt)}` : `überfällig – Kunden bis ${fmtDay(i.contactBy!)} kontaktieren (Anruf oder Besuch)`;
+    default: return `zahlbar bis ${fmtDay(i.dueAt)}`;
+  }
+}
+
 export function FinanceTab({ status, game }: { status: GameStatus; game: GameController | null }) {
+  const fb = useFeedback();
   const b = status.business;
   const c = status.company;
   if (!b || !c) return <p className="hint">–</p>;
@@ -320,7 +330,8 @@ export function FinanceTab({ status, game }: { status: GameStatus; game: GameCon
     m[l.category] = (m[l.category] ?? 0) + l.amount;
     months.set(key, m);
   }
-  const openInv = b.invoices.filter((i) => i.status === 'offen');
+  const openInv = b.invoices.filter((i) => i.status === 'offen' || i.status === 'überfällig');
+  const lost = b.invoices.filter((i) => i.status === 'verfallen');
   const finished = b.orders.filter((o) => o.status === 'fertig').slice().reverse();
   return (
     <>
@@ -328,6 +339,7 @@ export function FinanceTab({ status, game }: { status: GameStatus; game: GameCon
       <dl>
         <dt>Kontostand</dt><dd data-testid="cash-finance">{eur(c.cash)}</dd>
         <dt>Offene Rechnungen</dt><dd>{eur(openInv.reduce((a, i) => a + i.amount, 0))} ({openInv.length})</dd>
+        {lost.length > 0 && <><dt>Forderungsausfall</dt><dd className="neg">{eur(lost.reduce((a, i) => a + i.amount, 0))} ({lost.length})</dd></>}
         <dt>Kreditrahmen frei</dt><dd>{eur(c.creditLimit - c.loan)}</dd>
       </dl>
       <h2>Monatsübersicht</h2>
@@ -358,15 +370,21 @@ export function FinanceTab({ status, game }: { status: GameStatus; game: GameCon
               <span>
                 {i.number} · {game?.farmById(i.farmId)?.name} · <strong>{eur(i.amount)}</strong>
               </span>
-              <small className={i.status === 'offen' && b.time > i.dueAt ? 'warn' : 'hint'}>
-                {i.text} · {i.status === 'bezahlt' ? `bezahlt am ${fmtDay(i.paidAt!)}` : `fällig ${fmtDay(i.dueAt)}${b.time > i.dueAt ? ' – überfällig' : ''}`}
+              <small className={i.status === 'überfällig' || i.status === 'verfallen' ? 'warn' : 'hint'}>
+                {i.text} · {invoiceState(i)}
               </small>
+              {i.status === 'überfällig' && i.remindedAt === undefined && (
+                <button onClick={async () => fb.show(await game!.command({ kind: 'remind', invoiceId: i.id }))} data-testid={`remind-${i.id}`}>
+                  Kunden anrufen
+                </button>
+              )}
             </li>
           ))}
         </ul>
       ) : (
         <p className="hint">Rechnungen entstehen automatisch, wenn ein Auftrag fertig ist.</p>
       )}
+      {fb.msg && <p className="feedback">{fb.msg}</p>}
       <h2>Auswertung je Auftrag</h2>
       {finished.length ? (
         <table className="tbl">

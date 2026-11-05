@@ -28,6 +28,11 @@ Jeder Schritt endet mit einer spielbaren Windows-Version.
   dazu. Auflieger bzw. Anhänger (Kipper, Schubboden, Tankauflieger für Gülle) kauft der Spieler
   separat. Das passt zu den geplanten Transportaufträgen (siehe „Abgrenzung“) und braucht einen
   Führerschein-Skill (LKW, PA-10). Vorschlag: zusammen mit den Transportaufträgen nach Phase 5.
+- **Arbeitsketten** (5. Nov. 2026): Häcksler arbeitet nur mit Abfahrer nebenher; Drescher und
+  Roder laden auf Anhänger (angekoppelt oder abgestellt) im Feld bzw. am Feldrand ab; der
+  Rübenroder legt eine Feldrandmiete an, die ein Reinigungslader („Rübenmaus“) auf Anhänger
+  verlädt. Recherchierte Abläufe aller Maschinen mit Kennzahlen und Quellen: `docs/ablaeufe.md`.
+  Grundlagen (Rollen im Auftrag, Anhänger als eigene Einheit) in Phase 3, Ernteketten in Phase 4.
 
 ## Felddaten (Stand 5. Nov. 2026)
 
@@ -98,8 +103,15 @@ Feldblock als ein Feld; eine Aufteilung in Schläge ist später möglich.
 ## Rechnung, Konto, Spielstand (Schritt 5)
 
 - **Rechnung (AK-09):** Nach Abschluss eines Auftrags automatisch, netto, Nummer `RE-Jahr-0001`,
-  Zahlungsziel 14 Tage. Wann der Kunde zahlt, hängt von seiner Zufriedenheit ab: ab 60 % nach
-  3–12 Tagen, 40–60 % nach 10–20 Tagen, darunter nach 18–35 Tagen (dann oft überfällig).
+  Zahlungsziel 30 Tage (geändert nach Rückmeldung von Nils, 5. Nov. 2026). Der Kunde zahlt an
+  einem beliebigen Tag innerhalb der 30 Tage. Mit der Wahrscheinlichkeit
+  0,05 + 0,35 × (1 − Zufriedenheit/100) zahlt er nicht von selbst.
+- **Mahnwesen:** Ist eine Rechnung nach 30 Tagen offen, wird sie „überfällig“: Warnung in den
+  Meldungen, blinkender Hinweis in der oberen Leiste und Zähler am Reiter Finanzen. Der Spieler
+  muss den Kunden innerhalb von 14 Tagen kontaktieren: Knopf „Kunden anrufen“ an der Rechnung
+  (10 min Arbeitszeit des Chefs) oder ein Besuch auf dem Hof. Danach zahlt der Kunde in 1–10
+  Tagen, die Zufriedenheit sinkt um 3. Ohne Kontakt verfällt die Rechnung (Forderungsausfall,
+  im Finanzen-Reiter ausgewiesen).
 - **Konto (WF-08):** Buchungen für Zahlungseingänge, Maschinenkäufe und Diesel (täglich
   zusammengefasst), Monatsübersicht nach Kategorien im Reiter „Finanzen“.
 - **Auswertung je Auftrag (WF-09):** Erlös minus Diesel minus kalkulatorische Maschinenkosten

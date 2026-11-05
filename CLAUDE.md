@@ -10,6 +10,7 @@ Entscheidungen fragen, sonst autonom arbeiten.
 - `docs/maschinen.md` – Marken, Händler, Maschinen, Preise, LWK-Sätze
 - `docs/plan.md` – Arbeitsplan Phase 2, vorgemerkte Punkte (Fahrprofile, Lkw), Felddaten-Lizenzen
 - `docs/technik.md` – Architektur, Annahmen, Messwerte
+- `docs/ablaeufe.md` – Arbeitsketten aller Maschinen (Häcksler + Abfahrer, Drusch, Roden, Rübenmiete, Gülle …)
 
 ## Zielplattformen
 
@@ -57,6 +58,8 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
 - Phase 2, Schritt 5 fertig: Rechnungen, Zahlungen, Buchungen, Finanzen-Reiter, Spielstand
   (SQLite in der App über tauri-plugin-sql, localStorage im Browser), Autosave je Spieltag.
 - Phase 2 (Prototyp der Kern-Schleife) damit komplett → Gate „Nils spielt“.
+- Zahlungsregeln nach Rückmeldung: Zahlungsziel 30 Tage, Warnung bei Überfälligkeit, Anruf/Besuch
+  binnen 14 Tagen, sonst verfällt die Rechnung.
 
 ## CI (GitHub Actions)
 
