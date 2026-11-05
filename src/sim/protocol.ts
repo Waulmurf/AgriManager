@@ -3,7 +3,7 @@ import type { JobEstimate, PlanBar, PlayerUnitInfo, SaveState, VehicleInfo } fro
 import type { Competitor } from './market';
 import type { Company } from './economy';
 import type { ContactPreference } from './farms';
-import type { Analytics, BiogasPlant, Lease, LeaseOffer } from './business';
+import type { Analytics, BiogasPlant, FrameContract, Lease, LeaseOffer } from './business';
 import type { Applicant, Command, Delivery, StaffRequest, YearResult, GameEvent, Invoice, LedgerEntry, Order, QueueItem, Request } from './business';
 import type { MarketOffer } from './economy';
 
@@ -77,6 +77,15 @@ export interface BusinessState {
   market: { reputation: number; won: number; lost: number; competitors: Competitor[]; loyalFarms: number[] };
   /** Pacht und eigener Ackerbau: offene Angebote (ohne verdecktes Konkurrenzgebot), eigene Pachtflächen */
   farming: { offers: (Omit<LeaseOffer, 'competitorBid'> & { center: [number, number] })[]; leases: (Lease & { center: [number, number] })[] };
+  /** Vermarktung (Vorschlag 6): Preis je t, Lager, Vorkontrakte, Lagerplatz; organischer N je Fläche (Vorschlag 8) */
+  marketing: {
+    priceT: Record<string, number>; stock: Record<string, number>; capacity: number; store: boolean;
+    forwards: { id: number; crop: string; t: number; priceT: number; deliverBy: number }[];
+    orgN: Record<number, number>;
+  };
+  /** Rahmenverträge (Vorschlag 7) */
+  frames: FrameContract[];
+  frameOffers: FrameContract[];
   /** Auswertung (Vorschlag 13) */
   analytics: Analytics;
   /** eigene Biogasanlage (PB-07 bis PB-10) */

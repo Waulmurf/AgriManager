@@ -9,9 +9,10 @@ import { HARVEST_TOWED, HAULER_TYPES, HAULER_TYPE, chainName, isHarvest, SERVICE
 import { CATALOG, DEALERS } from '../data/catalog';
 import { BUILDINGS, SITE_OFFERS } from '../data/sites';
 import { leaseRate } from '../sim/finance';
-import { BIOGAS, EEG_MAX_CT, GAER_GABE, GAER_SELL_EUR, KWH_PER, MAIS_CAP, SUBSTRATE_NAME, SUBSTRATE_PRICE, dailyTarget, farmSlurryPerDay, type BiogasSize, type Substrate } from '../sim/biogas';
+import { FLEX_COST_KW, HEAT_COST, BIOGAS, EEG_MAX_CT, GAER_GABE, GAER_SELL_EUR, KWH_PER, MAIS_CAP, SUBSTRATE_NAME, SUBSTRATE_PRICE, dailyTarget, farmSlurryPerDay, type BiogasSize, type Substrate } from '../sim/biogas';
 import { Crop } from '../sim/farms';
 import { CROPS, IRRIGATION_EUR_HA, rotationFactor, soilFactor, type OwnCrop } from '../sim/farming';
+import { N_NEED, ORGANIC_N_LIMIT, STORABLE } from '../sim/marketing';
 import { formatGameTime } from '../game/clock';
 
 export const eur = (v: number) => v.toLocaleString('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
@@ -856,6 +857,7 @@ export function FleetTab({ status, game }: { status: GameStatus; game: GameContr
 /** Wettbewerb (Phase 5): Ruf, Stammkunden, Konkurrenten mit Preisniveau und Preiskampf */
 export function CompetitionTab({ status, game }: { status: GameStatus; game: GameController | null }) {
   const b = status.business;
+  const fb = useFeedback();
   if (!b) return <p className="hint">–</p>;
   const m = b.market;
   const quote = m.won + m.lost > 0 ? Math.round((m.won / (m.won + m.lost)) * 100) : 0;
@@ -878,6 +880,27 @@ export function CompetitionTab({ status, game }: { status: GameStatus; game: Gam
           })}
         </ul>
       )}
+      <h2>Rahmenverträge</h2>
+      <ul className="cards" data-testid="frames">
+        {b.frameOffers.map((f) => (
+          <li key={f.id} className="card">
+            <div className="card-head"><strong>Angebot: {game?.farmById(f.farmId)?.name}</strong><small>Antwort bis {fmtDay(f.until)}</small></div>
+            <small className="hint">{f.services.map((x) => SERVICE_NAMES[x]).join(', ')} · {f.years} Jahre · {Math.round(f.factor * 100)} % des Marktpreises</small>
+            <div className="card-actions">
+              <button onClick={async () => fb.show(await game!.command({ kind: 'frameAnswer', offerId: f.id, accept: true }))}>Annehmen</button>
+              <button onClick={async () => fb.show(await game!.command({ kind: 'frameAnswer', offerId: f.id, accept: false }))}>Ablehnen</button>
+            </div>
+          </li>
+        ))}
+        {b.frames.map((f) => (
+          <li key={f.id} className="card">
+            <div className="card-head"><strong>{game?.farmById(f.farmId)?.name}</strong><small>bis {fmtDay(f.until)}</small></div>
+            <small className={f.strikes ? 'warn' : 'hint'}>{f.services.map((x) => SERVICE_NAMES[x]).join(', ')} · {Math.round(f.factor * 100)} % des Marktpreises · Verspätungen {f.strikes}/3</small>
+          </li>
+        ))}
+        {!b.frames.length && !b.frameOffers.length && <li className="hint">Stammkunden bieten gelegentlich Rahmenverträge über mehrere Jahre an: sichere Aufträge, dafür etwas Nachlass und Pflicht zur Pünktlichkeit.</li>}
+      </ul>
+      {fb.msg && <p className="feedback">{fb.msg}</p>}
       <h2>Konkurrenz ({m.competitors.length})</h2>
       <table className="tbl" data-testid="competitors">
         <thead><tr><th>Lohnunternehmen</th><th>Ort</th><th>Größe</th><th>Preise</th><th>gewonnen</th></tr></thead>
@@ -917,6 +940,8 @@ export function FarmingTab({ status, game }: { status: GameStatus; game: GameCon
   const fb = useFeedback();
   const [bids, setBids] = useState<Record<number, number>>({});
   const [crops, setCrops] = useState<Record<number, OwnCrop>>({});
+  const [sellT, setSellT] = useState<Record<string, number>>({});
+  const [fw, setFw] = useState<{ crop: OwnCrop; t: number; months: number }>({ crop: 'weizen', t: 100, months: 6 });
   if (!b) return <p className="hint">–</p>;
   const send = async (cmd: Parameters<GameController['command']>[0]) => fb.show(await game!.command(cmd));
   const { offers, leases } = b.farming;
@@ -940,8 +965,9 @@ export function FarmingTab({ status, game }: { status: GameStatus; game: GameCon
             <li key={l.id} className="card" data-testid="lease">
               <div className="card-head">
                 <button className="link" onClick={() => game?.flyTo(l.center)}>{ha(l.areaHa)} von {farmName(l.farmId)}</button>
-                <small>{eur(l.rentHa)}/ha · bis {fmtDay(l.endsAt)}</small>
+                <small>{l.owned ? `Eigentum (${eur(l.price ?? 0)})` : `${eur(l.rentHa)}/ha · bis ${fmtDay(l.endsAt)}`}</small>
               </div>
+              {l.crop && <small className={(b.marketing.orgN[l.id] ?? 0) > ORGANIC_N_LIMIT * 0.9 ? 'warn' : 'hint'}>N-Bedarf {N_NEED[l.crop]} kg/ha · organisch gedüngt {b.marketing.orgN[l.id] ?? 0} kg/ha (höchstens {ORGANIC_N_LIMIT})</small>}
               <small className="hint">Ackerzahl {l.soil}{l.irrigated ? ' · beregnet' : ' · ohne Beregnung'}{l.lastCrop ? ` · Vorfrucht ${CROPS.find((c) => c.key === l.lastCrop)!.name}` : ''}</small>
               {def ? (
                 <>
@@ -972,6 +998,49 @@ export function FarmingTab({ status, game }: { status: GameStatus; game: GameCon
           );
         })}
       </ul>
+      <h2>Preise und Lager</h2>
+      <table className="tbl" data-testid="crop-prices">
+        <thead><tr><th>Kultur</th><th>Preis/t</th><th>Lager</th><th></th></tr></thead>
+        <tbody>
+          {CROPS.map((c) => {
+            const stock = b.marketing.stock[c.key] ?? 0;
+            return (
+              <tr key={c.key}>
+                <td>{c.name}</td>
+                <td>{eur(b.marketing.priceT[c.key] ?? c.priceT)}</td>
+                <td>{STORABLE.includes(c.key) ? `${Math.round(stock).toLocaleString('de-DE')} t` : '–'}</td>
+                <td>{stock > 0 && (
+                  <span className="card-actions">
+                    <input type="number" min={1} step={10} value={sellT[c.key] ?? Math.round(stock)} onChange={(e) => setSellT({ ...sellT, [c.key]: Number(e.target.value) })} aria-label={`${c.name} t`} style={{ width: '5em' }} />
+                    <button onClick={() => send({ kind: 'sellCrop', crop: c.key, t: sellT[c.key] ?? stock })}>Verkaufen</button>
+                  </span>
+                )}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <div className="card-actions">
+        <label><input type="checkbox" checked={b.marketing.store} onChange={(e) => send({ kind: 'storeHarvest', on: e.target.checked })} /> Weizen und Raps zur Ernte einlagern</label>
+        <small className="hint">Lagerplatz {b.marketing.capacity.toLocaleString('de-DE')} t (Getreidelager im Reiter Standorte bauen), Lagerkosten 1,50 €/t im Monat. Zur Ernte sind die Preise niedrig, im Frühjahr höher.</small>
+      </div>
+      <h3>Vorkontrakte</h3>
+      <ul className="list">
+        {b.marketing.forwards.map((f) => <li key={f.id}>{Math.round(f.t)} t {CROPS.find((c) => c.key === f.crop)?.name} à {eur(f.priceT)} · liefern bis {fmtDay(f.deliverBy)}</li>)}
+        {b.marketing.forwards.length === 0 && <li className="hint">Keine Vorkontrakte.</li>}
+      </ul>
+      <div className="card-actions">
+        <select value={fw.crop} onChange={(e) => setFw({ ...fw, crop: e.target.value as OwnCrop })} aria-label="Kultur Vorkontrakt">
+          {CROPS.filter((c) => STORABLE.includes(c.key) || c.key === 'kartoffeln').map((c) => <option key={c.key} value={c.key}>{c.name}</option>)}
+        </select>
+        <input type="number" min={10} step={10} value={fw.t} onChange={(e) => setFw({ ...fw, t: Number(e.target.value) })} aria-label="Menge t" style={{ width: '5em' }} />
+        <span>t, Lieferung in</span>
+        <select value={fw.months} onChange={(e) => setFw({ ...fw, months: Number(e.target.value) })} aria-label="Laufzeit">
+          {[1, 3, 6, 9, 12].map((m) => <option key={m} value={m}>{m} Monaten</option>)}
+        </select>
+        <button onClick={() => send({ kind: 'forward', crop: fw.crop, t: fw.t, months: fw.months })}>Vorkontrakt abschließen</button>
+      </div>
+      <p className="hint">Der Vorkontrakt sichert den Preis. Geliefert wird am Termin aus dem Lager; fehlt Ware, zahlt man die Preisdifferenz plus 10 €/t.</p>
       <h2>Pachtangebote ({offers.length})</h2>
       <ul className="cards" data-testid="lease-offers">
         {offers.map((o) => {
@@ -983,12 +1052,19 @@ export function FarmingTab({ status, game }: { status: GameStatus; game: GameCon
                 <small>Gebote bis {fmtDay(o.until)}</small>
               </div>
               <small className="hint">{o.reason} · {o.fields.length} {o.fields.length === 1 ? 'Feld' : 'Felder'} · Ackerzahl {o.soil}{o.irrigated ? ' · beregnet' : ''} · {o.years} Jahre · ortsüblich {eur(o.refRent)}/ha</small>
+              {o.salePrice !== undefined ? (
+                <div className="card-actions">
+                  <strong>{eur(o.salePrice)}</strong><small className="hint">({eur(o.salePrice / o.areaHa)}/ha)</small>
+                  <button onClick={() => send({ kind: 'buyLand', offerId: o.id })} data-testid="buy-land">Kaufen</button>
+                </div>
+              ) : (
               <div className="card-actions">
                 <input type="number" min={100} max={2500} step={5} value={bid} onChange={(e) => setBids({ ...bids, [o.id]: Number(e.target.value) })} aria-label="Gebot €/ha" style={{ width: '6em' }} />
                 <span>€/ha</span>
                 <button onClick={() => send({ kind: 'bidLease', offerId: o.id, rentHa: bid })} data-testid="bid-lease">{o.playerBid ? 'Gebot ändern' : 'Bieten'}</button>
                 {o.playerBid ? <small className="hint">abgegeben: {eur(o.playerBid)}/ha</small> : null}
               </div>
+              )}
             </li>
           );
         })}
@@ -1077,7 +1153,22 @@ export function BiogasTab({ status, game }: { status: GameStatus; game: GameCont
             <dt>Silo</dt><dd>{n(silage)} / {n(def.siloT)} t (Mais {n(p.stock.mais)}, GPS {n(p.stock.gps)}, Gras {n(p.stock.gras)}) · reicht etwa {p.today && p.today.mais + p.today.gps + p.today.gras > 0 ? n(silage / (p.today.mais + p.today.gps + p.today.gras)) : '–'} Tage</dd>
             <dt>Vorgrube Gülle</dt><dd>{n(p.stock.guelle)} m³</dd>
             <dt>Gärrestlager</dt><dd className={p.gaer > def.gaerM3 * 0.85 ? 'neg' : ''}>{n(p.gaer)} / {n(def.gaerM3)} m³</dd>
+            <dt>Silo festfahren</dt><dd>{p.siloBacklogT ? `${n(p.siloBacklogT)} t offen (sonst nach 2 Tagen Fremdwalze, 110 €/h)` : 'erledigt'}</dd>
           </dl>
+          {(p.siloBacklogT ?? 0) > 0 && (
+            <div className="card-actions">
+              {c.machines.filter((m) => m.type === 'radlader').map((m) => (
+                <button key={m.id} onClick={() => send({ kind: 'compactSilo', machineId: m.id, driverId: c.drivers.find((d) => (d.skills.radlader ?? 0) >= 1)?.id ?? 1 })}>Mit {machineName(m)} festfahren</button>
+              ))}
+              {!c.machines.some((m) => m.type === 'radlader') && <small className="hint">Kein eigener Radlader – es walzt ein Fremdunternehmen.</small>}
+            </div>
+          )}
+          <h3>Ausbau</h3>
+          <div className="card-actions">
+            <button disabled={p.heatAt !== undefined} onClick={() => send({ kind: 'biogasUpgrade', upgrade: 'waerme' })}>{p.heatAt !== undefined ? (b.time >= p.heatAt ? 'Wärmenetz in Betrieb' : `Wärmenetz ab ${fmtDay(p.heatAt)}`) : `Nahwärmenetz bauen (${eur(HEAT_COST)})`}</button>
+            <button disabled={p.flexAt !== undefined} onClick={() => send({ kind: 'biogasUpgrade', upgrade: 'flex' })}>{p.flexAt !== undefined ? (b.time >= p.flexAt ? 'Flexibel (Flexzuschlag)' : `Flex ab ${fmtDay(p.flexAt)}`) : `Flexibilisieren (${eur(p.kw * FLEX_COST_KW)})`}</button>
+          </div>
+          <p className="hint">Wärmenetz: Ein Teil der BHKW-Wärme geht an Nachbarn (4,5 ct/kWh). Flexibilisierung: zweites BHKW und Gasspeicher, Strom zu teuren Stunden, Flexzuschlag 65 €/kW im Jahr und etwa 0,8 ct/kWh mehr.</p>
           <h3>Substrat einkaufen (frei Silo)</h3>
           {(['mais', 'gps', 'gras'] as Substrate[]).map((k) => (
             <div key={k} className="card-actions">

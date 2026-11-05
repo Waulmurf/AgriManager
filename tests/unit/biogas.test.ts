@@ -183,6 +183,45 @@ describe('Biogasanlage', () => {
     expect(b.invoices.some((i) => i.orderId === o.id)).toBe(false);
   });
 
+  it('Düngeverordnung: höchstens 170 kg organischer N je ha und Jahr', () => {
+    const s = world(4);
+    const b = s.business;
+    const p = runningPlant(s);
+    p.gaer = 20000;
+    const l = b.leases[0];
+    expect(s.command({ kind: 'spreadGaerrest', leaseId: l.id })).toMatch(/Auftrag/);
+    for (const o of b.orders) if (o.gaerrest) o.status = 'fertig';
+    expect(s.command({ kind: 'spreadGaerrest', leaseId: l.id })).toMatch(/Auftrag/);
+    for (const o of b.orders) if (o.gaerrest) o.status = 'fertig';
+    expect(s.command({ kind: 'spreadGaerrest', leaseId: l.id })).toMatch(/Düngeverordnung/);
+  });
+
+  it('Ausbau: Wärmenetz und Flexzuschlag bringen Erlöse; Silo mit eigenem Radlader oder Fremdwalze', () => {
+    const s = world(4);
+    const b = s.business;
+    const p = runningPlant(s);
+    expect(s.command({ kind: 'biogasUpgrade', upgrade: 'waerme' })).toMatch(/beauftragt/);
+    expect(s.command({ kind: 'biogasUpgrade', upgrade: 'flex' })).toMatch(/beauftragt/);
+    p.heatAt = s.time; p.flexAt = s.time;
+    s.command({ kind: 'buySubstrate', substrate: 'gps', t: 2000 });
+    expect(p.siloBacklogT).toBe(2000);
+    // eigener Radlader
+    s.company.machines.push({ id: 960, type: 'radlader', brand: 'Volvo', model: 'L90H', year: 2022, hours: 0, condition: 95, newPrice: 210000, purchasePrice: 210000, afaYears: 10, boughtAt: 0, weightT: 15, power: 240 });
+    (s as unknown as { syncPlayerVehicles(): void }).syncPlayerVehicles();
+    s.company.drivers[0].skills.radlader = 2;
+    expect(s.command({ kind: 'compactSilo', machineId: 960, driverId: 1 })).toMatch(/festfahren|fest/);
+    runUntil(s, () => (p.siloBacklogT ?? 0) === 0, 3 * 1440);
+    expect(p.siloBacklogT).toBe(0);
+    expect(b.ledger.some((l) => l.text.includes('Fremdwalze'))).toBe(false);
+    // ohne Radlader: Fremdwalze nach 2 Tagen
+    s.command({ kind: 'buySubstrate', substrate: 'gras', t: 500 });
+    s.run(3 * 1440);
+    expect(p.siloBacklogT).toBe(0);
+    s.run(40 * 1440);
+    expect(b.ledger.some((l) => l.text.startsWith('Wärmeverkauf') && l.amount > 0)).toBe(true);
+    expect(b.ledger.some((l) => l.text.startsWith('Flexzuschlag') && l.amount > 0)).toBe(true);
+  });
+
   it('Spielstand mit Biogasanlage läuft bitgleich weiter', () => {
     const a = world(4);
     runningPlant(a);

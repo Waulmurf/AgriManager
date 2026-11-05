@@ -144,6 +144,14 @@ function sendBusiness(force = false) {
     },
     biogas: b.biogas ? structuredClone(b.biogas) : null,
     analytics: structuredClone(b.analytics(sim.time)),
+    frames: structuredClone(b.frames),
+    frameOffers: structuredClone(b.frameOffers),
+    marketing: {
+      priceT: Object.fromEntries(Object.keys(b.cropPrice).map((k) => [k, b.cropPriceT(k as never, sim!.time)])),
+      stock: { ...b.cropStock }, capacity: b.storeCapacity(), store: b.storeHarvest,
+      forwards: b.forwards.map((f) => ({ ...f })),
+      orgN: Object.fromEntries(b.leases.map((l) => [l.id, Math.round(b.orgNPerHa(l, sim!.time))])),
+    },
     weather: (() => {
       const day = Math.floor(sim!.time / 1440);
       const w = sim!.weather.day(day);

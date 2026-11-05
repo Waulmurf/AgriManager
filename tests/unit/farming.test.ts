@@ -141,6 +141,41 @@ describe('Pacht und eigener Ackerbau', () => {
     expect(b.ledger.some((x) => x.text.startsWith('Mähdrusch'))).toBe(false);
   });
 
+  it('Vermarktung: Lager verkaufen, Vorkontrakt liefern, Fehlmenge kostet Ausgleich', () => {
+    const s = world(4);
+    const b = s.business;
+    b.cropStock.weizen = 100;
+    const p0 = b.cropPriceT('weizen', s.time);
+    expect(p0).toBeGreaterThan(150);
+    expect(s.command({ kind: 'sellCrop', crop: 'weizen', t: 40 })).toMatch(/verkauft/);
+    expect(b.cropStock.weizen).toBe(60);
+    expect(s.command({ kind: 'forward', crop: 'weizen', t: 50, months: 1 })).toMatch(/Vorkontrakt/);
+    expect(s.command({ kind: 'forward', crop: 'raps', t: 20, months: 1 })).toMatch(/Vorkontrakt/);
+    s.run(32 * 1440);
+    expect(b.cropStock.weizen).toBe(10);
+    expect(b.ledger.some((l) => l.text.includes('Vorkontrakt Winterweizen') && l.amount > 0)).toBe(true);
+    expect(b.ledger.some((l) => l.text.includes('Vorkontrakt Winterraps') && l.amount < 0)).toBe(true);
+    // Preise bewegen sich
+    expect(b.cropPriceT('weizen', s.time)).not.toBe(p0);
+  });
+
+  it('Flächenkauf: Kaufangebot, Eigentum ohne Pacht, Bilanzwert', () => {
+    const s = world(4);
+    const b = s.business;
+    s.company.cash = 2_000_000;
+    for (const f of s.farms!.farms) { f.known = true; f.satisfaction = 100; }
+    for (const f of s.farms!.farms) if (b.askLand(f.id, s.time) === 'Angebot erhalten') break;
+    const o = b.leaseOffers[0];
+    o.salePrice = 30_000 * Math.round(o.areaHa);
+    const before = b.balance(s.time).assets;
+    expect(s.command({ kind: 'buyLand', offerId: o.id })).toMatch(/gekauft/);
+    const l = b.leases[0];
+    expect(l.owned).toBe(true);
+    expect(l.rentHa).toBe(0);
+    expect(s.farms!.fieldFarm[l.fields[0]]).toBe(-2);
+    expect(b.balance(s.time).assets).toBeCloseTo(before, -2); // Geld gegen Land getauscht
+  });
+
   it('Spielstand mit Pachtflächen läuft bitgleich weiter', () => {
     const a = world(4);
     const l = winLease(a);

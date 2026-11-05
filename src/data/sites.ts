@@ -3,7 +3,7 @@
  * (Hallen um 250 €/m² Grundfläche, Hausjournal: Leimbinderhalle 20 × 15 m bis etwa 80.000 €),
  * siehe docs/plan.md.
  */
-export type BuildingKey = 'platz' | 'halle' | 'werkstatt' | 'tank' | 'buero' | 'fahrsilo';
+export type BuildingKey = 'platz' | 'halle' | 'werkstatt' | 'tank' | 'buero' | 'fahrsilo' | 'lager';
 
 export interface BuildingDef {
   key: BuildingKey;
@@ -31,6 +31,8 @@ export const BUILDINGS: BuildingDef[] = [
     effect: 'Zufriedenheit der Mitarbeiter am Standort +5' },
   { key: 'fahrsilo', name: 'Fahrsilo (3 Kammern, 3.000 t)', cost: 120_000, weeks: 6, permit: true, runningPerYear: 1_200, requires: 'platz',
     effect: 'Lager für eigene Silage (Ackerbau, Biogas)' },
+  { key: 'lager', name: 'Getreidelager mit Belüftung (1.500 t)', cost: 210_000, weeks: 8, permit: true, runningPerYear: 2_500, requires: 'platz',
+    effect: 'Eigenes Korn einlagern und später verkaufen' },
 ];
 
 /** Genehmigungsdauer (Wochen) und Gebühr je Lage (ST-03, vereinfacht) */

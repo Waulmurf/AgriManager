@@ -96,7 +96,7 @@ export interface Site {
   /** gekauft oder gepachtet (Pacht je Monat) */
   rentPerMonth?: number;
   /** Gebäude: fertig (true) oder im Bau/Genehmigung (Fertigstellung, Genehmigung bis) */
-  buildings: Partial<Record<'platz' | 'halle' | 'werkstatt' | 'tank' | 'buero' | 'fahrsilo', { done: boolean; permitUntil?: number; readyAt?: number }>>;
+  buildings: Partial<Record<'platz' | 'halle' | 'werkstatt' | 'tank' | 'buero' | 'fahrsilo' | 'lager', { done: boolean; permitUntil?: number; readyAt?: number }>>;
   purchasePrice?: number;
 }
 

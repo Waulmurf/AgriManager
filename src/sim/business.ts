@@ -17,9 +17,10 @@ import { BUILDINGS, PERMIT, SITE_OFFERS, type BuildingKey } from '../data/sites'
 import { CROPS, IRRIGATION_EUR_HA, fieldIrrigated, fieldSoil, referenceRent, rotationFactor, soilFactor, type OwnCrop } from './farming';
 import {
   BIOGAS, BIOGAS_AFA_YEARS, EEG_MAX_CT, FIXED_SHARE, GAER_GABE, GAER_SERVICE_EUR_M3, GAER_SELL_EUR, GAER_VALUE_EUR, GUELLE_HAUL_EUR, OPEX_CT,
-  SUBSTRATE_NAME, SUBSTRATE_PRICE, dailyTarget, farmSlurryPerDay, gaerBlocked, gaerOf, ration, type BiogasSize, type Feed, type Substrate,
+  SUBSTRATE_NAME, SUBSTRATE_PRICE, FLEX_COST_KW, FLEX_CT, FLEX_EUR_KW_YEAR, HEAT_COST, HEAT_CT, HEAT_SHARE, SILO_HIRED_EUR_H, SILO_HIRED_TPH, dailyTarget, farmSlurryPerDay, gaerBlocked, gaerOf, ration, type BiogasSize, type Feed, type Substrate,
 } from './biogas';
 import { DESTINATIONS } from '../data/destinations';
+import { GAER_N_KG_M3, ORGANIC_N_LIMIT, SEASON_FACTOR, STORABLE, STORE_EUR_T_MONTH, landPrice } from './marketing';
 import { COMPETITOR_RANGE_KM, PRICE_WAR_KM, generateCompetitors, kmBetween, type Competitor } from './market';
 import {
   DIESEL_MEAN, DIESEL_START, LEASE_BASE_RATE, LIABILITY_PER_YEAR, OVERDRAFT_RATE, RATING_SURCHARGE,
@@ -306,6 +307,19 @@ export type LedgerCategory =
   | 'Kredit' | 'Tilgung' | 'Zinsen' | 'Leasing' | 'Versicherung' | 'Steuern' | 'Gebäude' | 'Bau'
   | 'Pacht' | 'Ackerbau' | 'Ernte' | 'Strom' | 'Biogas' | 'Maut' | 'Sonstiges';
 
+/** Rahmenvertrag (Vorschlag 7): alle Anfragen der Dienste werden zum vereinbarten Preis automatisch Aufträge */
+export interface FrameContract {
+  id: number;
+  farmId: number;
+  services: Service[];
+  /** Preis relativ zum Marktpreis (z. B. 0,95 = 5 % Nachlass für die Sicherheit) */
+  factor: number;
+  years: number;
+  /** Angebot: Antwort bis; Vertrag: läuft bis */
+  until: number;
+  strikes: number;
+}
+
 /** Sparten für die Auswertung (Vorschlag 13) */
 export type Branch = 'lohn' | 'transport' | 'ackerbau' | 'biogas';
 export const BRANCH_NAMES: Record<Branch, string> = { lohn: 'Lohnarbeit', transport: 'Transport', ackerbau: 'Ackerbau', biogas: 'Biogas' };
@@ -344,6 +358,12 @@ export interface BiogasPlant {
   /** Hinweise, damit Warnungen nicht täglich kommen */
   warnedShort?: number;
   warnedFull?: number;
+  /** Ausbau (Vorschlag 9): Wärmenetz bzw. Flexibilisierung fertig ab Spielminute */
+  heatAt?: number;
+  flexAt?: number;
+  /** Silage, die noch festgefahren werden muss (t), seit */
+  siloBacklogT?: number;
+  backlogSince?: number;
 }
 
 /** Pachtangebot (PB-01 bis PB-03) */
@@ -361,6 +381,8 @@ export interface LeaseOffer {
   competitorBid: number;
   playerBid?: number;
   reason: string;
+  /** Verkauf statt Pacht: Kaufpreis gesamt (fest) */
+  salePrice?: number;
 }
 
 /** Arbeitsgang einer eigenen Kultur */
@@ -389,6 +411,12 @@ export interface Lease {
   lastCrop?: OwnCrop;
   yieldFactor: number;
   history: { year: number; crop: OwnCrop; tonnes: number; revenue: number }[];
+  /** gekaufte Fläche (keine Pacht, kein Ende), Kaufpreis */
+  owned?: boolean;
+  price?: number;
+  /** organischer Stickstoff im Düngejahr (kg N gesamt) */
+  orgN?: number;
+  orgNYear?: number;
 }
 
 /** Jahresabschluss (WF-08) */
@@ -464,6 +492,11 @@ export type Command =
   | { kind: 'bidLease'; offerId: number; rentHa: number }
   | { kind: 'askLand'; farmId: number }
   | { kind: 'setCrop'; leaseId: number; crop: OwnCrop }
+  | { kind: 'buyLand'; offerId: number }
+  | { kind: 'frameAnswer'; offerId: number; accept: boolean }
+  | { kind: 'sellCrop'; crop: OwnCrop; t: number }
+  | { kind: 'forward'; crop: OwnCrop; t: number; months: number }
+  | { kind: 'storeHarvest'; on: boolean }
   | { kind: 'buildBiogas'; siteId: number; kw: BiogasSize; bidCt: number }
   | { kind: 'biogasBid'; ct: number }
   | { kind: 'buySubstrate'; substrate: Substrate; t: number }
@@ -472,6 +505,8 @@ export type Command =
   | { kind: 'fetchSlurry'; farmId: number }
   | { kind: 'spreadGaerrest'; leaseId: number }
   | { kind: 'sellGaerrest'; m3: number }
+  | { kind: 'biogasUpgrade'; upgrade: 'waerme' | 'flex' }
+  | { kind: 'compactSilo'; machineId: number; driverId: number }
   | { kind: 'buySite'; offerKey: string }
   | { kind: 'sellSite'; siteId: number }
   | { kind: 'transfer'; machineId: number; siteId: number; driverId: number; implementId?: number }
@@ -527,6 +562,15 @@ export class Business {
   lonLatNode: ((lonLat: [number, number]) => number) | null = null;
   /** eigene Biogasanlage */
   biogas: BiogasPlant | null = null;
+  /** Vermarktung (Vorschlag 6): Preisfaktor je Kultur, Lagerbestand (t), Vorkontrakte, Einlagern ja/nein */
+  readonly cropPrice: Record<OwnCrop, number> = { weizen: 1, raps: 1, mais: 1, rueben: 1, kartoffeln: 1 };
+  readonly cropStock: Record<OwnCrop, number> = { weizen: 0, raps: 0, mais: 0, rueben: 0, kartoffeln: 0 };
+  readonly forwards: { id: number; crop: OwnCrop; t: number; priceT: number; deliverBy: number }[] = [];
+  storeHarvest = true;
+  /** Rahmenverträge (Vorschlag 7): Angebote und laufende Verträge */
+  readonly frameOffers: FrameContract[] = [];
+  readonly frames: FrameContract[] = [];
+  private priceRng: Rng;
   /** Markt (Phase 5): Konkurrenten, Ruf, Statistik gewonnen/verloren */
   readonly competitors: Competitor[];
   reputation = 50;
@@ -576,6 +620,7 @@ export class Business {
     // eigener Zufallsstrom für den Markt, damit die übrigen Abläufe unverändert bleiben
     this.marketRng = new Rng(seed ^ 0x3a7c0e);
     this.competitors = generateCompetitors(() => this.marketRng.next());
+    this.priceRng = new Rng(seed ^ 0x9c1e5);
   }
 
   /** Zustand für den Spielstand (ohne Betriebe/Felder, die aus dem Seed entstehen) */
@@ -603,6 +648,9 @@ export class Business {
       leaseOffers: this.leaseOffers,
       leases: this.leases,
       biogas: this.biogas,
+      frameOffers: this.frameOffers,
+      frames: this.frames,
+      marketing: { rng: this.priceRng.getState(), price: this.cropPrice, stock: this.cropStock, forwards: this.forwards, store: this.storeHarvest },
       market: { rng: this.marketRng.getState(), competitors: this.competitors, reputation: this.reputation, won: this.won, lost: this.lost },
       years: this.years,
       yearSaleGain: this.yearSaleGain,
@@ -639,6 +687,15 @@ export class Business {
     put(this.leases, s.leases ?? []);
     this.applyLeases();
     this.biogas = s.biogas ? structuredClone(s.biogas) : null;
+    put(this.frameOffers, s.frameOffers ?? []);
+    put(this.frames, s.frames ?? []);
+    if (s.marketing) {
+      this.priceRng.setState(s.marketing.rng);
+      Object.assign(this.cropPrice, s.marketing.price);
+      Object.assign(this.cropStock, s.marketing.stock);
+      put(this.forwards, s.marketing.forwards);
+      this.storeHarvest = s.marketing.store;
+    }
     if (s.market) {
       this.marketRng.setState(s.market.rng);
       put(this.competitors, s.market.competitors);
@@ -684,7 +741,7 @@ export class Business {
     const farm = this.farms?.farms[farmId];
     if (!farm) return;
     farm.satisfaction = Math.max(0, Math.min(100, farm.satisfaction + delta));
-    if (delta < 0 && farm.satisfaction < RIVAL_SWITCH_SATISFACTION && farm.rivalUntil <= time) {
+    if (delta < 0 && farm.satisfaction < RIVAL_SWITCH_SATISFACTION && farm.rivalUntil <= time && !this.frameOf(farmId)) {
       farm.rivalUntil = time + (RIVAL_MIN_DAYS + this.rng.int(RIVAL_EXTRA_DAYS + 1)) * 1440;
       for (const r of this.requests) if (r.farmId === farmId && r.status === 'offen') r.status = 'abgelaufen';
       this.emit(time, 'warnung', `${farm.name} ist unzufrieden und arbeitet ab jetzt mit einem anderen Lohnunternehmen. In einigen Wochen kann man es mit kleinen Aufträgen wieder versuchen.`, farmId);
@@ -852,21 +909,128 @@ export class Business {
     const ratio = days > 60 ? rain / (300 * (days / 153)) : 1;
     const dry = l.irrigated ? 1 : Math.max(0.4, 1 - def.drought * Math.max(0, 0.9 - ratio));
     const tonnes = Math.round(def.yieldT * soilFactor(l.soil) * rotationFactor(def.key, l.lastCrop) * dry * l.yieldFactor * l.areaHa * 10) / 10;
-    const price = Math.round(def.priceT * (0.9 + this.marketRng.next() * 0.2) * 100) / 100;
+    const price = this.cropPriceT(def.key, time);
     // Silomais in die eigene Biogasanlage (PB-06), soweit das Silo Platz hat
     const intoSilo = def.key === 'mais' ? Math.min(tonnes, this.siloRoom()) : 0;
     if (intoSilo > 0) {
       this.biogas!.stock.mais += intoSilo;
+      this.addSiloBacklog(intoSilo, time);
       this.emit(time, 'info', `${intoSilo.toLocaleString('de-DE')} t Silomais ins Silo der Biogasanlage.`);
     }
-    const revenue = Math.round((tonnes - intoSilo) * price);
-    if (revenue > 0) this.book(time, `Ernte ${def.name}: ${(Math.round((tonnes - intoSilo) * 10) / 10).toLocaleString('de-DE')} t à ${fmtEur(price)}`, revenue, 'Ernte');
+    // lagerfähiges Korn ins eigene Getreidelager (Vorschlag 6), soweit Platz
+    const intoStore = STORABLE.includes(def.key) && this.storeHarvest ? Math.min(tonnes, this.storeRoom()) : 0;
+    if (intoStore > 0) {
+      this.cropStock[def.key] = Math.round((this.cropStock[def.key] + intoStore) * 10) / 10;
+      this.emit(time, 'info', `${intoStore.toLocaleString('de-DE')} t ${def.name} eingelagert (Reiter Ackerbau: verkaufen, wenn der Preis passt).`);
+    }
+    const sold = Math.round((tonnes - intoSilo - intoStore) * 10) / 10;
+    const revenue = Math.round(sold * price);
+    if (revenue > 0) this.book(time, `Ernte ${def.name}: ${sold.toLocaleString('de-DE')} t à ${fmtEur(price)}`, revenue, 'Ernte');
     l.history.push({ year: gameDate(time).year, crop: def.key, tonnes, revenue });
     this.emit(time, 'info', `Ernte ${def.name} (${fmtHa(l.areaHa)}): ${tonnes.toLocaleString('de-DE')} t (${(tonnes / l.areaHa).toLocaleString('de-DE', { maximumFractionDigits: 1 })} t/ha${!l.irrigated && dry < 0.95 ? ', Trockenheit' : ''}) – verkauft für ${fmtEur(revenue)}.`);
     l.lastCrop = def.key;
     l.crop = undefined;
     l.steps = [];
     if (l.nextCrop) { const n = l.nextCrop; l.nextCrop = undefined; this.setCrop(l.id, n, time); }
+  }
+
+  // ---------- Vermarktung und Lager (Vorschlag 6) ----------
+
+  /** aktueller Preis je t einer Kultur (Basis × Zufallsgang × Saison für lagerfähiges Korn) */
+  cropPriceT(crop: OwnCrop, time: number): number {
+    const def = CROPS.find((c) => c.key === crop)!;
+    const season = STORABLE.includes(crop) ? SEASON_FACTOR[gameDate(time).month - 1] : 1;
+    return Math.round(def.priceT * this.cropPrice[crop] * season * 100) / 100;
+  }
+
+  /** Lagerplatz (t): 1.500 t je fertigem Getreidelager */
+  storeCapacity(): number {
+    return (this.company.sites ?? []).filter((s) => s.buildings.lager?.done).length * 1500;
+  }
+
+  private storeRoom(): number {
+    const used = STORABLE.reduce((a, k) => a + this.cropStock[k], 0);
+    return Math.max(0, Math.floor(this.storeCapacity() - used));
+  }
+
+  sellCrop(crop: OwnCrop, t: number, time: number): string {
+    const v = Math.min(Math.round(t * 10) / 10, this.cropStock[crop]);
+    if (!(v > 0)) return 'Nichts auf Lager';
+    const price = this.cropPriceT(crop, time);
+    this.cropStock[crop] = Math.round((this.cropStock[crop] - v) * 10) / 10;
+    this.book(time, `Verkauf ${CROPS.find((c) => c.key === crop)!.name} aus dem Lager: ${v.toLocaleString('de-DE')} t à ${fmtEur(price)}`, Math.round(v * price), 'Ernte');
+    this.version++;
+    return `${v.toLocaleString('de-DE')} t verkauft für ${fmtEur(Math.round(v * price))}`;
+  }
+
+  /** Vorkontrakt: Menge zum heutigen Terminpreis (Preis zum Liefermonat, leicht abgezinst) fest verkaufen */
+  forward(crop: OwnCrop, t: number, months: number, time: number): string {
+    if (!STORABLE.includes(crop) && crop !== 'kartoffeln') return 'Vorkontrakte gibt es für Weizen, Raps und Kartoffeln';
+    if (!(t >= 10) || ![1, 3, 6, 9, 12].includes(months)) return 'Mindestens 10 t, Laufzeit 1, 3, 6, 9 oder 12 Monate';
+    const deliverBy = time + months * 30 * 1440;
+    const def = CROPS.find((c) => c.key === crop)!;
+    const season = STORABLE.includes(crop) ? SEASON_FACTOR[gameDate(deliverBy).month - 1] : 1;
+    const priceT = Math.round(def.priceT * (0.5 + 0.5 * this.cropPrice[crop]) * season * 0.98 * 100) / 100;
+    this.forwards.push({ id: this.nextId++, crop, t: Math.round(t), priceT, deliverBy });
+    this.version++;
+    return `Vorkontrakt: ${Math.round(t)} t ${def.name} à ${fmtEur(priceT)} bis ${fmtDay(deliverBy)}`;
+  }
+
+  /** Täglich: Preise bewegen, Lagerkosten (Monatserster), fällige Vorkontrakte liefern */
+  private marketingDaily(time: number) {
+    for (const k of Object.keys(this.cropPrice) as OwnCrop[]) {
+      // Zufallsgang mit Rückkehr zum Mittel (±1 % am Tag, Spanne etwa 0,75–1,3)
+      const p = this.cropPrice[k];
+      this.cropPrice[k] = Math.round(Math.max(0.7, Math.min(1.35, p + (1 - p) * 0.02 + (this.priceRng.next() - 0.5) * 0.02)) * 10000) / 10000;
+    }
+    if (gameDate(time).day === 1) {
+      const t = STORABLE.reduce((a, k) => a + this.cropStock[k], 0);
+      if (t > 0) this.book(time, `Lagerkosten Getreidelager (${Math.round(t)} t)`, -Math.round(t * STORE_EUR_T_MONTH), 'Ackerbau');
+    }
+    for (let i = this.forwards.length - 1; i >= 0; i--) {
+      const f = this.forwards[i];
+      if (time < f.deliverBy) continue;
+      this.forwards.splice(i, 1);
+      const have = Math.min(f.t, this.cropStock[f.crop]);
+      this.cropStock[f.crop] = Math.round((this.cropStock[f.crop] - have) * 10) / 10;
+      const name = CROPS.find((c) => c.key === f.crop)!.name;
+      if (have > 0) this.book(time, `Vorkontrakt ${name}: ${have.toLocaleString('de-DE')} t à ${fmtEur(f.priceT)} geliefert`, Math.round(have * f.priceT), 'Ernte');
+      const short = f.t - have;
+      if (short > 0) {
+        // Fehlmenge: Händler deckt sich am Markt ein, Differenz plus 10 €/t zahlt der Spieler
+        const pen = Math.round(short * (Math.max(0, this.cropPriceT(f.crop, time) - f.priceT) + 10));
+        this.book(time, `Vorkontrakt ${name}: ${short.toLocaleString('de-DE')} t nicht geliefert (Ausgleich)`, -pen, 'Ackerbau');
+        this.emit(time, 'warnung', `Vorkontrakt ${name}: ${short.toLocaleString('de-DE')} t fehlen – Ausgleichszahlung ${fmtEur(pen)}.`);
+      }
+      this.version++;
+    }
+  }
+
+  // ---------- Flächenkauf (Vorschlag 8) ----------
+
+  buyLand(offerId: number, time: number): string {
+    const o = this.leaseOffers.find((x) => x.id === offerId);
+    if (!o || o.salePrice === undefined) return 'Kein Kaufangebot';
+    if (!this.canPay(o.salePrice)) return 'Nicht genug Geld – Darlehen?';
+    this.leaseOffers.splice(this.leaseOffers.indexOf(o), 1);
+    this.book(time, `Kauf ${fmtHa(o.areaHa)} Ackerland von ${this.farmName(o.farmId)}`, -o.salePrice, 'Bau');
+    this.leases.push({
+      id: this.nextId++, farmId: o.farmId, fields: o.fields, areaHa: o.areaHa, soil: o.soil, irrigated: o.irrigated,
+      rentHa: 0, startAt: time, endsAt: Number.MAX_SAFE_INTEGER, steps: [], yieldFactor: 1, history: [], owned: true, price: o.salePrice,
+    });
+    this.applyLeases();
+    this.version++;
+    return `${fmtHa(o.areaHa)} gekauft für ${fmtEur(o.salePrice)}`;
+  }
+
+  /** Wert der eigenen Flächen (Kaufpreis) für die Bilanz */
+  landValue(): number {
+    return this.leases.reduce((a, l) => a + (l.owned ? l.price ?? 0 : 0), 0);
+  }
+
+  /** organischer Stickstoff einer Fläche im laufenden Düngejahr (kg N/ha) */
+  orgNPerHa(l: Lease, time: number): number {
+    return l.orgNYear === gameDate(time).year ? (l.orgN ?? 0) / l.areaHa : 0;
   }
 
   /** Täglich: Pachtangebote, Gebotsentscheidung, Arbeitsgänge, Pacht und Beregnung (1.10.), Pachtende */
@@ -879,13 +1043,19 @@ export class Business {
       const farm = fs.farms[this.marketRng.int(fs.farms.length)];
       const reason = this.marketRng.next() < 0.5 ? 'Betriebsaufgabe' : 'Generationswechsel';
       const o = this.makeLeaseOffer(farm.id, time, reason);
-      if (o) this.emit(time, 'info', `Pachtangebot (${reason}): ${farm.name} gibt ${fmtHa(o.areaHa)} ab, Ackerzahl ${o.soil}${o.irrigated ? ', beregnet' : ''}, ${o.years} Jahre. Gebote bis ${fmtDay(o.until)}.`, farm.id);
+      // jedes vierte Angebot ist ein Verkauf (Vorschlag 8)
+      if (o && this.marketRng.next() < 0.25) {
+        o.salePrice = Math.round(landPrice(o.soil, o.irrigated) * o.areaHa / 100) * 100;
+        o.reason = `${reason}, Verkauf`;
+        this.emit(time, 'info', `Ackerland zu kaufen (${reason}): ${farm.name} verkauft ${fmtHa(o.areaHa)}, Ackerzahl ${o.soil}${o.irrigated ? ', beregnet' : ''}, für ${fmtEur(o.salePrice)} (bis ${fmtDay(o.until)}).`, farm.id);
+      } else if (o) this.emit(time, 'info', `Pachtangebot (${reason}): ${farm.name} gibt ${fmtHa(o.areaHa)} ab, Ackerzahl ${o.soil}${o.irrigated ? ', beregnet' : ''}, ${o.years} Jahre. Gebote bis ${fmtDay(o.until)}.`, farm.id);
     }
     // Gebote entscheiden
     for (let i = this.leaseOffers.length - 1; i >= 0; i--) {
       const o = this.leaseOffers[i];
       if (o.until > time) continue;
       this.leaseOffers.splice(i, 1);
+      if (o.salePrice !== undefined) continue; // Kaufangebot verfällt
       if (o.playerBid !== undefined && o.playerBid >= o.competitorBid) {
         const l: Lease = {
           id: this.nextId++, farmId: o.farmId, fields: o.fields, areaHa: o.areaHa, soil: o.soil, irrigated: o.irrigated,
@@ -1027,6 +1197,7 @@ export class Business {
     const cost = Math.round(t * price);
     if (!this.canPay(cost)) return 'Nicht genug Geld';
     p.stock[kind] += Math.round(t);
+    this.addSiloBacklog(Math.round(t), time);
     this.book(time, `${SUBSTRATE_NAME[kind]} ${Math.round(t).toLocaleString('de-DE')} t frei Silo à ${fmtEur(price)}`, -cost, 'Biogas');
     this.version++;
     return `${Math.round(t).toLocaleString('de-DE')} t ${SUBSTRATE_NAME[kind]} eingelagert`;
@@ -1110,6 +1281,13 @@ export class Business {
     if (this.orders.some((o) => o.gaerrest && o.ownLeaseId === leaseId && o.status !== 'fertig')) return 'Läuft schon';
     const m3 = Math.round(l.areaHa * GAER_GABE);
     if (p.gaer < m3) return `Zu wenig Gärrest (${Math.round(p.gaer)} m³, gebraucht ${m3} m³)`;
+    // Düngeverordnung: höchstens 170 kg organischer N je ha und Jahr
+    const y = gameDate(time).year;
+    const nNow = l.orgNYear === y ? l.orgN ?? 0 : 0;
+    const nAdd = m3 * GAER_N_KG_M3;
+    if ((nNow + nAdd) / l.areaHa > ORGANIC_N_LIMIT) return `Düngeverordnung: mehr als ${ORGANIC_N_LIMIT} kg organischer N je ha in diesem Jahr`;
+    l.orgN = nNow + nAdd;
+    l.orgNYear = y;
     p.gaer -= m3;
     const o: Order = {
       id: this.nextId++, requestId: 0, farmId: -1, service: 'guelle', fields: l.fields.slice(), doneFields: [], areaHa: l.areaHa, priceHa: 0,
@@ -1132,6 +1310,40 @@ export class Business {
     this.book(time, `Gärrest abgegeben: ${v.toLocaleString('de-DE')} m³ à ${fmtEur(GAER_SELL_EUR)}`, -v * GAER_SELL_EUR, 'Biogas');
     this.version++;
     return `${v.toLocaleString('de-DE')} m³ abgegeben`;
+  }
+
+  /** Silage muss festgefahren werden (Radlader), sonst Fremdwalze */
+  private addSiloBacklog(t: number, time: number) {
+    const p = this.biogas;
+    if (!p || t <= 0) return;
+    if (!p.siloBacklogT) p.backlogSince = time;
+    p.siloBacklogT = (p.siloBacklogT ?? 0) + t;
+    this.version++;
+  }
+
+  /** eigener Radlader hat festgefahren */
+  compactDone(time: number, who: string) {
+    const p = this.biogas;
+    if (!p) return;
+    this.emit(time, 'info', `Silo festgefahren (${Math.round(p.siloBacklogT ?? 0)} t, ${who}).`);
+    p.siloBacklogT = 0;
+    p.backlogSince = undefined;
+    this.version++;
+  }
+
+  /** Ausbau der Anlage: Wärmenetz oder Flexibilisierung (8 Wochen Bauzeit) */
+  biogasUpgrade(kind: 'waerme' | 'flex', time: number): string {
+    const p = this.biogas;
+    if (!p || p.status !== 'betrieb') return 'Erst wenn die Anlage läuft';
+    if (kind === 'waerme' && p.heatAt !== undefined) return 'Wärmenetz gibt es schon';
+    if (kind === 'flex' && p.flexAt !== undefined) return 'Anlage ist schon flexibilisiert';
+    const cost = kind === 'waerme' ? HEAT_COST : p.kw * FLEX_COST_KW;
+    if (!this.canPay(cost)) return 'Nicht genug Geld';
+    this.book(time, kind === 'waerme' ? 'Biogas: Nahwärmenetz' : `Biogas: Flexibilisierung (zweites BHKW, Gasspeicher)`, -cost, 'Bau');
+    const at = time + 8 * 7 * 1440;
+    if (kind === 'waerme') p.heatAt = at; else p.flexAt = at;
+    this.version++;
+    return `${kind === 'waerme' ? 'Wärmenetz' : 'Flexibilisierung'} beauftragt, fertig ${fmtDay(at)}`;
   }
 
   /** AfA der Anlage (20 Jahre) */
@@ -1179,6 +1391,14 @@ export class Business {
       this.emit(time, 'info', `Biogasanlage ${p.kw} kW läuft an. Substrat einlagern (Silo ${def.siloT.toLocaleString('de-DE')} t), Gülleverträge abschließen.`);
     }
     if (p.status !== 'betrieb') return;
+    // nicht festgefahrene Silage: nach 2 Tagen walzt ein Fremdunternehmen (Kosten)
+    if ((p.siloBacklogT ?? 0) > 0 && time - (p.backlogSince ?? time) >= 2 * 1440) {
+      const h = (p.siloBacklogT ?? 0) / SILO_HIRED_TPH;
+      p.costMonth += h * SILO_HIRED_EUR_H;
+      this.emit(time, 'info', `Silo von Fremdwalze festgefahren (${Math.round(p.siloBacklogT ?? 0)} t, ${fmtEur(Math.round(h * SILO_HIRED_EUR_H))}). Mit eigenem Radlader geht es günstiger.`);
+      p.siloBacklogT = 0;
+      p.backlogSince = undefined;
+    }
     // Gülle-Anfuhr (Vorgrube fasst 30 Tage) und Rücknahme Gärrest durch die Lieferanten (Februar–September)
     let delivered = 0, back = 0;
     for (let i = p.contracts.length - 1; i >= 0; i--) {
@@ -1221,6 +1441,8 @@ export class Business {
     // Abrechnung am Monatsersten: Strom (Netzbetreiber), Betrieb und Wartung, fixe Kosten, Gülle-Anfuhr
     if (d.day === 1 && p.kwhMonth > 0) {
       this.book(time, `Stromerlös Biogas: ${Math.round(p.kwhMonth).toLocaleString('de-DE')} kWh à ${(p.ct ?? 0).toLocaleString('de-DE')} ct`, Math.round((p.kwhMonth * (p.ct ?? 0)) / 100), 'Strom');
+      if (p.heatAt !== undefined && time >= p.heatAt) this.book(time, `Wärmeverkauf: ${Math.round((p.kwhMonth * HEAT_SHARE) / 1000).toLocaleString('de-DE')} MWh`, Math.round((p.kwhMonth * HEAT_SHARE * HEAT_CT) / 100), 'Strom');
+      if (p.flexAt !== undefined && time >= p.flexAt) this.book(time, 'Flexzuschlag und Direktvermarktung', Math.round((p.kw * FLEX_EUR_KW_YEAR) / 12 + (p.kwhMonth * FLEX_CT) / 100), 'Strom');
       const opex = (p.kwhMonth * OPEX_CT) / 100 + (def.cost * FIXED_SHARE) / 12 + p.costMonth;
       this.book(time, 'Biogas: Betrieb, Wartung BHKW, Versicherung, Gülle-Anfuhr', -Math.round(opex), 'Biogas');
       p.kwhMonth = 0;
@@ -1414,7 +1636,7 @@ export class Business {
     if (!fs) return;
     // Abwanderung im Preiskampf: unzufriedene Nicht-Stammkunden in der Nähe
     for (const f of fs.farms) {
-      if (!f.known || f.rivalUntil > time || this.isLoyal(f.id) || f.satisfaction >= 65) continue;
+      if (!f.known || f.rivalUntil > time || this.isLoyal(f.id) || f.satisfaction >= 65 || this.frameOf(f.id)) continue;
       const war = this.priceWarNear(f.id, time);
       if (war && r.next() < 0.004) {
         f.rivalUntil = war.warUntil + 30 * 1440;
@@ -1561,7 +1783,61 @@ export class Business {
       channel,
     };
     this.requests.push(req);
+    // Rahmenvertrag: zum Vertragspreis automatisch annehmen (Vorschlag 7)
+    const fr = this.frameOf(farmId);
+    if (fr && fr.services.includes(req.service) && !req.liquid) {
+      req.priceHa = Math.round(this.marketPriceHa(req.service, req.gabe, req.chain) * fr.factor * 100) / 100;
+      if (req.tPerHa) req.priceHa = offerHa;
+      const msg = this.respond(req.id, 'accept', time);
+      if (msg === 'Auftrag angelegt') this.emit(time, 'auftrag', `Rahmenvertrag ${farm.name}: ${SERVICE_NAMES[req.service]} ${fmtHa(req.areaHa)} automatisch eingeplant (bis ${fmtDay(req.latest)}).`, farmId);
+    }
     return req;
+  }
+
+  /** laufender Rahmenvertrag eines Betriebs */
+  frameOf(farmId: number): FrameContract | undefined {
+    return this.frames.find((f) => f.farmId === farmId);
+  }
+
+  frameAnswer(offerId: number, accept: boolean, time: number): string {
+    const o = this.frameOffers.find((x) => x.id === offerId);
+    if (!o) return 'Angebot nicht mehr aktuell';
+    this.frameOffers.splice(this.frameOffers.indexOf(o), 1);
+    this.version++;
+    if (!accept) { this.satisfy(o.farmId, -2, time); return 'abgelehnt'; }
+    this.frames.push({ ...o, until: time + o.years * 365 * 1440, strikes: 0 });
+    this.satisfy(o.farmId, 5, time);
+    this.emit(time, 'info', `Rahmenvertrag mit ${this.farmName(o.farmId)} über ${o.years} Jahre: ${o.services.map((x) => SERVICE_NAMES[x]).join(', ')} zu ${Math.round(o.factor * 100)} % des Marktpreises. Aufträge kommen automatisch; drei Verspätungen beenden den Vertrag.`, o.farmId);
+    return 'Rahmenvertrag abgeschlossen';
+  }
+
+  /** Täglich: Angebote für Rahmenverträge von Stammkunden, Ablauf */
+  private framesDaily(time: number) {
+    const fs = this.farms;
+    if (!fs) return;
+    for (let i = this.frameOffers.length - 1; i >= 0; i--) if (this.frameOffers[i].until <= time) this.frameOffers.splice(i, 1);
+    for (let i = this.frames.length - 1; i >= 0; i--) {
+      const f = this.frames[i];
+      if (f.until > time) continue;
+      this.frames.splice(i, 1);
+      this.emit(time, 'info', `Rahmenvertrag mit ${this.farmName(f.farmId)} ausgelaufen.`, f.farmId);
+    }
+    if (this.marketRng.next() >= 0.02) return;
+    const loyal = fs.farms.filter((f) => this.isLoyal(f.id) && !this.frameOf(f.id) && !this.frameOffers.some((o) => o.farmId === f.id));
+    if (!loyal.length) return;
+    const farm = loyal[this.marketRng.int(loyal.length)];
+    // Dienste aus den bisherigen Aufträgen (bis zu drei häufigste)
+    const count = new Map<Service, number>();
+    for (const o of this.orders) if (o.farmId === farm.id && o.status === 'fertig') count.set(o.service, (count.get(o.service) ?? 0) + 1);
+    const services = [...count.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map((x) => x[0]);
+    if (!services.length) return;
+    const offer: FrameContract = {
+      id: this.nextId++, farmId: farm.id, services, factor: Math.round((0.93 + this.marketRng.next() * 0.05) * 100) / 100,
+      years: 2 + this.marketRng.int(3), until: time + 7 * 1440, strikes: 0,
+    };
+    this.frameOffers.push(offer);
+    this.version++;
+    this.emit(time, 'info', `${farm.name} bietet einen Rahmenvertrag an: ${services.map((x) => SERVICE_NAMES[x]).join(', ')} für ${offer.years} Jahre zu ${Math.round(offer.factor * 100)} % des Marktpreises (Reiter Wettbewerb, Antwort bis ${fmtDay(offer.until)}).`, farm.id);
   }
 
   /** nächster Hof mit Vieh oder Biogasanlage im Umkreis von 15 km (Gülle-/Gärrestbörse), sonst null */
@@ -1661,6 +1937,8 @@ export class Business {
     this.marketDaily(time);
     this.sitesDaily(time);
     this.farmingDaily(time);
+    this.marketingDaily(time);
+    this.framesDaily(time);
     this.biogasDaily(time);
     // Auftrag steht wegen Panne: Kunde wartet und wird unzufriedener (MZ-07)
     for (const o of this.orders) {
@@ -1822,7 +2100,7 @@ export class Business {
     const receivables = this.invoices.filter((i) => i.status === 'offen' || i.status === 'überfällig').reduce((a, i) => a + i.amount, 0);
     const cash = this.company.cash;
     const debt = this.company.loan + Math.max(0, -cash);
-    const assets = Math.max(0, cash) + machines + receivables + (this.company.partsStock ?? 0);
+    const assets = Math.max(0, cash) + machines + receivables + (this.company.partsStock ?? 0) + this.landValue();
     return { assets, debt, equity: assets - debt, receivables, machines };
   }
 
@@ -2415,12 +2693,21 @@ export class Business {
         // Erntemenge aus Fläche × Ertrag (Wagen können noch unterwegs zum Silo sein)
         const harvested = Math.round(o.areaHa * SILAGE_YIELD_T_HA);
         const t = Math.min(harvested, this.siloRoom());
-        if (this.biogas) this.biogas.stock.mais += t;
+        if (this.biogas) { this.biogas.stock.mais += t; this.addSiloBacklog(t, time); }
         this.book(time, `Mais auf dem Halm von ${this.farmName(o.farmId)}: ${harvested.toLocaleString('de-DE')} t à ${fmtEur(o.biogasPriceT)}`, -Math.round(harvested * o.biogasPriceT), 'Biogas');
         this.satisfy(o.farmId, 2, time);
         return;
       }
       this.satisfy(o.farmId, onTime ? 5 : -10, time);
+      const fr = this.frameOf(o.farmId);
+      if (fr && !onTime && fr.services.includes(o.service)) {
+        fr.strikes++;
+        if (fr.strikes >= 3) {
+          this.frames.splice(this.frames.indexOf(fr), 1);
+          this.satisfy(o.farmId, -15, time);
+          this.emit(time, 'warnung', `${this.farmName(o.farmId)} kündigt den Rahmenvertrag nach drei Verspätungen.`, o.farmId);
+        } else this.emit(time, 'warnung', `Rahmenvertrag ${this.farmName(o.farmId)}: Verspätung ${fr.strikes} von 3.`, o.farmId);
+      }
       this.changeReputation(onTime ? 1.5 : -3);
       const farm = this.farms?.farms[o.farmId];
       if (farm) {

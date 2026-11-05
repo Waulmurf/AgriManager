@@ -973,3 +973,29 @@ Nils wählt aus, was umgesetzt wird. Empfehlung für den nächsten Block: 4, 1, 
 - **Eigener Ackerbau:** Mit eigener Drille, Einzelkornsämaschine, Spritze bzw. eigenem
   Kartoffelroder werden die Arbeitsgänge zu Eigenaufträgen. Gebucht werden dann nur die
   Betriebsmittel (`CropStep.materialHa`).
+
+## Umsetzung Paket 2: Vermarktung, Rahmenverträge, Flächenkauf und Düngung, Biogas-Ausbau (5. Nov. 2026)
+
+- **6 Vermarktung und Lager (`src/sim/marketing.ts`):**
+  - Preise je Kultur bewegen sich täglich (Zufallsgang um den Basispreis, eigener Zufallsstrom).
+  - Weizen und Raps haben dazu ein Saisonmuster: August −8 %, März/April +6 %.
+  - Getreidelager 1.500 t (210.000 €) als Gebäude. Weizen und Raps werden zur Ernte eingelagert
+    (abschaltbar) und später verkauft. Lagerkosten 1,50 €/t im Monat.
+  - Vorkontrakte für Weizen, Raps und Kartoffeln: 1–12 Monate zum Terminpreis.
+  - Geliefert wird am Termin aus dem Lager. Für Fehlmengen zahlt man die Preisdifferenz plus
+    10 €/t.
+- **7 Rahmenverträge:** Stammkunden bieten gelegentlich Verträge über 2–4 Jahre an. Sie decken die
+  Dienste ab, die man für sie schon gefahren hat, zu 93–98 % des Marktpreises.
+  - Anfragen werden automatisch Aufträge.
+  - Der Kunde wechselt nicht zur Konkurrenz.
+  - Drei Verspätungen beenden den Vertrag.
+- **8 Flächenkauf und Düngung:** Jedes vierte Flächenangebot ist ein Verkauf. Preis: 30.000 €/ha
+  bei Ackerzahl 35, je Punkt ±800 €, Beregnung +4.000 € (Annahme).
+  - Eigentum zahlt keine Pacht und zählt in der Bilanz zum Vermögen.
+  - Stickstoff: N-Bedarf je Kultur, organischer N aus Gärrest (3,5 kg/m³).
+  - Düngeverordnung: höchstens 170 kg organischer N je ha und Jahr.
+- **9 Biogas ausbauen:**
+  - Nahwärmenetz (180.000 €, 8 Wochen): 36 % der Strommenge als Wärme zu 4,5 ct/kWh.
+  - Flexibilisierung (600 €/kW): Flexzuschlag 65 €/kW im Jahr und +0,8 ct/kWh.
+  - Silo festfahren: Neue Silage muss gewalzt werden. Mit eigenem Radlader (Betriebsgewicht × 4 t/h)
+    geht das als Aufgabe `compact`, sonst walzt nach 2 Tagen eine Fremdwalze (100 t/h, 110 €/h).

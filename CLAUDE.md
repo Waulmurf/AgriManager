@@ -112,6 +112,9 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
 - Feld teilen: `Simulation.joinPlan`, `Order.shareDone`, `Business.fieldPartDone`. Fremde BGAs `hasBga` (farms.ts),
   `Request.sourceFarmId`/`liquid`. 4b: Dienste saat/einzelkorn/pflanzenschutz/pressen/kartoffelroden, `HARVEST_TOWED`,
   `HAULER_TYPES` (Überladewagen lädt am Feldrand über), `CropStep.materialHa`.
+- Paket 2 fertig: Vermarktung `src/sim/marketing.ts` (Preise, Lager, Vorkontrakte), Getreidelager-Gebäude `lager`, Rahmenverträge
+  (`FrameContract`, `framesDaily`), Flächenkauf (`LeaseOffer.salePrice`, `Lease.owned`, `buyLand`), DüV-Grenze (`Lease.orgN`),
+  Biogas-Ausbau (`biogasUpgrade`, `heatAt`/`flexAt`, Silo festfahren `compactSilo`, Task `compact`).
 
 ## CI (GitHub Actions)
 

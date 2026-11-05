@@ -108,3 +108,35 @@ describe('Markt und Konkurrenz', () => {
     expect(b.business.competitors.map((c) => c.won)).toEqual(a.business.competitors.map((c) => c.won));
   });
 });
+
+describe('Rahmenverträge (Vorschlag 7)', () => {
+  it('Stammkunde bietet Vertrag an; danach werden Anfragen automatisch Aufträge zum Vertragspreis', () => {
+    const s = world(5);
+    const b = s.business;
+    const farm = s.farms!.farms.find((f) => f.fields.length >= 2)!;
+    farm.known = true; farm.satisfaction = 90; farm.orderCount = 5;
+    // erledigte Aufträge als Grundlage für die Dienste
+    b.orders.push({ id: 9000, requestId: 0, farmId: farm.id, service: 'grubbern', fields: [farm.fields[0]], doneFields: [farm.fields[0]], areaHa: 5, priceHa: 55, earliest: 0, latest: 1, status: 'fertig', dieselL: 0, dieselCost: 0, tractorHours: 0 });
+    const biz = b as unknown as { framesDaily(t: number): void; maybeRequest(f: number, t: number, c: number, ch: string): unknown };
+    for (let k = 0; k < 2000 && !b.frameOffers.length; k++) biz.framesDaily(s.time);
+    expect(b.frameOffers.length).toBe(1);
+    const offer = b.frameOffers[0];
+    expect(offer.services).toEqual(['grubbern']);
+    expect(s.command({ kind: 'frameAnswer', offerId: offer.id, accept: true })).toMatch(/abgeschlossen/);
+    // Anfrage im Frühjahr wird sofort Auftrag
+    const before = b.orders.length;
+    for (let k = 0; k < 400 && b.orders.length === before; k++) {
+      for (const r of b.requests) if (r.status === 'offen') r.status = 'abgelehnt'; // andere Dienste (ohne Vertrag)
+      biz.maybeRequest(farm.id, s.time, 1, 'anruf');
+    }
+    const o = b.orders.at(-1)!;
+    expect(b.orders.length).toBe(before + 1);
+    expect(o.farmId).toBe(farm.id);
+    expect(o.service).toBe('grubbern');
+    expect(o.priceHa).toBeLessThan(55 * 1.0);
+    // Kunde wechselt mit Vertrag nicht zur Konkurrenz
+    farm.satisfaction = 5;
+    (b as unknown as { satisfy(f: number, d: number, t: number): void }).satisfy(farm.id, -5, s.time);
+    expect(farm.rivalUntil).toBe(0);
+  });
+});

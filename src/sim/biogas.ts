@@ -98,5 +98,18 @@ export function farmSlurryPerDay(areaHa: number): number {
   return Math.round(((areaHa * 0.5 * 15) / 365) * 10) / 10;
 }
 
+/** Ausbau (Vorschlag 9): Nahwärmenetz, Flexibilisierung (zweites BHKW, Gasspeicher) */
+export const HEAT_COST = 180_000;
+/** Wärme: 0,9 kWh thermisch je kWh Strom, 40 % davon verkauft, 4,5 ct/kWh (Annahme) */
+export const HEAT_SHARE = 0.9 * 0.4;
+export const HEAT_CT = 4.5;
+/** Flex: 600 € je kW, Flexzuschlag 65 €/kW und Jahr (EEG), bessere Vermarktung +0,8 ct/kWh */
+export const FLEX_COST_KW = 600;
+export const FLEX_EUR_KW_YEAR = 65;
+export const FLEX_CT = 0.8;
+/** Silo festfahren: ohne eigenen Radlader nach 2 Tagen Fremdwalze (100 t/h, 110 €/h) */
+export const SILO_HIRED_TPH = 100;
+export const SILO_HIRED_EUR_H = 110;
+
 /** Gärrest beim Kunden ausbringen (€/m³): Gärrest gratis, Kunde zahlt nur die Ausbringung (Annahme) */
 export const GAER_SERVICE_EUR_M3 = 3;

@@ -224,6 +224,10 @@ type PlayerTask =
       phase: 'toLoad' | 'load' | 'toUnload' | 'unload' | 'break' | 'back' | 'night';
     }
   | {
+      /** Radlader fährt das Silo der Biogasanlage fest */
+      kind: 'compact'; driverId: number; phase: 'to' | 'work' | 'back'; node: number; minutes: number;
+    }
+  | {
       /** Überführung zu einem anderen Standort (ggf. mit angehängtem Gerät) */
       kind: 'transfer'; driverId: number; siteId: number; implementId?: number;
     }
@@ -598,6 +602,7 @@ export class Simulation {
       if (v.task.kind === 'haul') return `${who} fährt Abfahrer`;
       if (v.task.kind === 'transfer') return `${who} überführt eine Maschine`;
       if (v.task.kind === 'truck') return `${who} fährt Lkw`;
+      if (v.task.kind === 'compact') return `${who} fährt das Silo fest`;
       if (v.task.kind === 'silo') return `${who} walzt am Silo`;
       return v.task.kind === 'visit' ? `${who} ist auf Besuch bei ${this.business.farmName(v.task.farmId)}` : `${who} fährt einen Auftrag`;
     }
@@ -869,6 +874,10 @@ export class Simulation {
         const end = this.time + 30;
         if (t.kind === 'transfer') {
           bars.push({ key: `r${v.id}`, driverId: t.driverId, kind: 'visit', label: 'Überführung', start: this.time, end: this.time + 60, warnings: [] });
+          continue;
+        }
+        if (t.kind === 'compact') {
+          bars.push({ key: `r${v.id}`, driverId: t.driverId, kind: 'visit', label: 'Silo festfahren', start: this.time, end: this.time + t.minutes, warnings: [] });
           continue;
         }
         if (t.kind === 'truck') {
@@ -1449,6 +1458,7 @@ export class Simulation {
             unload: 'lädt ab (Waage, Probe)', break: 'Lenkzeitpause', back: 'fährt zurück zum Hof', night: 'Feierabend, morgen weiter',
           } as Record<string, string>)[t.phase] + (o ? ` · ${Math.round(o.doneT ?? 0)} von ${Math.round(o.areaHa * (o.tPerHa ?? 0))} t` : '');
         }
+        if (t?.kind === 'compact') status = t.phase === 'work' ? 'fährt das Silo fest' : t.phase === 'to' ? 'fährt zur Biogasanlage' : 'fährt zurück';
         if (t?.kind === 'transfer') status = `wird überführt nach ${(this.company.sites ?? []).find((x) => x.id === t.siteId)?.name ?? ''}`;
         if (t?.kind === 'silo') status = t.phase === 'work' ? 'verteilt und walzt am Silo' : t.phase === 'to' ? 'fährt zum Silo' : 'fährt zurück zum Hof';
         if (t?.kind === 'feeder') {
@@ -1559,6 +1569,11 @@ export class Simulation {
         return b.askLand(cmd.farmId, t);
       case 'setCrop':
         return b.setCrop(cmd.leaseId, cmd.crop, t);
+      case 'buyLand': return b.buyLand(cmd.offerId, t);
+      case 'frameAnswer': return b.frameAnswer(cmd.offerId, cmd.accept, t);
+      case 'sellCrop': return b.sellCrop(cmd.crop, cmd.t, t);
+      case 'forward': return b.forward(cmd.crop, cmd.t, cmd.months, t);
+      case 'storeHarvest': b.storeHarvest = cmd.on; b.version++; return cmd.on ? 'Korn wird eingelagert' : 'Korn wird zur Ernte verkauft';
       case 'buildBiogas': return b.buildBiogas(cmd.siteId, cmd.kw, cmd.bidCt, t);
       case 'biogasBid': return b.biogasBid(cmd.ct);
       case 'buySubstrate': return b.buySubstrate(cmd.substrate, cmd.t, t);
@@ -1567,6 +1582,24 @@ export class Simulation {
       case 'fetchSlurry': return b.fetchSlurry(cmd.farmId, t);
       case 'spreadGaerrest': return b.spreadGaerrest(cmd.leaseId, t);
       case 'sellGaerrest': return b.sellGaerrest(cmd.m3, t);
+      case 'biogasUpgrade': return b.biogasUpgrade(cmd.upgrade, t);
+      case 'compactSilo': {
+        const p = b.biogas;
+        if (!p || !(p.siloBacklogT ?? 0)) return 'Nichts festzufahren';
+        const m = this.company.machines.find((x) => x.id === cmd.machineId && x.type === 'radlader');
+        const unit = m ? this.vehicles.find((v) => v.owner === 'player' && v.machineId === m.id) : undefined;
+        const d = this.company.drivers.find((x) => x.id === cmd.driverId);
+        if (!m || !unit || unit.task) return 'Radlader nicht frei';
+        if (!d || (d.skills.radlader ?? 0) < 1) return 'Fahrer braucht Radlader-Erfahrung';
+        if (this.driverBusy(d.id) || this.driverBlocked(d.id)) return `${this.driverName(d.id)} ist nicht frei`;
+        const node = (this.company.sites ?? []).find((x) => x.id === p.siteId)?.node ?? this.homeNode;
+        // Walzleistung ≈ Betriebsgewicht × 4 t/h
+        const minutes = Math.ceil(((p.siloBacklogT ?? 0) / ((m.weightT ?? 12) * 4)) * 60);
+        unit.task = { kind: 'compact', driverId: d.id, phase: 'to', node, minutes };
+        this.driveTo(unit, node);
+        b.version++;
+        return `Radlader fährt das Silo fest (etwa ${Math.round(minutes / 60)} h)`;
+      }
       case 'buySite': {
         const o = SITE_OFFERS.find((x) => x.key === cmd.offerKey);
         if (!o) return 'Angebot unbekannt';
@@ -2076,6 +2109,12 @@ export class Simulation {
       b.version++;
       return;
     }
+    if (t.kind === 'compact') {
+      if (t.phase === 'to') { t.phase = 'work'; v.state = VehicleState.Waiting; v.waitMin = t.minutes; }
+      else { v.task = undefined; v.state = VehicleState.Waiting; }
+      b.version++;
+      return;
+    }
     if (t.kind === 'truck') {
       // Lenkzeit: Fahrminuten seit der letzten Pause
       const r = v.route;
@@ -2204,6 +2243,12 @@ export class Simulation {
       return;
     }
     if (t.kind === 'truck') { this.truckWaitDone(v, t); return; }
+    if (t.kind === 'compact' && t.phase === 'work') {
+      this.business.compactDone(this.time, this.driverName(t.driverId));
+      t.phase = 'back';
+      this.driveTo(v, this.homeOf(v));
+      return;
+    }
     if (t.kind === 'visit' && t.phase === 'at') {
       this.business.onVisit(t.farmId, this.time);
       t.phase = 'back';
