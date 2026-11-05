@@ -6,9 +6,33 @@
  * Preise und Wahrscheinlichkeiten sind Annahmen (siehe docs/plan.md), beim Testen nachjustierbar.
  */
 import { Rng } from './rng';
-import { Crop, type FarmSet } from './farms';
+import { Crop, SURNAMES, type FarmSet } from './farms';
 import type { FieldSet } from './fields';
-import { gameDate, START_OFFERS, type Company, type MarketOffer } from './economy';
+import {
+  EMPLOYER_SV, MIN_WAGE, MONTH_HOURS, SKILLS, XP_MINUTES_PER_LEVEL, baseSkills, gameDate, START_OFFERS,
+  type Company, type Employee, type MarketOffer, type Skill,
+} from './economy';
+
+const FIRST_NAMES = [
+  'Jan', 'Lars', 'Timo', 'Sven', 'Hauke', 'Malte', 'Jonas', 'Niklas', 'Lukas', 'Finn', 'Ole', 'Tobias',
+  'Kevin', 'Dennis', 'Marco', 'Henrik', 'Jannik', 'Tim', 'Bernd', 'Uwe', 'Dirk', 'Heiko', 'Anna', 'Lena',
+  'Kim', 'Svenja', 'Jana', 'Maren', 'Wiebke', 'Hanna', 'Piotr', 'Tomasz', 'Andrzej', 'Mihai',
+];
+
+/** Bewerbung (PA-01, PA-13): Gehaltsvorstellung nach Skills und Erfahrung */
+export interface Applicant {
+  id: number;
+  person: Omit<Employee, 'id' | 'hiredAt'>;
+  /** Bewerbung zieht sich nach diesem Zeitpunkt zurück */
+  until: number;
+  note: string;
+}
+
+/** Ecklohn Lohnunternehmen (Annahme: Tarif BLU/IG BAU 2022 15,40 €, hochgerechnet auf 2027) */
+export const ECK_WAGE = 17;
+/** Neue Bewerbungen: Wahrscheinlichkeit je Tag, höchstens so viele gleichzeitig */
+export const APPLICANT_CHANCE = 0.25;
+export const MAX_APPLICANTS = 5;
 
 /** Startpreis Grubbern inkl. Schlepper, Fahrer, Diesel (Annahme, €/ha netto) */
 export const BASE_PRICE_GRUBBERN = 55;
@@ -113,7 +137,7 @@ export interface Invoice {
   status: InvoiceStatus;
 }
 
-export type LedgerCategory = 'Rechnung' | 'Diesel' | 'Maschinenkauf' | 'Sonstiges';
+export type LedgerCategory = 'Rechnung' | 'Diesel' | 'Maschinenkauf' | 'Personal' | 'Sonstiges';
 
 /** Buchung auf dem Konto (WF-08) */
 export interface LedgerEntry {
@@ -133,10 +157,12 @@ export interface GameEvent {
 export type Command =
   | { kind: 'visit'; farmId: number }
   | { kind: 'respond'; requestId: number; action: 'accept' | 'reject' | 'counter'; priceHa?: number }
-  | { kind: 'startJob'; orderId: number; tractorId: number; implementId: number }
+  | { kind: 'startJob'; orderId: number; tractorId: number; implementId: number; driverId?: number }
   | { kind: 'buy'; offerId: number }
   | { kind: 'recall'; vehicle: number }
   | { kind: 'remind'; invoiceId: number }
+  | { kind: 'hire'; applicantId: number; asKind: 'fest' | 'saison' }
+  | { kind: 'fire'; employeeId: number }
   | { kind: 'dequeue'; queueId: number }
   | { kind: 'queueMove'; queueId: number; dir: -1 | 1 };
 
@@ -144,6 +170,8 @@ export type Command =
 export type QueueCommand = Extract<Command, { kind: 'visit' } | { kind: 'startJob' }>;
 export interface QueueItem {
   id: number;
+  /** Fahrer, der die Aufgabe übernimmt (Besuche immer der Chef) */
+  driverId: number;
   cmd: QueueCommand;
   label: string;
 }
@@ -153,6 +181,9 @@ export class Business {
   readonly orders: Order[] = [];
   readonly invoices: Invoice[] = [];
   readonly ledger: LedgerEntry[] = [];
+  readonly applicants: Applicant[] = [];
+  /** aufgelaufene Lohnkosten des laufenden Monats (wird am Monatsersten gebucht) */
+  private payrollAccrued = 0;
   /** heute verbrauchter Diesel, wird täglich als eine Buchung zusammengefasst */
   private dieselTodayL = 0;
   private dieselTodayEur = 0;
@@ -187,6 +218,8 @@ export class Business {
       dieselTotalL: this.dieselTotalL,
       dieselTodayL: this.dieselTodayL,
       dieselTodayEur: this.dieselTodayEur,
+      applicants: this.applicants,
+      payrollAccrued: this.payrollAccrued,
     };
   }
 
@@ -202,6 +235,8 @@ export class Business {
     this.dieselTotalL = s.dieselTotalL;
     this.dieselTodayL = s.dieselTodayL;
     this.dieselTodayEur = s.dieselTodayEur;
+    put(this.applicants, s.applicants ?? []);
+    this.payrollAccrued = s.payrollAccrued ?? 0;
     this.events = [];
     this.version++;
   }
@@ -327,8 +362,10 @@ export class Business {
   }
 
   /** Täglich um 06:00: Anfragen per Anruf/Nachricht von bekannten Betrieben, Fristen prüfen */
-  daily(time: number) {
+  daily(time: number, workedMinutes: Record<number, number> = {}) {
     this.bookDiesel(time);
+    this.payroll(time, workedMinutes);
+    this.updateApplicants(time);
     this.checkInvoices(time);
     for (const r of this.requests) {
       if (r.status === 'offen' && time >= r.replyBy) {
@@ -414,12 +451,12 @@ export class Business {
     return 'gekauft';
   }
 
-  orderStarted(o: Order, tractorId: number, implementId: number, time: number) {
+  orderStarted(o: Order, tractorId: number, implementId: number, time: number, driver = 'Chef') {
     o.status = 'läuft';
     o.tractorId = tractorId;
     o.implementId = implementId;
     o.startedAt = time;
-    this.emit(time, 'auftrag', `Auftrag ${this.farmName(o.farmId)} gestartet.`, o.farmId);
+    this.emit(time, 'auftrag', `Auftrag ${this.farmName(o.farmId)} gestartet (Fahrer: ${driver}).`, o.farmId);
   }
 
   fieldDone(o: Order, field: number, time: number) {
@@ -543,6 +580,103 @@ export class Business {
   orderInterrupted(o: Order, time: number) {
     o.status = 'offen';
     this.emit(time, 'warnung', `Auftrag ${this.farmName(o.farmId)} unterbrochen (${o.doneFields.length}/${o.fields.length} Felder fertig).`, o.farmId);
+  }
+
+  // ---------- Personal ----------
+
+  /**
+   * Lohnkosten des Vortags aufsummieren (feste: Monatsgehalt ÷ 30 je Kalendertag, Saisonkräfte:
+   * geleistete Stunden), am Monatsersten als eine Buchung „Löhne“ abziehen. Je Mitarbeiter
+   * Erfahrung aus der Arbeit gutschreiben, macht der Rechenkern über addExperience.
+   */
+  private payroll(time: number, worked: Record<number, number>) {
+    let day = 0;
+    for (const e of this.company.drivers) {
+      if (e.kind === 'fest') day += (e.wage * MONTH_HOURS * (1 + EMPLOYER_SV)) / 30;
+      else if (e.kind === 'saison') day += ((worked[e.id] ?? 0) / 60) * e.wage * (1 + EMPLOYER_SV);
+    }
+    this.payrollAccrued += day;
+    if (gameDate(time).day === 1 && this.payrollAccrued > 0) {
+      const amount = Math.round(this.payrollAccrued * 100) / 100;
+      this.company.cash = Math.round((this.company.cash - amount) * 100) / 100;
+      this.ledger.push({ time, text: 'Löhne inkl. Arbeitgeberanteil', amount: -amount, category: 'Personal' });
+      this.emit(time, 'info', `Löhne für den Vormonat gezahlt: ${fmtEur(amount)}.`);
+      this.payrollAccrued = 0;
+    }
+  }
+
+  /** Erfahrung sammeln (PA-08); liefert die neue Stufe, falls aufgestiegen */
+  addExperience(driverId: number, skill: Skill, minutes: number, time: number): void {
+    const e = this.company.drivers.find((d) => d.id === driverId);
+    if (!e || minutes <= 0) return;
+    const lvl = e.skills[skill] ?? 1;
+    if (lvl >= 5) return;
+    const xp = (e.xp[skill] ?? 0) + minutes;
+    const need = lvl * XP_MINUTES_PER_LEVEL;
+    if (xp >= need) {
+      e.skills[skill] = lvl + 1;
+      e.xp[skill] = xp - need;
+      const name = SKILLS.find((k) => k.key === skill)?.name ?? skill;
+      this.emit(time, 'info', `${e.name} hat Erfahrung gesammelt: ${name} jetzt Stufe ${lvl + 1}.`);
+    } else e.xp[skill] = xp;
+    this.version++;
+  }
+
+  /** Bewerbungen kommen und gehen (PA-01) */
+  private updateApplicants(time: number) {
+    for (let i = this.applicants.length - 1; i >= 0; i--) if (this.applicants[i].until <= time) this.applicants.splice(i, 1);
+    // erste Bewerbungen schon am ersten Tag, damit man früh jemanden findet
+    const n = this.applicants.length;
+    if (n < MAX_APPLICANTS && (this.rng.next() < APPLICANT_CHANCE || (n === 0 && time <= 1440))) this.applicants.push(this.makeApplicant(time));
+  }
+
+  private makeApplicant(time: number): Applicant {
+    const r = this.rng;
+    const age = 18 + r.int(45);
+    const skills = baseSkills(1);
+    // Erfahrung wächst mit dem Alter, Schwerpunkte zufällig
+    const exp = Math.min(4, Math.floor((age - 18) / 8) + r.int(2));
+    skills.boden = Math.min(5, 1 + r.int(exp + 1));
+    for (const k of SKILLS) if (k.key !== 'boden' && r.next() < 0.35) skills[k.key] = Math.min(5, 1 + r.int(exp + 1));
+    const licenseC = r.next() < 0.3;
+    let top = 0, sum = 0;
+    for (const k of SKILLS) { top = Math.max(top, skills[k.key]); sum += skills[k.key] - 1; }
+    // Gehaltsvorstellung: Mindestlohn + Stufe der besten Tätigkeit + Breite, LKW-Schein extra
+    const wantFest = Math.round((ECK_WAGE - 2 + (top - 1) * 1.1 + sum * 0.15 + (licenseC ? 0.8 : 0) + (r.next() - 0.5)) * 10) / 10;
+    const wage = Math.max(MIN_WAGE, wantFest);
+    const first = FIRST_NAMES[r.int(FIRST_NAMES.length)];
+    const last = SURNAMES[r.int(SURNAMES.length)];
+    const notes = ['sucht feste Stelle', 'auch als Saisonkraft', 'Landwirtssohn, kennt Schlepper', 'kommt aus der Region', 'bisher bei einem anderen Lohnunternehmen'];
+    return {
+      id: this.nextId++,
+      person: { name: `${first} ${last}`, isPlayer: false, kind: 'fest', wage, skills, xp: {}, licenseC, age },
+      until: time + (7 + r.int(14)) * 1440,
+      note: notes[r.int(notes.length)],
+    };
+  }
+
+  hire(applicantId: number, asKind: 'fest' | 'saison', time: number): string {
+    const i = this.applicants.findIndex((a) => a.id === applicantId);
+    if (i < 0) return 'Bewerbung nicht mehr aktuell';
+    const a = this.applicants[i];
+    const id = this.company.drivers.reduce((m, d) => Math.max(m, d.id), 0) + 1;
+    // Saisonkräfte verlangen etwas mehr je Stunde, weil sie nur für geleistete Stunden bezahlt werden
+    const wage = asKind === 'saison' ? Math.round(a.person.wage * 1.08 * 10) / 10 : a.person.wage;
+    this.company.drivers.push({ ...structuredClone(a.person), id, kind: asKind, wage, hiredAt: time });
+    this.applicants.splice(i, 1);
+    this.emit(time, 'info', `${a.person.name} eingestellt (${asKind === 'fest' ? 'fest' : 'Saisonkraft'}, ${fmtEur(wage)}/h).`);
+    return 'eingestellt';
+  }
+
+  /** Entlassen; die Engine prüft vorher, dass der Mitarbeiter nicht unterwegs ist */
+  fire(employeeId: number, time: number): string {
+    const i = this.company.drivers.findIndex((d) => d.id === employeeId);
+    if (i < 0) return 'Mitarbeiter unbekannt';
+    const e = this.company.drivers[i];
+    if (e.isPlayer) return 'Den Chef kann man nicht entlassen';
+    this.company.drivers.splice(i, 1);
+    this.emit(time, 'info', `${e.name} hat den Betrieb verlassen.`);
+    return 'entlassen';
   }
 
   warn(time: number, text: string) {

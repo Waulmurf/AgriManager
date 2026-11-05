@@ -63,7 +63,7 @@ const SHARES_NORTH = [0, 0.38, 0.12, 0.14, 0.18, 0.1, 0.08]; // Uelzen/Lüneburg
 const SHARES_ALTMARK = [0, 0.35, 0.04, 0.04, 0.19, 0.17, 0.21]; // Steckbrief Altmarkkreis Salzwedel
 const LIVESTOCK_SHIFT = [0, -0.05, -0.05, -0.08, 0.1, -0.02, 0.1]; // Viehbetriebe: mehr Mais und Futter
 
-const SURNAMES = [
+export const SURNAMES = [
   'Meyer', 'Müller', 'Schulz', 'Schröder', 'Wilkens', 'Brandt', 'Lüdemann', 'Peters', 'Harms', 'Rieckmann',
   'Heuer', 'Bartels', 'Hoppe', 'Niebuhr', 'Gerdes', 'Schütte', 'Burmester', 'Dittmer', 'Evers', 'Garbers',
   'Hennings', 'Kröger', 'Lemke', 'Martens', 'Ohlhoff', 'Prigge', 'Rademacher', 'Stöver', 'Thies', 'Voß',

@@ -4,12 +4,13 @@ import { formatGameTime } from './game/clock';
 import { runSelftest } from './game/selftest';
 import { forwardLogsToHost, platformName, selftestConfig } from './platform';
 import type { Speed } from './sim/protocol';
-import { BusinessTab, FinanceTab, MarketTab, NewsTab, OrdersTab, SavePanel, VehicleMenu } from './ui/Panels';
+import { BusinessTab, FinanceTab, MarketTab, NewsTab, OrdersTab, SavePanel, StaffTab, VehicleMenu } from './ui/Panels';
 import { AUTOSAVE } from './game/savegame';
 
 const TABS = [
   { id: 'betrieb', label: 'Betrieb' },
   { id: 'auftraege', label: 'Aufträge' },
+  { id: 'personal', label: 'Personal' },
   { id: 'finanzen', label: 'Finanzen' },
   { id: 'markt', label: 'Markt' },
   { id: 'nachrichten', label: 'Meldungen' },
@@ -149,6 +150,7 @@ export function App() {
             <>
               <section hidden={tab !== 'betrieb'}><BusinessTab status={status} game={game} /></section>
               <section hidden={tab !== 'auftraege'}><OrdersTab status={status} game={game} /></section>
+              <section hidden={tab !== 'personal'}><StaffTab status={status} game={game} /></section>
               <section hidden={tab !== 'finanzen'}><FinanceTab status={status} game={game} /></section>
               <section hidden={tab !== 'markt'}><MarketTab status={status} game={game} /></section>
               <section hidden={tab !== 'nachrichten'}><NewsTab status={status} game={game} /></section>

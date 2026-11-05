@@ -1,0 +1,156 @@
+import { describe, expect, it } from 'vitest';
+import { parseRoadGraph, RoadClass } from '../../src/sim/roadgraph';
+import { parseFields } from '../../src/sim/fields';
+import { Simulation } from '../../src/sim/engine';
+import { MIN_WAGE, skillSpeed } from '../../src/sim/economy';
+import { buildRoadGraphBuffer } from './helpers/grid';
+import { buildFieldsBuffer } from './helpers/fields';
+
+function world(seed = 3) {
+  const n = 9;
+  const nodes: [number, number][] = [];
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) nodes.push([i * 1000 - 4000, j * 1000 - 4000]);
+  const edges: { u: number; v: number; cls: number }[] = [];
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+    const a = j * n + i;
+    if (i + 1 < n) edges.push({ u: a, v: a + 1, cls: j % 2 === 0 ? RoadClass.Residential : RoadClass.Track });
+    if (j + 1 < n) edges.push({ u: a, v: a + n, cls: RoadClass.Tertiary });
+  }
+  const polys: [number, number][][] = [];
+  const access: number[] = [];
+  for (let k = 0; k < 200; k++) {
+    const x = -3900 + (k % 20) * 390, y = -3900 + Math.floor(k / 20) * 780;
+    polys.push([[x, y], [x + 350, y], [x + 350, y + 300], [x, y + 300]]);
+    access.push(Math.round((y + 4000) / 1000) * n + Math.round((x + 4000) / 1000));
+  }
+  return new Simulation(parseRoadGraph(buildRoadGraphBuffer(nodes, edges)), { seed, vehicleCount: 0, fields: parseFields(buildFieldsBuffer(polys, access)) });
+}
+
+const runUntil = (s: Simulation, cond: () => boolean, max = 5000) => {
+  for (let i = 0; i < max && !cond(); i++) s.step();
+};
+
+/** Zwei angenommene Aufträge, Grubber gekauft */
+function twoOrders(seed = 5) {
+  const s = world(seed);
+  for (const farm of s.farms!.farms) {
+    if (s.business.orders.length >= 2) break;
+    s.command({ kind: 'visit', farmId: farm.id });
+    runUntil(s, () => !s.chefBusy);
+    const req = s.business.requests.find((r) => r.status === 'offen');
+    if (req) s.command({ kind: 'respond', requestId: req.id, action: 'accept' });
+  }
+  return s;
+}
+
+describe('Personal', () => {
+  it('Bewerbungen kommen, Einstellen und Entlassen', () => {
+    const s = world(5);
+    runUntil(s, () => s.business.applicants.length >= 2, 30 * 1440);
+    expect(s.business.applicants.length).toBeGreaterThanOrEqual(2);
+    const a = s.business.applicants[0];
+    expect(a.person.wage).toBeGreaterThanOrEqual(MIN_WAGE);
+    expect(a.person.skills.boden).toBeGreaterThanOrEqual(1);
+    expect(s.command({ kind: 'hire', applicantId: a.id, asKind: 'fest' })).toBe('eingestellt');
+    expect(s.company.drivers.length).toBe(2);
+    expect(s.business.applicants.some((x) => x.id === a.id)).toBe(false);
+    const id = s.company.drivers[1].id;
+    expect(s.command({ kind: 'fire', employeeId: 1 })).toMatch(/Chef/);
+    expect(s.command({ kind: 'fire', employeeId: id })).toBe('entlassen');
+    expect(s.company.drivers.length).toBe(1);
+  });
+
+  it('bucht Löhne am Monatsersten (fest: Monatsgehalt, Saison: geleistete Stunden)', () => {
+    const s = world(5);
+    runUntil(s, () => s.business.applicants.length >= 2, 30 * 1440);
+    const [a, b] = s.business.applicants;
+    s.command({ kind: 'hire', applicantId: a.id, asKind: 'fest' });
+    s.command({ kind: 'hire', applicantId: b.id, asKind: 'saison' });
+    const fest = s.company.drivers.find((d) => d.kind === 'fest')!;
+    const hiredAt = s.time;
+    // bis zum nächsten Monatsersten (1. April = Tag 31)
+    runUntil(s, () => s.business.ledger.some((l) => l.category === 'Personal'), 62 * 1440);
+    const entry = s.business.ledger.find((l) => l.category === 'Personal')!;
+    expect(entry).toBeDefined();
+    const days = Math.round((entry.time - hiredAt) / 1440);
+    const expected = ((fest.wage * 173 * 1.21) / 30) * days; // Saisonkraft hat nicht gearbeitet
+    expect(-entry.amount).toBeCloseTo(expected, -1);
+  });
+
+  it('zweiter Fahrer grubbert mit zweitem Schlepper, während der Chef Kunden besucht', () => {
+    const s = twoOrders(5);
+    expect(s.business.orders.length).toBe(2);
+    runUntil(s, () => s.business.applicants.length > 0, 20 * 1440);
+    s.command({ kind: 'hire', applicantId: s.business.applicants[0].id, asKind: 'fest' });
+    const driver = s.company.drivers[1];
+    expect(s.command({ kind: 'buy', offerId: 1 })).toBe('gekauft');
+    expect(s.command({ kind: 'buy', offerId: 2 })).toBe('gekauft');
+    expect(s.command({ kind: 'buy', offerId: 4 })).toBe('gekauft');
+    const tractors = s.company.machines.filter((m) => m.type === 'schlepper');
+    expect(tractors.length).toBe(2);
+    expect(s.playerUnits().length).toBe(3); // 2 Schlepper + Firmenwagen
+    const [g1, g2] = s.company.machines.filter((m) => m.type === 'grubber');
+    const [o1, o2] = s.business.orders;
+    runUntil(s, () => s.time % 1440 > 10 && s.time % 1440 < 60, 1440);
+    expect(s.command({ kind: 'startJob', orderId: o1.id, tractorId: tractors[0].id, implementId: g1.id, driverId: 1 })).toMatch(/gestartet/);
+    expect(s.command({ kind: 'startJob', orderId: o2.id, tractorId: tractors[1].id, implementId: g2.id, driverId: driver.id })).toMatch(/gestartet/);
+    expect(s.driverBusy(1)).toMatch(/Chef fährt/);
+    expect(s.driverBusy(driver.id)).toMatch(new RegExp(driver.name));
+    s.run(60);
+    expect(s.driverMinutes[driver.id]).toBe(60);
+    runUntil(s, () => o1.status === 'fertig' && o2.status === 'fertig', 6 * 1440);
+    expect(o1.status).toBe('fertig');
+    expect(o2.status).toBe('fertig');
+  });
+
+  it('Auftrag wartet in der Warteschlange, solange der Schlepper bei einem anderen Fahrer ist', () => {
+    const s = twoOrders(5);
+    runUntil(s, () => s.business.applicants.length > 0, 20 * 1440);
+    s.command({ kind: 'hire', applicantId: s.business.applicants[0].id, asKind: 'fest' });
+    const driver = s.company.drivers[1];
+    s.command({ kind: 'buy', offerId: 1 });
+    s.command({ kind: 'buy', offerId: 2 });
+    const [g1, g2] = s.company.machines.filter((m) => m.type === 'grubber');
+    const [o1, o2] = s.business.orders;
+    runUntil(s, () => s.time % 1440 > 10 && s.time % 1440 < 60, 1440);
+    s.command({ kind: 'startJob', orderId: o1.id, tractorId: 1, implementId: g1.id, driverId: 1 });
+    expect(s.command({ kind: 'startJob', orderId: o2.id, tractorId: 1, implementId: g2.id, driverId: driver.id })).toMatch(/Schlepper ist im Einsatz/);
+    expect(s.queue.length).toBe(1);
+    runUntil(s, () => o1.status === 'fertig', 6 * 1440);
+    runUntil(s, () => o2.status !== 'offen', 2 * 1440);
+    expect(o2.status).not.toBe('offen');
+    expect(s.driverBusy(driver.id)).toMatch(new RegExp(driver.name));
+  });
+
+  it('Skillstufe wirkt aufs Arbeitstempo, Erfahrung steigt', () => {
+    expect(skillSpeed(1)).toBeCloseTo(0.9);
+    expect(skillSpeed(3)).toBeCloseTo(1.0);
+    expect(skillSpeed(5)).toBeCloseTo(1.1);
+    const s = world(5);
+    const chef = s.company.drivers[0];
+    expect(chef.skills.boden).toBe(3);
+    s.business.addExperience(1, 'boden', 300 * 60, s.time);
+    expect(chef.skills.boden).toBe(4);
+    expect(chef.xp.boden).toBe(0);
+  });
+
+  it('Spielstand mit gekauftem Schlepper und eingestelltem Fahrer läuft bitgleich weiter', () => {
+    const a = twoOrders(6);
+    runUntil(a, () => a.business.applicants.length > 0, 20 * 1440);
+    a.command({ kind: 'hire', applicantId: a.business.applicants[0].id, asKind: 'saison' });
+    a.command({ kind: 'buy', offerId: 4 });
+    a.command({ kind: 'buy', offerId: 1 });
+    const t2 = a.company.machines.find((m) => m.type === 'schlepper' && m.id !== 1)!;
+    const g = a.company.machines.find((m) => m.type === 'grubber')!;
+    if (a.business.orders[0]) a.command({ kind: 'startJob', orderId: a.business.orders[0].id, tractorId: t2.id, implementId: g.id, driverId: a.company.drivers[1].id });
+    a.run(120);
+    const b = twoOrders(6);
+    b.restore(JSON.parse(JSON.stringify(a.serialize())));
+    expect(b.playerUnits().length).toBe(a.playerUnits().length);
+    expect(b.hash()).toBe(a.hash());
+    a.run(2000);
+    b.run(2000);
+    expect(b.hash()).toBe(a.hash());
+    expect(b.company.cash).toBe(a.company.cash);
+  });
+});

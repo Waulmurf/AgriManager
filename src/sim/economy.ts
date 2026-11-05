@@ -80,7 +80,90 @@ export const START_OFFERS: MarketOffer[] = [
     seller: 'Landtechnik Uelzen (Händler)',
     note: 'Kurzscheibenegge 3 m – für Grubber-Aufträge nicht geeignet',
   },
+  {
+    // Wert nach Startformel: 185.000 € · 0,9 · 0,94^11 · (1 − 0,025 · 6,5) ≈ 70.600 €
+    id: 4,
+    machine: { type: 'schlepper', brand: 'Fendt', model: '516 Vario', year: 2016, hours: 6500, condition: 72, newPrice: 185_000, power: 165 },
+    price: 69_500,
+    seller: 'Landtechnik Uelzen (Händler)',
+    note: 'Schlepper 165 PS, Gewährleistung 6 Monate',
+  },
+  {
+    // Wert nach Startformel: 140.000 € · 0,9 · 0,94^12 · (1 − 0,025 · 8) ≈ 48.000 €
+    id: 5,
+    machine: { type: 'schlepper', brand: 'John Deere', model: '6130R', year: 2015, hours: 8000, condition: 64, newPrice: 140_000, power: 130 },
+    price: 44_000,
+    seller: 'Privat, Suderburg',
+    note: 'Schlepper 130 PS, ohne Gewährleistung – reicht für den 3-m-Grubber',
+  },
 ];
+
+/** Tätigkeiten mit eigenem Skill (PA-02) */
+export type Skill = 'boden' | 'saat' | 'guelle' | 'haecksler' | 'drescher' | 'roder' | 'kartoffel' | 'transport' | 'werkstatt';
+export const SKILLS: { key: Skill; name: string }[] = [
+  { key: 'boden', name: 'Schlepper/Bodenbearbeitung' },
+  { key: 'saat', name: 'Saat' },
+  { key: 'guelle', name: 'Gülle' },
+  { key: 'haecksler', name: 'Häcksler' },
+  { key: 'drescher', name: 'Mähdrescher' },
+  { key: 'roder', name: 'Rübenroder' },
+  { key: 'kartoffel', name: 'Kartoffeltechnik' },
+  { key: 'transport', name: 'Transport' },
+  { key: 'werkstatt', name: 'Werkstatt' },
+];
+
+/** Gesetzlicher Mindestlohn 2027 (PA-03), €/h brutto */
+export const MIN_WAGE = 14.6;
+/** Arbeitgeberanteil Sozialversicherung (PA-15, Annahme ca. 21 %) */
+export const EMPLOYER_SV = 0.21;
+/** Monatsstunden bei 40-h-Woche (40 × 52 ÷ 12) */
+export const MONTH_HOURS = 173;
+/** Erfahrung für die nächste Stufe: Stufe n → n+1 braucht n × 100 Arbeitsstunden (PA-08) */
+export const XP_MINUTES_PER_LEVEL = 100 * 60;
+
+/** Mitarbeiter (PA-01, PA-02, PA-13). Der Chef ist Mitarbeiter Nr. 1 ohne Lohn (KK-13, KK-15). */
+export interface Employee {
+  id: number;
+  name: string;
+  isPlayer: boolean;
+  /** fest = Monatsgehalt, saison = Stundenlohn nur für geleistete Stunden */
+  kind: 'chef' | 'fest' | 'saison';
+  /** Stundenlohn brutto (€/h); Monatsgehalt = Lohn × 173 h */
+  wage: number;
+  /** Skillstufe 1–5 je Tätigkeit (PA-07) */
+  skills: Record<Skill, number>;
+  /** gesammelte Arbeitsminuten je Tätigkeit seit der letzten Stufe */
+  xp: Partial<Record<Skill, number>>;
+  /** Führerschein LKW (C/CE) – für spätere Lkw (PA-10) */
+  licenseC: boolean;
+  hiredAt: number;
+  /** Alter in Jahren (Anzeige) */
+  age: number;
+}
+
+export function baseSkills(level = 1): Record<Skill, number> {
+  const s = {} as Record<Skill, number>;
+  for (const k of SKILLS) s[k.key] = level;
+  return s;
+}
+
+/** Arbeitstempo nach Skillstufe (PA-07): Stufe 1 = 90 %, 3 = 100 %, 5 = 110 % */
+export function skillSpeed(level: number): number {
+  return 0.85 + 0.05 * level;
+}
+/** Dieselverbrauch nach Skillstufe: Stufe 1 = +6 %, 3 = ±0, 5 = −6 % */
+export function skillDiesel(level: number): number {
+  return 1.09 - 0.03 * level;
+}
+
+/** Arbeitgeberkosten je Arbeitsstunde inkl. Sozialversicherung */
+export function employerHourCost(e: Employee): number {
+  return Math.round(e.wage * (1 + EMPLOYER_SV) * 100) / 100;
+}
+/** Monatliche Arbeitgeberkosten eines festen Mitarbeiters */
+export function employerMonthCost(e: Employee): number {
+  return Math.round(e.wage * MONTH_HOURS * (1 + EMPLOYER_SV) * 100) / 100;
+}
 
 export interface Company {
   name: string;
@@ -91,8 +174,8 @@ export interface Company {
   homeNode: number;
   site: string;
   machines: Machine[];
-  /** Fahrer; zu Beginn nur der Chef selbst */
-  drivers: { id: number; name: string; isPlayer: boolean }[];
+  /** Mitarbeiter; zu Beginn nur der Chef selbst (Nr. 1) */
+  drivers: Employee[];
 }
 
 export function machineValue(m: Machine, year = START_YEAR): number {
@@ -116,8 +199,22 @@ export function startCompany(homeNode: number): Company {
       { id: 1, type: 'schlepper', brand: 'Fendt', model: '720 Vario', year: 2014, hours: 9000, condition: 68, newPrice: 225_000, power: 200 },
       { id: 2, type: 'firmenwagen', brand: '', model: 'Firmenwagen (Kombi)', year: 2018, hours: 2800, condition: 75, newPrice: 38_000 },
     ],
-    drivers: [{ id: 1, name: 'Chef (du)', isPlayer: true }],
+    drivers: [chefEmployee()],
   };
+}
+
+export function chefEmployee(): Employee {
+  return {
+    id: 1, name: 'Chef (du)', isPlayer: true, kind: 'chef', wage: 0,
+    skills: { ...baseSkills(1), boden: 3, saat: 2, guelle: 2, transport: 2 },
+    xp: {}, licenseC: false, hiredAt: 0, age: 34,
+  };
+}
+
+/** Mitarbeiterliste aus älteren Spielständen auf den aktuellen Aufbau bringen */
+export function normalizeDrivers(c: Company): void {
+  c.drivers = (c.drivers ?? []).map((d) => (d.isPlayer && !(d as Partial<Employee>).skills ? chefEmployee() : d));
+  if (!c.drivers.length) c.drivers.push(chefEmployee());
 }
 
 /** Spielkalender ohne Date-Objekt (deterministisch): Minute 0 = 1. März 2027, 06:00. */

@@ -182,3 +182,25 @@ test('Kern-Schleife: Besuch → Anfrage → Gerät kaufen → Auftrag starten', 
   await page.getByTestId('start-job').first().click();
   await expect(page.getByTestId('order').first()).toContainText('läuft');
 });
+
+test('Personal: Bewerber einstellen, zweiten Schlepper kaufen – erscheint auf der Karte', async ({ page }) => {
+  await page.goto('./?neu');
+  await waitForGame(page);
+  await page.getByTestId('speed-100').click();
+  await page.waitForFunction(() => ((window as any).__game.status.business?.applicants.length ?? 0) > 0, null, { timeout: 60_000 });
+  await page.getByTestId('speed-0').click();
+  await page.getByTestId('tab-personal').click();
+  await page.getByTestId('hire').first().click();
+  await expect(page.getByTestId('staff').locator('li')).toHaveCount(2);
+  const before = await page.evaluate(() => (window as any).__game.status.business.units.length);
+  await page.getByTestId('tab-markt').click();
+  await page.locator('li', { hasText: '516 Vario' }).getByTestId('buy').click();
+  await page.waitForFunction((n) => (window as any).__game.status.business.units.length === n + 1, before, { timeout: 10_000 });
+  // neues Fahrzeug hat eine Position auf der Karte
+  await page.getByTestId('speed-1').click();
+  await page.waitForFunction(() => {
+    const g = (window as any).__game;
+    const pos = g.vehiclePositions();
+    return pos.length >= g.status.business.units.length + 30 && pos.every((p: any) => Math.abs(p.lon) > 1);
+  }, null, { timeout: 15_000 });
+});

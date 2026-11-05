@@ -4,7 +4,7 @@
 import { useState } from 'react';
 import type { GameController, GameStatus } from '../game/controller';
 import type { JobEstimate } from '../sim/engine';
-import { machineValue, type Machine } from '../sim/economy';
+import { SKILLS, employerHourCost, employerMonthCost, machineValue, type Employee, type Machine } from '../sim/economy';
 import { SERVICE_NAMES, fmtDay, type Invoice, type Request, type Order } from '../sim/business';
 import { formatGameTime } from '../game/clock';
 
@@ -152,12 +152,15 @@ function OrderItem({ o, game, status }: { o: Order; game: GameController | null;
   const implementsOk = c.machines.filter((m) => m.type === 'grubber');
   const [tractor, setTractor] = useState(tractors[0]?.id ?? 0);
   const [impl, setImpl] = useState(0);
+  const [driver, setDriver] = useState(1);
   const fb = useFeedback();
   const farm = game?.farmById(o.farmId);
   const implId = impl || implementsOk[0]?.id || 0;
+  const drivers = c.drivers;
   const start = async () => {
-    fb.show(await game!.command({ kind: 'startJob', orderId: o.id, tractorId: tractor, implementId: implId }));
+    fb.show(await game!.command({ kind: 'startJob', orderId: o.id, tractorId: tractor, implementId: implId, driverId: driver }));
   };
+  const driverBusy = status.business?.driverStatus[driver] || status.business?.queue.some((q) => q.driverId === driver);
   const late = status.business && o.status !== 'fertig' && status.business.time > o.latest;
   const queued = !!status.business?.queue.some((q) => q.cmd.kind === 'startJob' && q.cmd.orderId === o.id);
   return (
@@ -189,8 +192,11 @@ function OrderItem({ o, game, status }: { o: Order; game: GameController | null;
           ) : (
             <small className="warn">Kein Grubber – im Markt kaufen</small>
           )}
+          <select value={driver} onChange={(e) => setDriver(Number(e.target.value))} aria-label="Fahrer" data-testid="driver">
+            {drivers.map((d) => <option key={d.id} value={d.id}>{d.isPlayer ? 'Chef (du)' : d.name} · Boden {d.skills.boden}</option>)}
+          </select>
           <button onClick={start} disabled={!implementsOk.length || queued} data-testid="start-job">
-            {queued ? 'Eingeplant' : status.business?.chefBusy || status.business?.queue.length ? 'Fahrer: Chef · Einplanen' : 'Fahrer: Chef · Starten'}
+            {queued ? 'Eingeplant' : driverBusy ? 'Einplanen' : 'Starten'}
           </button>
         </div>
       )}
@@ -199,29 +205,38 @@ function OrderItem({ o, game, status }: { o: Order; game: GameController | null;
   );
 }
 
-/** Warteschlange des Chefs: geplante Besuche und Aufträge, der Reihe nach */
+/** Warteschlangen je Fahrer: geplante Besuche und Aufträge, der Reihe nach */
 function QueueList({ status, game }: { status: GameStatus; game: GameController | null }) {
   const fb = useFeedback();
   const q = status.business?.queue ?? [];
+  const drivers = status.company?.drivers ?? [];
   const send = async (cmd: Parameters<GameController['command']>[0]) => fb.show(await game!.command(cmd));
   return (
     <>
-      <h3>Geplant für den Chef ({q.length})</h3>
+      <h3>Geplant ({q.length})</h3>
       {q.length ? (
-        <ol className="queue" data-testid="queue">
-          {q.map((item, i) => (
-            <li key={item.id}>
-              <span>{item.label}</span>
-              <span className="queue-actions">
-                <button onClick={() => send({ kind: 'queueMove', queueId: item.id, dir: -1 })} disabled={i === 0} title="früher">▲</button>
-                <button onClick={() => send({ kind: 'queueMove', queueId: item.id, dir: 1 })} disabled={i === q.length - 1} title="später">▼</button>
-                <button onClick={() => send({ kind: 'dequeue', queueId: item.id })} title="aus dem Plan nehmen" data-testid="dequeue">✕</button>
-              </span>
-            </li>
-          ))}
-        </ol>
+        drivers.filter((d) => q.some((x) => x.driverId === d.id)).map((d) => {
+          const mine = q.filter((x) => x.driverId === d.id);
+          return (
+            <div key={d.id}>
+              <small className="hint">{d.isPlayer ? 'Chef' : d.name}</small>
+              <ol className="queue" data-testid="queue">
+                {mine.map((item, i) => (
+                  <li key={item.id}>
+                    <span>{item.label}</span>
+                    <span className="queue-actions">
+                      <button onClick={() => send({ kind: 'queueMove', queueId: item.id, dir: -1 })} disabled={i === 0} title="früher">▲</button>
+                      <button onClick={() => send({ kind: 'queueMove', queueId: item.id, dir: 1 })} disabled={i === mine.length - 1} title="später">▼</button>
+                      <button onClick={() => send({ kind: 'dequeue', queueId: item.id })} title="aus dem Plan nehmen" data-testid="dequeue">✕</button>
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          );
+        })
       ) : (
-        <p className="hint">Nichts geplant. Ist der Chef unterwegs, werden Besuche und Aufträge hier eingereiht und danach der Reihe nach gestartet (zwischen 06:00 und 20:00).</p>
+        <p className="hint">Nichts geplant. Ist ein Fahrer unterwegs oder sein Schlepper im Einsatz, werden Aufträge hier eingereiht und danach der Reihe nach gestartet (zwischen 06:00 und 20:00). Besuche macht immer der Chef.</p>
       )}
       {fb.msg && <p className="feedback">{fb.msg}</p>}
     </>
@@ -249,13 +264,78 @@ export function OrdersTab({ status, game }: { status: GameStatus; game: GameCont
       )}
       <h2>Planungstafel</h2>
       <ul className="list">
-        <li><span>Chef</span><small>{b.chefBusy ?? 'frei, im Büro'}</small></li>
+        {(status.company?.drivers ?? []).map((d) => (
+          <li key={`d${d.id}`}>
+            <span>{d.isPlayer ? 'Chef' : d.name}</span>
+            <small>{b.driverStatus[d.id] ?? (d.isPlayer ? 'frei, im Büro' : 'frei, am Hof')} · {((b.driverMinutes[d.id] ?? 0) / 60).toLocaleString('de-DE', { maximumFractionDigits: 1 })} h heute</small>
+          </li>
+        ))}
         {b.units.map((u) => {
           const m = status.company?.machines.find((x) => x.id === u.machineId);
           return <li key={u.machineId}><span>{m ? machineName(m) : u.machineId}</span><small>{u.status}</small></li>;
         })}
       </ul>
       <QueueList status={status} game={game} />
+    </>
+  );
+}
+
+const skillShort = (e: Pick<Employee, 'skills'>) =>
+  SKILLS.filter((k) => e.skills[k.key] > 1 || k.key === 'boden').map((k) => `${k.name.split('/')[0]} ${e.skills[k.key]}`).join(' · ');
+
+/** Personal (PA-01 bis PA-15): Mitarbeiter, Bewerbungen, Lohnkosten */
+export function StaffTab({ status, game }: { status: GameStatus; game: GameController | null }) {
+  const fb = useFeedback();
+  const b = status.business;
+  const c = status.company;
+  if (!b || !c) return <p className="hint">–</p>;
+  const monthly = c.drivers.reduce((a, e) => a + (e.kind === 'fest' ? employerMonthCost(e) : 0), 0);
+  return (
+    <>
+      <h2>Mitarbeiter ({c.drivers.length})</h2>
+      <ul className="cards" data-testid="staff">
+        {c.drivers.map((e) => (
+          <li key={e.id} className="card">
+            <div className="card-head">
+              <strong>{e.isPlayer ? 'Chef (du)' : e.name}</strong>
+              <small>{e.kind === 'chef' ? 'kein Lohn' : e.kind === 'fest' ? `fest · ${eur(employerMonthCost(e))}/Monat` : `Saison · ${eur(employerHourCost(e))}/h`}</small>
+            </div>
+            <small className="hint">{skillShort(e)}{e.licenseC ? ' · Führerschein C/CE' : ''}{!e.isPlayer ? ` · ${e.age} Jahre · ${e.wage.toLocaleString('de-DE')} €/h brutto` : ''}</small>
+            <small>{b.driverStatus[e.id] ?? 'frei'} · heute {((b.driverMinutes[e.id] ?? 0) / 60).toLocaleString('de-DE', { maximumFractionDigits: 1 })} von 10 h</small>
+            {!e.isPlayer && (
+              <div className="card-actions">
+                <button onClick={async () => fb.show(await game!.command({ kind: 'fire', employeeId: e.id }))}>Entlassen</button>
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+      <dl>
+        <dt>Lohnkosten fest</dt><dd>{eur(monthly)} je Monat</dd>
+      </dl>
+      <p className="hint">Löhne inkl. Arbeitgeberanteil (21 %) werden am Monatsersten gebucht. Saisonkräfte bekommen nur geleistete Stunden. Skills steigen mit der Arbeit (Stufe n → n+1 nach n × 100 h) und wirken auf Arbeitstempo und Diesel.</p>
+      <h2>Bewerbungen ({b.applicants.length})</h2>
+      {b.applicants.length ? (
+        <ul className="cards" data-testid="applicants">
+          {b.applicants.map((a) => (
+            <li key={a.id} className="card">
+              <div className="card-head">
+                <strong>{a.person.name}</strong>
+                <small>{a.person.age} Jahre · bis {fmtDay(a.until)}</small>
+              </div>
+              <small className="hint">{skillShort(a.person)}{a.person.licenseC ? ' · Führerschein C/CE' : ''} · {a.note}</small>
+              <div>Gehaltswunsch: <strong>{a.person.wage.toLocaleString('de-DE')} €/h</strong> ({eur(a.person.wage * 173)} brutto im Monat)</div>
+              <div className="card-actions">
+                <button onClick={async () => fb.show(await game!.command({ kind: 'hire', applicantId: a.id, asKind: 'fest' }))} data-testid="hire">Fest einstellen</button>
+                <button onClick={async () => fb.show(await game!.command({ kind: 'hire', applicantId: a.id, asKind: 'saison' }))}>Als Saisonkraft</button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="hint">Gerade keine Bewerbungen. Neue kommen alle paar Tage.</p>
+      )}
+      {fb.msg && <p className="feedback">{fb.msg}</p>}
     </>
   );
 }
@@ -361,7 +441,7 @@ export function VehicleMenu({ status, game }: { status: GameStatus; game: GameCo
   );
 }
 
-const CATEGORIES = ['Rechnung', 'Diesel', 'Maschinenkauf', 'Sonstiges'] as const;
+const CATEGORIES = ['Rechnung', 'Diesel', 'Maschinenkauf', 'Personal', 'Sonstiges'] as const;
 
 /** Finanzen: Konto, Monatsübersicht, Rechnungen, Auswertung je Auftrag (WF-08, WF-09) */
 function invoiceState(i: Invoice): string {

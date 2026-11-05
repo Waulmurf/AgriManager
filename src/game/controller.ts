@@ -274,6 +274,16 @@ export class GameController {
         farmCount: msg.farms.length,
         knownFarms: msg.farms.filter((f) => f.known).length,
       });
+    } else if (msg.type === 'vehicles') {
+      // Fahrzeugliste geändert (Kauf, Laden): Symbole neu aufbauen, bekannte Positionen behalten
+      this.vehicles = msg.vehicles;
+      const home = (this.features[0]?.geometry.coordinates as [number, number] | undefined) ?? [0, 0];
+      this.features = msg.vehicles.map((v, i) => ({
+        type: 'Feature',
+        id: v.id,
+        properties: { icon: vehicleIconId(v.brand, v.profile), bearing: 0, state: 0, name: v.name, player: v.owner === 'player' },
+        geometry: { type: 'Point', coordinates: [...((this.features[i]?.geometry.coordinates as [number, number] | undefined) ?? home)] },
+      }));
     } else if (msg.type === 'tick') {
       this.interp.addTick(msg.time, msg.speed, msg.positions, msg.routes, performance.now());
       this.status.stats = msg.stats;

@@ -30,6 +30,7 @@ let lastSend = 0;
 let lastSentTime = -1;
 let pendingRoutes: WireRoute[] = [];
 let sentBusinessVersion = -1;
+let sentVehiclesVersion = -1;
 let timer: ReturnType<typeof setTimeout> | null = null;
 
 // gleitende Messwerte
@@ -109,6 +110,9 @@ function sendBusiness(force = false) {
     chefBusy: sim.chefBusy,
     queue: sim.queue.map((q) => ({ ...q, cmd: { ...q.cmd } })),
     estimates: sim.planEstimates(),
+    driverMinutes: { ...sim.driverMinutes },
+    driverStatus: Object.fromEntries(sim.company.drivers.map((d) => [d.id, sim!.driverBusy(d.id)])),
+    applicants: structuredClone(b.applicants),
     rivalFarms,
     trialFarms,
     knownFarms: known,
@@ -125,7 +129,13 @@ let lastBizSend = 0;
 function send(now: number) {
   if (!sim) return;
   // während eigene Fahrzeuge unterwegs sind: Status/Tempo regelmäßig aktualisieren
-  const live = now - lastBizSend > (sim.chefBusy !== null ? 250 : 1000);
+  const live = now - lastBizSend > (sim.anyPlayerBusy ? 250 : 1000);
+  if (sim.vehiclesVersion !== sentVehiclesVersion) {
+    // neue Fahrzeuge (Kauf, Laden): Liste und Parkrouten zuerst schicken
+    sentVehiclesVersion = sim.vehiclesVersion;
+    for (const r of sim.drainRoutes()) pendingRoutes.push(toWire(r));
+    post({ type: 'vehicles', vehicles: sim.vehicleInfo });
+  }
   if (live || sim.business.version !== sentBusinessVersion) lastBizSend = now;
   sendBusiness(live);
   const positions = sim.snapshot();

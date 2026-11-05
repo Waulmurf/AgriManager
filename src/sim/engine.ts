@@ -10,7 +10,7 @@ import { PROFILES, Router, curveSpeed, edgeSpeeds, type ProfileKey, type Vehicle
 import { BRANDS, COMPANY_CAR } from '../data/brands';
 import { fieldPattern, type FieldSet } from './fields';
 import { generateFarms, type FarmSet } from './farms';
-import { START_OFFERS, startCompany, type Company } from './economy';
+import { START_OFFERS, normalizeDrivers, skillDiesel, skillSpeed, startCompany, type Company, type Machine } from './economy';
 import { Business, REMIND_CALL_MINUTES, VISIT_MINUTES, fmtHa, type Command, type QueueCommand, type QueueItem } from './business';
 import { appendEdgePoints, nearestNode, RoadClass, type RoadGraph } from './roadgraph';
 
@@ -74,6 +74,8 @@ export interface SaveState {
   version: number;
   time: number;
   chefMinutes: number;
+  /** heutige Arbeitsminuten je Mitarbeiter */
+  driverMinutes?: Record<number, number>;
   nextRouteId: number;
   rng: [number, number, number, number];
   company: Company;
@@ -118,9 +120,13 @@ export interface PlayerUnitInfo {
 }
 
 type PlayerTask =
-  | { kind: 'visit'; farmId: number; phase: 'to' | 'at' | 'back' }
+  | { kind: 'visit'; driverId: number; farmId: number; phase: 'to' | 'at' | 'back' }
   | {
       kind: 'job';
+      driverId: number;
+      implementId: number;
+      /** Skillstufe des Fahrers bei Start (Bodenbearbeitung) */
+      skill: number;
       orderId: number;
       queue: number[];
       current: number;
@@ -183,10 +189,18 @@ export class Simulation {
   /** Anfragen, Aufträge, Markt, Ereignisse */
   readonly business: Business;
   readonly homeNode: number;
+  /** heutige Arbeitsminuten des Chefs */
+  get chefMinutes(): number {
+    return this.driverMinutes[1] ?? 0;
+  }
   /** Spielzeit in Minuten seit Start */
   time = 0;
-  /** heutige Arbeitsminuten des Chefs (Reset um 06:00) */
-  chefMinutes = 0;
+  /** heutige Arbeitsminuten je Mitarbeiter (Reset um 06:00); Nr. 1 = Chef */
+  driverMinutes: Record<number, number> = {};
+  /** Zahl der Testfahrzeuge (davor), Spielerfahrzeuge folgen */
+  private testCount = 0;
+  /** steigt, wenn Fahrzeuge dazukommen (Oberfläche muss die Liste neu laden) */
+  vehiclesVersion = 0;
   /** geplante Aufgaben des Chefs, werden nacheinander abgearbeitet */
   queue: QueueItem[] = [];
   private nextQueueId = 1;
@@ -226,31 +240,8 @@ export class Simulation {
       });
     }
     // Fahrzeuge des Spielers (Schlepper, Firmenwagen) nach den Testfahrzeugen
-    for (const m of this.company.machines) {
-      if (m.type !== 'schlepper' && m.type !== 'firmenwagen') continue;
-      const profile: ProfileKey = m.type === 'firmenwagen' ? 'car' : 'tractor';
-      this.vehicles.push({
-        id: this.vehicles.length,
-        name: [m.brand, m.model].filter(Boolean).join(' '),
-        brand: profile === 'car' ? COMPANY_CAR.name : m.brand,
-        profile,
-        prof: PROFILES[profile],
-        state: VehicleState.Waiting,
-        node: this.homeNode,
-        route: null,
-        seg: 0,
-        segOff: 0,
-        dist: 0,
-        waitMin: 0,
-        next: 'home',
-        fieldNode: -1,
-        trips: 0,
-        owner: 'player',
-        machineId: m.id,
-        restUntil: 0,
-        chargedRoute: 0,
-      });
-    }
+    this.testCount = this.vehicles.length;
+    for (const m of this.company.machines) this.addPlayerVehicle(m, false);
     this.business = new Business(opts.seed, this.company, this.farms, this.fields);
     // Abgestellt am Hof: Route aus einem Punkt, damit jedes Fahrzeug eine Position hat
     for (const v of this.vehicles) {
@@ -263,15 +254,54 @@ export class Simulation {
     return this.vehicles.map(({ id, name, brand, profile, owner, machineId }) => ({ id, name, brand, profile, owner, machineId }));
   }
 
+  /** Fahrbare Maschine des Spielers als Fahrzeug auf die Karte bringen (Schlepper, Firmenwagen) */
+  private addPlayerVehicle(m: Machine, park = true): void {
+    if (m.type !== 'schlepper' && m.type !== 'firmenwagen') return;
+    if (this.vehicles.some((v) => v.owner === 'player' && v.machineId === m.id)) return;
+    const profile: ProfileKey = m.type === 'firmenwagen' ? 'car' : 'tractor';
+    this.vehicles.push({
+      id: this.vehicles.length,
+      name: [m.brand, m.model].filter(Boolean).join(' '),
+      brand: profile === 'car' ? COMPANY_CAR.name : m.brand,
+      profile,
+      prof: PROFILES[profile],
+      state: VehicleState.Waiting,
+      node: this.homeNode,
+      route: null,
+      seg: 0,
+      segOff: 0,
+      dist: 0,
+      waitMin: 0,
+      next: 'home',
+      fieldNode: -1,
+      trips: 0,
+      owner: 'player',
+      machineId: m.id,
+      restUntil: 0,
+      chargedRoute: 0,
+    });
+    this.vehiclesVersion++;
+    if (!park) return; // im Konstruktor bekommen alle Fahrzeuge gemeinsam ihre Parkposition
+    // Parkposition am Hof (Ein-Punkt-Route), damit das Fahrzeug sofort sichtbar ist
+    const v = this.vehicles[this.vehicles.length - 1];
+    v.route = this.makeRoute([this.graph.x[this.homeNode]], [this.graph.y[this.homeNode]], [], 'road');
+    this.pending.push(v.route);
+  }
+
   /** Ein Schritt = 1 Spielminute. */
   step(): void {
     this.time++;
     if (this.time % 1440 === 0) {
-      this.business.daily(this.time); // täglich 06:00
-      this.chefMinutes = 0;
+      this.business.daily(this.time, this.driverMinutes); // täglich 06:00
+      this.driverMinutes = {};
     }
-    // Arbeitszeit des Chefs: zählt, solange er unterwegs ist (nicht im Feierabend)
-    if (this.vehicles.some((v) => v.owner === 'player' && v.task && v.restUntil <= this.time)) this.chefMinutes++;
+    // Arbeitszeit je Fahrer: zählt, solange er unterwegs ist (nicht im Feierabend)
+    for (const v of this.vehicles) {
+      if (v.owner === 'player' && v.task && v.restUntil <= this.time) {
+        const d = v.task.driverId;
+        this.driverMinutes[d] = (this.driverMinutes[d] ?? 0) + 1;
+      }
+    }
     for (const v of this.vehicles) {
       if (v.owner === 'player') this.stepPlayer(v);
       else this.stepVehicle(v);
@@ -279,15 +309,74 @@ export class Simulation {
     if (this.queue.length) this.runQueue();
   }
 
-  /** Nächste geplante Aufgabe starten, sobald der Chef frei ist (tagsüber, mit Arbeitszeit übrig) */
+  private minutesOf(driverId: number): number {
+    return this.driverMinutes[driverId] ?? 0;
+  }
+
+  private driverName(driverId: number): string {
+    const d = this.company.drivers.find((x) => x.id === driverId);
+    return d ? (d.isPlayer ? 'Chef' : d.name) : `Fahrer ${driverId}`;
+  }
+
+  /** Aufgabe, die ein Fahrer gerade hat (null = frei, im Büro bzw. am Hof) */
+  driverBusy(driverId: number): string | null {
+    for (const v of this.vehicles) {
+      if (v.owner !== 'player' || !v.task || v.task.driverId !== driverId) continue;
+      const who = this.driverName(driverId);
+      return v.task.kind === 'visit' ? `${who} ist auf Besuch bei ${this.business.farmName(v.task.farmId)}` : `${who} fährt einen Auftrag`;
+    }
+    return null;
+  }
+
+  /** irgendein eigenes Fahrzeug unterwegs */
+  get anyPlayerBusy(): boolean {
+    return this.vehicles.some((v) => v.owner === 'player' && !!v.task);
+  }
+
+  /** Der Chef ist unterwegs (Besuch oder selbst gefahrener Auftrag) */
+  get chefBusy(): string | null {
+    return this.driverBusy(1);
+  }
+
+  /** Schlepper oder Gerät gerade bei einem anderen Fahrer im Einsatz? */
+  private machineInUse(cmd: QueueCommand): string | null {
+    if (cmd.kind === 'visit') {
+      const car = this.vehicles.find((v) => v.owner === 'player' && v.profile === 'car');
+      return car?.task ? 'Firmenwagen ist unterwegs' : null;
+    }
+    for (const v of this.vehicles) {
+      if (v.owner !== 'player' || !v.task) continue;
+      if (v.machineId === cmd.tractorId) return 'Schlepper ist im Einsatz';
+      if (v.task.kind === 'job' && v.task.implementId === cmd.implementId) return 'Gerät ist im Einsatz';
+    }
+    return null;
+  }
+
+  private cmdDriver(cmd: QueueCommand): number {
+    return cmd.kind === 'visit' ? 1 : cmd.driverId ?? 1;
+  }
+
+  /**
+   * Nächste geplante Aufgabe je Fahrer starten, sobald er frei ist (tagsüber, mit Arbeitszeit
+   * übrig). Ist die Maschine noch bei jemand anderem, wartet der Eintrag.
+   */
   private runQueue() {
-    if (this.time % 1440 >= QUEUE_LAST_START || this.chefMinutes >= CHEF_MAX_MINUTES) return;
-    while (this.queue.length && !this.chefBusy) {
-      const item = this.queue.shift()!;
-      this.business.version++;
+    if (this.time % 1440 >= QUEUE_LAST_START) return;
+    const tried = new Set<number>();
+    for (let k = 0; k < this.queue.length; k++) {
+      const item = this.queue[k];
+      const d = item.driverId;
+      if (tried.has(d)) continue;
+      tried.add(d);
+      if (this.driverBusy(d) || this.minutesOf(d) >= CHEF_MAX_MINUTES) continue;
       const err = this.checkQueueCommand(item.cmd, item.id);
+      if (!err && this.machineInUse(item.cmd)) continue; // wartet auf die Maschine
+      this.queue.splice(k, 1);
+      k--;
+      tried.delete(d); // nach einem Fehlschlag gleich den nächsten Eintrag des Fahrers versuchen
+      this.business.version++;
       const msg = err ?? this.startNow(item.cmd);
-      if (this.chefBusy) this.business.info(this.time, `Plan: ${item.label} – ${msg}`);
+      if (this.driverBusy(d)) { this.business.info(this.time, `Plan ${this.driverName(d)}: ${item.label} – ${msg}`); tried.add(d); }
       else this.business.warn(this.time, `Geplant, aber nicht möglich: ${item.label} – ${msg}`);
     }
   }
@@ -336,9 +425,9 @@ export class Simulation {
   }
 
   /** Ende, wenn ab jetzt `need` Minuten Chef-Arbeitszeit anfallen (10 h je Tag, Start 06:00) */
-  private finishAfter(need: number): number {
+  private finishAfter(need: number, driverId = 1): number {
     let t = this.time;
-    let left = Math.max(0, CHEF_MAX_MINUTES - this.chefMinutes);
+    let left = Math.max(0, CHEF_MAX_MINUTES - this.minutesOf(driverId));
     // nach 20:00 beginnt nichts Neues mehr
     if (t % 1440 >= QUEUE_LAST_START) left = 0;
     while (need > left) {
@@ -351,47 +440,61 @@ export class Simulation {
 
   /**
    * Schätzungen für offene Anfragen und Aufträge (Schlüssel = Anfrage- bzw. Auftrags-ID).
-   * Fertigtermin: hinter dem laufenden Auftrag und allen geplanten Aufgaben.
+   * Fertigtermin: hinter laufender Arbeit und der Warteschlange des Fahrers; für Anfragen und
+   * ungeplante Aufträge beim Fahrer, der am frühesten frei ist.
    */
   planEstimates(): Record<number, JobEstimate> {
     const out: Record<number, JobEstimate> = {};
     if (!this.fields) return out;
-    let backlog = 0;
+    const backlog: Record<number, number> = {};
+    for (const d of this.company.drivers) backlog[d.id] = 0;
+    const running: Record<number, number> = {};
     for (const v of this.vehicles) {
       const t = v.task;
       if (v.owner !== 'player' || !t) continue;
+      let m = 30;
       if (t.kind === 'job') {
         const left = t.queue.slice(t.current + (t.phase === 'work' ? 1 : 0));
-        backlog += this.estimateJobMinutes(left).minutes + (t.phase === 'work' ? 30 : 0);
-      } else backlog += 30;
+        m = this.estimateJobMinutes(left, t.haPerHour).minutes + (t.phase === 'work' ? 30 : 0);
+        running[t.orderId] = t.driverId;
+      }
+      backlog[t.driverId] = (backlog[t.driverId] ?? 0) + m;
     }
-    const running = backlog;
+    const runBacklog = { ...backlog };
     for (const q of this.queue) {
-      const m = this.estimateQueueItem(q.cmd);
-      backlog += m;
+      backlog[q.driverId] = (backlog[q.driverId] ?? 0) + this.estimateQueueItem(q.cmd);
       if (q.cmd.kind === 'startJob') {
         const o = this.business.orders.find((x) => x.id === (q.cmd as { orderId: number }).orderId);
         if (o) {
-          const e = this.estimateJobMinutes(o.fields.filter((f) => !o.doneFields.includes(f)));
-          out[o.id] = { ...e, finishAt: this.finishAfter(backlog) };
+          const e = this.estimateJobMinutes(o.fields.filter((f) => !o.doneFields.includes(f)), this.driverHaPerHour(q.driverId));
+          out[o.id] = { ...e, finishAt: this.finishAfter(backlog[q.driverId], q.driverId) };
         }
       }
     }
+    // frühester freier Fahrer (der Chef zählt mit)
+    let best = 1;
+    for (const d of this.company.drivers) if ((backlog[d.id] ?? 0) < (backlog[best] ?? 0)) best = d.id;
     for (const o of this.business.orders) {
       if (o.status === 'fertig' || out[o.id]) continue;
       const left = o.fields.filter((f) => !o.doneFields.includes(f));
-      const e = this.estimateJobMinutes(left);
-      out[o.id] = { ...e, finishAt: o.status === 'läuft' ? this.finishAfter(running) : this.finishAfter(backlog + e.minutes) };
+      const e = this.estimateJobMinutes(left, this.driverHaPerHour(best));
+      const d = running[o.id];
+      out[o.id] = { ...e, finishAt: d !== undefined ? this.finishAfter(runBacklog[d], d) : this.finishAfter((backlog[best] ?? 0) + e.minutes, best) };
     }
     for (const r of this.business.requests) {
       if (r.status !== 'offen') continue;
-      const e = this.estimateJobMinutes(r.fields);
-      out[r.id] = { ...e, finishAt: this.finishAfter(backlog + e.minutes) };
+      const e = this.estimateJobMinutes(r.fields, this.driverHaPerHour(best));
+      out[r.id] = { ...e, finishAt: this.finishAfter((backlog[best] ?? 0) + e.minutes, best) };
     }
     return out;
   }
 
-  /** Prüfungen, die unabhängig davon gelten, ob der Chef gerade frei ist; null = in Ordnung */
+  private driverHaPerHour(driverId: number): number {
+    const d = this.company.drivers.find((x) => x.id === driverId);
+    return this.estimateHaPerHour() * skillSpeed(d?.skills.boden ?? 3);
+  }
+
+  /** Prüfungen, die unabhängig davon gelten, ob der Fahrer gerade frei ist; null = in Ordnung */
   private checkQueueCommand(cmd: QueueCommand, ignoreQueueId = 0): string | null {
     const b = this.business;
     if (cmd.kind === 'visit') {
@@ -399,6 +502,8 @@ export class Simulation {
       if (!this.vehicles.some((v) => v.owner === 'player' && v.profile === 'car')) return 'Kein Firmenwagen';
       return null;
     }
+    const driver = this.company.drivers.find((d) => d.id === (cmd.driverId ?? 1));
+    if (!driver) return 'Fahrer gibt es nicht mehr';
     const o = b.orders.find((x) => x.id === cmd.orderId);
     if (!o || o.status !== 'offen') return 'Auftrag nicht startbar';
     const tractor = this.company.machines.find((m) => m.id === cmd.tractorId && m.type === 'schlepper');
@@ -406,6 +511,7 @@ export class Simulation {
     if (!tractor || !impl) return 'Maschine fehlt';
     if (impl.type !== 'grubber') return 'Für Grubbern wird ein Grubber gebraucht';
     if ((impl.powerNeed ?? 0) > (tractor.power ?? 0)) return 'Schlepper zu schwach für das Gerät';
+    if (!this.vehicles.some((v) => v.owner === 'player' && v.machineId === tractor.id)) return 'Schlepper nicht verfügbar';
     if (!this.fields) return 'Keine Felddaten';
     if (!o.fields.some((f) => !o.doneFields.includes(f))) return 'Alle Felder erledigt';
     if (this.queue.some((q) => q.id !== ignoreQueueId && q.cmd.kind === 'startJob' && q.cmd.orderId === o.id)) return 'Auftrag ist schon eingeplant';
@@ -419,30 +525,38 @@ export class Simulation {
     return o ? `Grubbern ${b.farmName(o.farmId)} (${fmtHa(o.areaHa)})` : 'Auftrag';
   }
 
-  /** Besuch oder Auftrag sofort starten oder, wenn der Chef beschäftigt ist, hinten einplanen */
+  /**
+   * Besuch oder Auftrag sofort starten oder hinten in die Warteschlange des Fahrers stellen,
+   * wenn er unterwegs ist, keine Arbeitszeit mehr hat, schon etwas geplant ist oder die
+   * Maschine gerade ein anderer fährt.
+   */
   private startOrQueue(cmd: QueueCommand): string {
     const err = this.checkQueueCommand(cmd);
     if (err) return err;
-    const busy = this.chefBusy;
-    const tired = this.chefMinutes >= CHEF_MAX_MINUTES;
-    if (busy || tired || this.queue.length) {
-      if (cmd.kind === 'visit' && this.queue.some((q) => q.cmd.kind === 'visit' && q.cmd.farmId === cmd.farmId)) return 'Besuch ist schon eingeplant';
+    const d = this.cmdDriver(cmd);
+    const busy = this.driverBusy(d);
+    const tired = this.minutesOf(d) >= CHEF_MAX_MINUTES;
+    const inUse = this.machineInUse(cmd);
+    const mine = this.queue.filter((q) => q.driverId === d);
+    if (busy || tired || inUse || mine.length) {
+      if (cmd.kind === 'visit' && mine.some((q) => q.cmd.kind === 'visit' && q.cmd.farmId === cmd.farmId)) return 'Besuch ist schon eingeplant';
       const label = this.queueLabel(cmd);
-      this.queue.push({ id: this.nextQueueId++, cmd: { ...cmd }, label });
+      this.queue.push({ id: this.nextQueueId++, driverId: d, cmd: { ...cmd }, label });
       this.business.version++;
-      return `Eingeplant als Nr. ${this.queue.length}: ${label}${tired && !busy ? ' (ab 06:00)' : ''}`;
+      const why = tired && !busy ? ' (ab 06:00)' : inUse && !busy ? ` (${inUse})` : '';
+      return `Eingeplant für ${this.driverName(d)} als Nr. ${mine.length + 1}: ${label}${why}`;
     }
     return this.startNow(cmd);
   }
 
-  /** Startet die Aufgabe; der Chef muss frei sein (Prüfung vorher über checkQueueCommand) */
+  /** Startet die Aufgabe; Fahrer und Maschine müssen frei sein (Prüfung vorher) */
   private startNow(cmd: QueueCommand): string {
     const b = this.business;
     const t = this.time;
     if (cmd.kind === 'visit') {
       const farm = this.farms!.farms[cmd.farmId];
       const car = this.vehicles.find((v) => v.owner === 'player' && v.profile === 'car')!;
-      car.task = { kind: 'visit', farmId: farm.id, phase: 'to' };
+      car.task = { kind: 'visit', driverId: 1, farmId: farm.id, phase: 'to' };
       if (!this.driveTo(car, farm.homeNode)) return 'Hof nicht erreichbar';
       b.version++;
       return `Fahrt zu ${farm.name}`;
@@ -452,25 +566,20 @@ export class Simulation {
     const impl = this.company.machines.find((m) => m.id === cmd.implementId)!;
     const unit = this.vehicles.find((v) => v.owner === 'player' && v.machineId === tractor.id);
     if (!unit || unit.task) return 'Schlepper nicht verfügbar';
+    const driverId = cmd.driverId ?? 1;
+    const skill = this.company.drivers.find((d) => d.id === driverId)?.skills.boden ?? 1;
     const queue = o.fields.filter((f) => !o.doneFields.includes(f));
     unit.task = {
-      kind: 'job', orderId: o.id, queue, current: 0, phase: 'prep',
-      width: impl.width ?? 3, haPerHour: impl.haPerHour ?? 1.5, workKmh: impl.workKmh ?? 10,
-      dieselLHa: impl.dieselLHa ?? 9,
+      kind: 'job', driverId, implementId: impl.id, skill, orderId: o.id, queue, current: 0, phase: 'prep',
+      width: impl.width ?? 3,
+      haPerHour: (impl.haPerHour ?? 1.5) * skillSpeed(skill),
+      workKmh: (impl.workKmh ?? 10) * skillSpeed(skill),
+      dieselLHa: (impl.dieselLHa ?? 9) * skillDiesel(skill),
     };
     unit.state = VehicleState.Waiting;
     unit.waitMin = RUEST_HOF_MIN;
-    b.orderStarted(o, tractor.id, impl.id, t);
-    return 'Auftrag gestartet';
-  }
-
-  /** Der Chef ist der einzige Fahrer: beschäftigt, solange ein Spielerfahrzeug eine Aufgabe hat. */
-  get chefBusy(): string | null {
-    for (const v of this.vehicles) {
-      if (v.owner !== 'player' || !v.task) continue;
-      return v.task.kind === 'visit' ? `Chef ist auf Besuch bei ${this.business.farmName(v.task.farmId)}` : 'Chef fährt einen Auftrag';
-    }
-    return null;
+    b.orderStarted(o, tractor.id, impl.id, t, this.driverName(driverId));
+    return `Auftrag gestartet (${this.driverName(driverId)})`;
   }
 
   /** Was die Spielerfahrzeuge gerade tun (für Oberfläche und Rechtsklick-Menü). */
@@ -510,13 +619,28 @@ export class Simulation {
     switch (cmd.kind) {
       case 'respond':
         return b.respond(cmd.requestId, cmd.action, t, cmd.priceHa);
-      case 'buy':
-        return b.buy(cmd.offerId, t);
+      case 'buy': {
+        const r = b.buy(cmd.offerId, t);
+        for (const m of this.company.machines) this.addPlayerVehicle(m);
+        return r;
+      }
       case 'remind': {
         // Anruf geht auch unterwegs, kostet aber Arbeitszeit des Chefs
         if (this.chefMinutes >= CHEF_MAX_MINUTES) return 'Arbeitszeit des Chefs für heute erreicht (ab 06:00 wieder)';
         const r = b.remind(cmd.invoiceId, t);
-        if (r === 'Kunde angerufen') this.chefMinutes += REMIND_CALL_MINUTES;
+        if (r === 'Kunde angerufen') this.driverMinutes[1] = this.chefMinutes + REMIND_CALL_MINUTES;
+        return r;
+      }
+      case 'hire':
+        return b.hire(cmd.applicantId, cmd.asKind, t);
+      case 'fire': {
+        if (this.driverBusy(cmd.employeeId)) return 'Mitarbeiter ist gerade unterwegs – erst zurückrufen';
+        const r = b.fire(cmd.employeeId, t);
+        if (r === 'entlassen') {
+          const before = this.queue.length;
+          this.queue = this.queue.filter((q) => q.driverId !== cmd.employeeId);
+          if (this.queue.length !== before) b.warn(t, 'Geplante Aufgaben des Mitarbeiters wurden gestrichen.');
+        }
         return r;
       }
       case 'visit':
@@ -530,9 +654,13 @@ export class Simulation {
         return `Aus dem Plan genommen: ${q.label}`;
       }
       case 'queueMove': {
+        // innerhalb der Warteschlange desselben Fahrers tauschen
         const i = this.queue.findIndex((q) => q.id === cmd.queueId);
-        const j = i + cmd.dir;
-        if (i < 0 || j < 0 || j >= this.queue.length) return 'Nicht verschiebbar';
+        if (i < 0) return 'Nicht verschiebbar';
+        const d = this.queue[i].driverId;
+        let j = i + cmd.dir;
+        while (j >= 0 && j < this.queue.length && this.queue[j].driverId !== d) j += cmd.dir;
+        if (j < 0 || j >= this.queue.length) return 'Nicht verschiebbar';
         [this.queue[i], this.queue[j]] = [this.queue[j], this.queue[i]];
         b.version++;
         return 'Reihenfolge geändert';
@@ -571,6 +699,7 @@ export class Simulation {
       version: SAVE_VERSION,
       time: this.time,
       chefMinutes: this.chefMinutes,
+      driverMinutes: { ...this.driverMinutes },
       nextRouteId: this.nextRouteId,
       rng: this.rng.getState(),
       company: structuredClone(this.company),
@@ -589,19 +718,23 @@ export class Simulation {
   /** Spielstand laden (Simulation muss mit denselben Kartendaten, Seed und Fahrzeugzahl erzeugt sein) */
   restore(s: SaveState): void {
     if (s.version !== SAVE_VERSION) throw new Error(`Spielstand-Version ${s.version} wird nicht unterstützt`);
+    // Spielerfahrzeuge aus dem gespeicherten Fuhrpark neu aufbauen
+    this.vehicles.length = this.testCount;
+    for (const m of s.company.machines) this.addPlayerVehicle(m, false);
     if (s.vehicles.length !== this.vehicles.length) throw new Error('Spielstand passt nicht zu den Fahrzeugen');
     this.time = s.time;
-    this.chefMinutes = s.chefMinutes;
+    this.driverMinutes = s.driverMinutes ? { ...s.driverMinutes } : { 1: s.chefMinutes };
     this.nextRouteId = s.nextRouteId;
     this.rng.setState(s.rng);
     Object.assign(this.company, structuredClone(s.company));
+    normalizeDrivers(this.company);
     this.business.restore(s.business);
     if (this.farms) s.farms.forEach(([known, sat, rival], i) => {
       const f = this.farms!.farms[i];
       if (f) { f.known = known === 1; f.satisfaction = sat; f.rivalUntil = rival ?? 0; }
     });
     this.pending = [];
-    this.queue = structuredClone(s.queue ?? []);
+    this.queue = structuredClone(s.queue ?? []).map((q) => ({ ...q, driverId: q.driverId ?? 1 }));
     this.nextQueueId = s.nextQueueId ?? 1;
     s.vehicles.forEach((d, i) => {
       const v = this.vehicles[i];
@@ -676,7 +809,7 @@ export class Simulation {
     mix(this.nextRouteId);
     for (const s of this.rng.getState()) mix(s);
     mix(this.company.cash);
-    mix(this.chefMinutes);
+    for (const d of this.company.drivers) mix(this.minutesOf(d.id));
     mix(this.business.requests.length);
     mix(this.business.orders.length);
     for (const q of this.queue) mix(q.id);
@@ -811,9 +944,9 @@ export class Simulation {
     // Feierabend: Fahrzeug steht, bis der Chef wieder arbeiten darf
     if (v.restUntil > this.time) return;
     const t = v.task;
-    if (t?.kind === 'job' && (t.phase === 'to' || t.phase === 'setup' || t.phase === 'work') && this.chefMinutes >= CHEF_MAX_MINUTES) {
+    if (t?.kind === 'job' && (t.phase === 'to' || t.phase === 'setup' || t.phase === 'work') && this.minutesOf(t.driverId) >= CHEF_MAX_MINUTES) {
       v.restUntil = this.time + (1440 - (this.time % 1440));
-      this.business.warn(this.time, `${v.name}: Feierabend – Höchstarbeitszeit des Chefs erreicht, weiter morgen um 06:00.`);
+      this.business.warn(this.time, `${v.name}: Feierabend – Höchstarbeitszeit (${this.driverName(t.driverId)}) erreicht, weiter morgen um 06:00.`);
       return;
     }
     let budget = STEP_SECONDS;
@@ -893,6 +1026,7 @@ export class Simulation {
         b.chargeDiesel(this.fields!.areaHa[fi] * t.dieselLHa, o, this.time);
       }
       this.addMachineHours(v, t);
+      b.addExperience(t.driverId, 'boden', Math.round((this.fields!.areaHa[fi] / t.haPerHour) * 60), this.time);
       t.current++;
       if (t.current < t.queue.length) {
         t.phase = 'to';

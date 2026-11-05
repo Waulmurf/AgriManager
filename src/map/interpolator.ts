@@ -98,12 +98,14 @@ export class VehicleInterpolator {
     let i = n - 1;
     while (i > 0 && this.snaps[i - 1].time > t) i--;
     const b = this.snaps[i];
-    const a = i > 0 ? this.snaps[i - 1] : b;
-    const span = b.time - a.time;
-    const f = span > 0 ? Math.min(1, Math.max(0, (t - a.time) / span)) : 1;
+    const a0 = i > 0 ? this.snaps[i - 1] : b;
+    const span = b.time - a0.time;
+    const f = span > 0 ? Math.min(1, Math.max(0, (t - a0.time) / span)) : 1;
     const count = b.positions.length / SNAPSHOT_STRIDE;
     for (let v = 0; v < count; v++) {
       const k = v * SNAPSHOT_STRIDE;
+      // neu hinzugekommenes Fahrzeug (z. B. gerade gekauft): nur die neuere Meldung verwenden
+      const a = k < a0.positions.length ? a0 : b;
       const rb = b.positions[k];
       const db = b.positions[k + 1];
       const st = f < 1 ? a.positions[k + 2] : b.positions[k + 2];

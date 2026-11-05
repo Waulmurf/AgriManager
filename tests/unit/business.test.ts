@@ -48,7 +48,7 @@ describe('Besuch, Anfrage, Auftrag', () => {
     expect(s.command({ kind: 'visit', farmId: farm.id })).toMatch(/Fahrt zu/);
     expect(s.chefBusy).toMatch(/Besuch/);
     // zweiter Befehl während der Fahrt: wird eingeplant, hier gleich wieder gestrichen
-    expect(s.command({ kind: 'visit', farmId: farm.id })).toMatch(/^Eingeplant als Nr\. 1: Besuch/);
+    expect(s.command({ kind: 'visit', farmId: farm.id })).toMatch(/^Eingeplant für Chef als Nr\. 1: Besuch/);
     expect(s.command({ kind: 'dequeue', queueId: s.queue[0].id })).toMatch(/Aus dem Plan/);
     expect(s.queue.length).toBe(0);
     runUntil(s, () => farm.known);
@@ -83,7 +83,7 @@ describe('Besuch, Anfrage, Auftrag', () => {
     expect(s.company.cash).toBeCloseTo(cashBefore - 12_500, 2);
     const grubber = s.company.machines.find((m) => m.type === 'grubber')!;
     const hoursBefore = s.company.machines[0].hours;
-    expect(s.command({ kind: 'startJob', orderId: order.id, tractorId: 1, implementId: grubber.id })).toBe('Auftrag gestartet');
+    expect(s.command({ kind: 'startJob', orderId: order.id, tractorId: 1, implementId: grubber.id })).toMatch(/^Auftrag gestartet/);
     expect(order.status).toBe('läuft');
     let sawWork = false;
     const start = s.time;
@@ -196,7 +196,7 @@ describe('Rückruf, Rüstzeit, Arbeitszeit', () => {
     runUntil(s, () => !s.chefBusy, 3000);
     expect(s.playerUnits()[0].status).toBe('am Hof');
     // neu starten: nur die offenen Felder
-    expect(s.command({ kind: 'startJob', orderId: order.id, tractorId: 1, implementId: grubber.id })).toBe('Auftrag gestartet');
+    expect(s.command({ kind: 'startJob', orderId: order.id, tractorId: 1, implementId: grubber.id })).toMatch(/^Auftrag gestartet/);
     runUntil(s, () => order.status === 'fertig', 20000);
     expect(order.status).toBe('fertig');
     expect(new Set(order.doneFields).size).toBe(order.fields.length);
@@ -204,7 +204,7 @@ describe('Rückruf, Rüstzeit, Arbeitszeit', () => {
 
   it('macht nach 10 Stunden Arbeit des Chefs Feierabend bis 06:00', () => {
     const { s, order, grubber } = setupJob(5);
-    s.chefMinutes = 590; // Tag ist fast voll
+    s.driverMinutes[1] = 590; // Tag ist fast voll
     s.command({ kind: 'startJob', orderId: order.id, tractorId: 1, implementId: grubber.id });
     s.run(40);
     expect(s.playerUnits()[0].status).toMatch(/Feierabend/);
@@ -295,13 +295,13 @@ describe('Warteschlange des Chefs', () => {
     const order = s.business.orders[0];
     const grubber = s.company.machines.find((m) => m.type === 'grubber')!;
     runUntil(s, () => s.time % 1440 > 30 && s.time % 1440 < 120, 1440); // morgens starten
-    expect(s.command({ kind: 'startJob', orderId: order.id, tractorId: 1, implementId: grubber.id })).toBe('Auftrag gestartet');
+    expect(s.command({ kind: 'startJob', orderId: order.id, tractorId: 1, implementId: grubber.id })).toMatch(/^Auftrag gestartet/);
     const others = s.farms!.farms.filter((f) => f.id !== order.farmId && f.homeNode !== s.homeNode);
     const [f1, f2, f3] = others;
-    expect(s.command({ kind: 'visit', farmId: f1.id })).toMatch(/^Eingeplant als Nr\. 1/);
-    expect(s.command({ kind: 'visit', farmId: f2.id })).toMatch(/^Eingeplant als Nr\. 2/);
+    expect(s.command({ kind: 'visit', farmId: f1.id })).toMatch(/^Eingeplant für Chef als Nr\. 1/);
+    expect(s.command({ kind: 'visit', farmId: f2.id })).toMatch(/^Eingeplant für Chef als Nr\. 2/);
     expect(s.command({ kind: 'visit', farmId: f1.id })).toBe('Besuch ist schon eingeplant');
-    expect(s.command({ kind: 'visit', farmId: f3.id })).toMatch(/^Eingeplant als Nr\. 3/);
+    expect(s.command({ kind: 'visit', farmId: f3.id })).toMatch(/^Eingeplant für Chef als Nr\. 3/);
     // Reihenfolge ändern: f3 nach vorn
     s.command({ kind: 'queueMove', queueId: s.queue[2].id, dir: -1 });
     s.command({ kind: 'queueMove', queueId: s.queue[1].id, dir: -1 });

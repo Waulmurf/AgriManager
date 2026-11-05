@@ -2,7 +2,7 @@
 import type { JobEstimate, PlayerUnitInfo, SaveState, VehicleInfo } from './engine';
 import type { Company } from './economy';
 import type { ContactPreference } from './farms';
-import type { Command, GameEvent, Invoice, LedgerEntry, Order, QueueItem, Request } from './business';
+import type { Applicant, Command, GameEvent, Invoice, LedgerEntry, Order, QueueItem, Request } from './business';
 import type { MarketOffer } from './economy';
 
 /** Spielminuten pro Sekunde Echtzeit bei 1x. 10x/100x vervielfachen die Schrittzahl. */
@@ -59,8 +59,12 @@ export interface BusinessState {
   chefMaxMinutes: number;
   dieselTotalL: number;
   chefBusy: string | null;
-  /** geplante Aufgaben des Chefs */
+  /** geplante Aufgaben je Fahrer (driverId im Eintrag) */
   queue: QueueItem[];
+  /** heutige Arbeitsminuten und aktuelle Aufgabe je Mitarbeiter */
+  driverMinutes: Record<number, number>;
+  driverStatus: Record<number, string | null>;
+  applicants: Applicant[];
   /** Zeitschätzung je offener Anfrage bzw. offenem Auftrag (Schlüssel = ID) */
   estimates: Record<number, JobEstimate>;
   /** Kunden bei der Konkurrenz bzw. in der Probephase (nur kleine Aufträge) */
@@ -106,6 +110,7 @@ export type FromWorker =
       /** je Feld: Kultur */
       fieldCrop: Uint8Array;
     }
+  | { type: 'vehicles'; vehicles: VehicleInfo[] }
   | {
       type: 'tick';
       /** Spielzeit (Minuten) dieses Schnappschusses */

@@ -63,6 +63,9 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
 - Warteschlange für den Chef (`Simulation.queue`, Befehle dequeue/queueMove), im Spielstand gespeichert.
 - Kundenbindung: unter 20 % Zufriedenheit Wechsel zur Konkurrenz (`Farm.rivalUntil`), danach Probephase;
   Zeitschätzung `Simulation.planEstimates()`. Planungsboard ist für Phase 3 geplant (docs/plan.md).
+- Phase 3 läuft (Schritte in docs/plan.md). Schritt 1 Personal fertig: `Employee` in `economy.ts`,
+  Bewerbungen/Löhne/Erfahrung in `business.ts`, je Fahrer `driverMinutes` und Warteschlange in
+  `engine.ts`, Reiter Personal. Spielerfahrzeuge entstehen dynamisch (`addPlayerVehicle`, Meldung `vehicles`).
 
 ## CI (GitHub Actions)
 

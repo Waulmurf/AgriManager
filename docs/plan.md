@@ -161,3 +161,47 @@ Feldblock als ein Feld; eine Aufteilung in Schläge ist später möglich.
   `kunden`. Im Browser landet der Spielstand im localStorage. Autosave einmal je Spieltag; beim
   Start geht es mit dem Autosave weiter (`?neu` startet ein neues Spiel). Laden ist bitgleich:
   Ein geladener Stand rechnet exakt so weiter wie das Original.
+
+## Phase 3: Fuhrpark und Personal (ab 5. Nov. 2026)
+
+Schritte:
+1. **Personal** (umgesetzt, siehe unten)
+2. **Fuhrpark:** Händler mit Standort und Marken (`docs/maschinen.md`), Kauf neu oder gebraucht,
+   Verkauf und Inzahlungnahme, Verschleiß, Wartung, Pannen und Werkstatt (MF-04 bis MF-07,
+   HM-04 bis HM-08, MZ-01 bis MZ-12)
+3. **Planungsboard** (siehe „Vorgemerkt“)
+4. **Urlaub, Krankheit, Zufriedenheit der Mitarbeiter, Zuschläge** (PA-05, PA-11, PA-16, PA-17,
+   ZU-01 bis ZU-03)
+
+### Schritt 1: Personal (Annahmen)
+
+- **Bewerbungen (PA-01):** Mit 25 % Wahrscheinlichkeit am Tag kommt eine Bewerbung, höchstens
+  5 liegen gleichzeitig vor, jede 7–20 Tage lang. Am ersten Tag gibt es sicher eine.
+  - Alter 18–62. Skills: Bodenbearbeitung 1–5 je nach Erfahrung (Alter), weitere Tätigkeiten mit
+    35 % Wahrscheinlichkeit. 30 % haben einen Lkw-Führerschein (C/CE).
+  - Gehaltswunsch (PA-13): Ecklohn 17 € − 2 € + 1,10 € je Stufe der besten Tätigkeit + 0,15 € je
+    weiterer Stufe + 0,80 € mit Führerschein C/CE ± 0,50 €, mindestens Mindestlohn 14,60 €.
+  - Der Ecklohn ist eine Annahme: Tarif BLU/IG BAU 2022 15,40 € ([IG BAU](https://igbau.de/Binaries/Binary18281/2022-10-11-TI-zum-Tarifabschluss-BLU.pdf)),
+    2025 +3,7 % ([DGB](https://www.dgb.de/service/weiterer-service/tarifmeldungen/tarifmeldung/neuer-entgelttarifvertrag-fuer-lohnunternehmen-mehr-geld-und-bessere-leistungen/)),
+    hochgerechnet auf 2027. Die Lohntabelle nach Gruppen ist noch zu recherchieren (ZU-04).
+- **Einstellen:** fest (Monatsgehalt = Stundenlohn × 173 h) oder als Saisonkraft
+  (Stundenlohn + 8 %, nur geleistete Stunden). Entlassen geht sofort, nicht während der Fahrt.
+  Kündigungsfristen kommen mit Schritt 4.
+- **Löhne (PA-14, PA-15):** Arbeitgeberanteil 21 % (Annahme). Feste Mitarbeiter je
+  Kalendertag 1/30 des Monatsgehalts. Gebucht wird am Monatsersten als „Löhne“ in der neuen
+  Kategorie Personal. Der Chef kostet keinen Lohn (KK-15).
+- **Skills (PA-02, PA-07, PA-08):** neun Tätigkeiten, Stufe 1–5.
+  - Bodenbearbeitung wirkt beim Grubbern: Tempo 90 % (Stufe 1) bis 110 % (Stufe 5), Diesel +6 %
+    bis −6 %.
+  - Erfahrung: Stufe n → n+1 nach n × 100 Arbeitsstunden in der Tätigkeit.
+  - Der Chef startet mit Boden 3, Saat 2, Gülle 2, Transport 2.
+- **Fahrer je Auftrag:** Beim Start wählt man den Fahrer. Jeder Fahrer hat eigene 10 h am Tag
+  und eine eigene Warteschlange.
+  - Ist der Schlepper oder das Gerät gerade bei einem anderen Fahrer, wartet der Auftrag in der
+    Warteschlange, bis die Maschine frei ist.
+  - Besuche und Zahlungserinnerungen macht immer der Chef.
+- **Fuhrpark (Vorgriff auf Schritt 2):** Gekaufte Schlepper erscheinen sofort als Fahrzeug am
+  Hof. Der Markt bietet zwei gebrauchte Schlepper an:
+  - Fendt 516 Vario, 165 PS, Bj. 2016, 69.500 €
+  - John Deere 6130R, 130 PS, Bj. 2015, 44.000 €
+
