@@ -41,7 +41,7 @@ echo "== Protomaps-Build ermitteln"
 BUILD=$(curl -sS -A "$UA" https://build-metadata.protomaps.dev/builds.json | jq -r 'map(.key) | sort | last')
 echo "   build=$BUILD"
 pmtiles extract "https://build.protomaps.com/$BUILD" "$OUT/region.pmtiles" --bbox="$BBOX" --maxzoom="$MAXZOOM"
-pmtiles show "$OUT/region.pmtiles" | head -30
+pmtiles show "$OUT/region.pmtiles" > "$WORK/region-info.txt"; head -30 "$WORK/region-info.txt"
 
 echo "== OSM-Auszüge laden und zuschneiden"
 PARTS=()
@@ -56,7 +56,7 @@ osmium merge --overwrite -o "$WORK/region.osm.pbf" "${PARTS[@]}"
 osmium tags-filter --overwrite -o "$WORK/roads.osm.pbf" "$WORK/region.osm.pbf" w/highway w/route=ferry
 # OPL mit Knotenzeilen (Koordinaten) und Wegzeilen (Knotenreferenzen)
 osmium cat --overwrite -f opl -o "$WORK/roads.opl" "$WORK/roads.osm.pbf"
-head -c 600 "$WORK/roads.opl"; echo; grep -m2 '^w' "$WORK/roads.opl" | cut -c1-300
+head -c 600 "$WORK/roads.opl" || true; echo
 OSM_TS=$(osmium fileinfo -g header.option.osmosis_replication_timestamp "$WORK/niedersachsen.osm.pbf" 2>/dev/null || echo "")
 
 echo "== Straßengraph bauen"
@@ -73,7 +73,8 @@ for i in $(seq 0 $(( $(jq '.fieldSources | length' "$CFG") - 1 ))); do
   mkdir -p "$WORK/fb-$CODE"
   if curl -sS -L -A "$UA" --fail -o "$WORK/fb-$CODE.zip" "$URL"; then
     unzip -o -q "$WORK/fb-$CODE.zip" -d "$WORK/fb-$CODE"
-    SRC=$(find "$WORK/fb-$CODE" -iname '*.shp' -o -iname '*.gpkg' | head -1)
+    # Feldblöcke, nicht Landschaftselemente (z. B. Brandenburg: DFBK_FB.shp neben DFBK_LE.shp)
+    SRC=$(find "$WORK/fb-$CODE" \( -iname '*.shp' -o -iname '*.gpkg' \) | grep -viE '_LE\.|landschaft' | sort | head -1)
     echo "   $CODE: $SRC"
     ogrinfo -so "$SRC" 2>/dev/null | head -20 || true
     ogr2ogr -f GeoJSONSeq -t_srs EPSG:4326 -spat $WEST $SOUTH $EAST $NORTH -spat_srs EPSG:4326 \
@@ -93,7 +94,7 @@ node "$ROOT/scripts/data/build-fields.mjs" "${OFFICIAL_ARGS[@]}" --osm "$WORK/os
 tippecanoe -o "$OUT/fields.pmtiles" --force -l fields -Z10 -z14 --use-attribute-for-id=i \
   --drop-densest-as-needed --simplify-only-low-zooms --detect-shared-borders \
   --name "Felder Spielregion" "$WORK/fields.geojsonl"
-pmtiles show "$OUT/fields.pmtiles" | head -15
+pmtiles show "$OUT/fields.pmtiles" > "$WORK/fields-info.txt"; head -15 "$WORK/fields-info.txt"
 FIELD_ATTRIB=$(printf '%s; ' "${ATTRIB_FIELDS[@]}")
 
 jq -n --argjson lat "$LAT" --argjson lon "$LON" --argjson r "$RADIUS_KM" \
