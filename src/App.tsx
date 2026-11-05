@@ -122,6 +122,7 @@ export function App() {
           <dl>
             <dt>Gebiet</dt><dd>{status?.region ? `${status.region.radiusKm} km um Groß Thondorf` : '–'}</dd>
             <dt>Straßengraph</dt><dd>{status?.graph ? `${status.graph.nodes.toLocaleString('de-DE')} Knoten` : '–'}</dd>
+            <dt>Felder</dt><dd data-testid="field-count">{status?.fieldCount ? status.fieldCount.toLocaleString('de-DE') : '–'}</dd>
             <dt>Daten</dt><dd>{status?.region?.tag ?? '–'}</dd>
             <dt>System</dt><dd>{platformName()}</dd>
           </dl>

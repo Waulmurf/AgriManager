@@ -19,11 +19,24 @@ mkdirSync(OUT, { recursive: true });
 const sha = (buf) => createHash('sha256').update(buf).digest('hex');
 
 const relUrl = `https://api.github.com/repos/${REPO}/releases/tags/${tag}`;
-let rel = await fetch(relUrl, { headers });
-if (rel.status === 401 && token) {
-  // ungültiges Token in der Umgebung: öffentliches Repo ohne Anmeldung versuchen
-  headers = { 'User-Agent': headers['User-Agent'] };
+// MAP_DATA_WAIT_MIN: so lange auf das Release warten (CI, wenn der Daten-Workflow parallel baut)
+const waitUntil = Date.now() + Number(process.env.MAP_DATA_WAIT_MIN ?? 0) * 60_000;
+let rel;
+for (;;) {
   rel = await fetch(relUrl, { headers });
+  if (rel.status === 401 && token) {
+    // ungültiges Token in der Umgebung: öffentliches Repo ohne Anmeldung versuchen
+    headers = { 'User-Agent': headers['User-Agent'] };
+    rel = await fetch(relUrl, { headers });
+  }
+  let ready = false;
+  if (rel.ok) {
+    const names = (await rel.clone().json()).assets.map((a) => a.name);
+    ready = [...FILES, 'SHA256SUMS'].every((f) => names.includes(f));
+  }
+  if (ready || Date.now() > waitUntil) break;
+  console.log(`Warte auf Release ${tag} (Workflow „map-data“) …`);
+  await new Promise((r) => setTimeout(r, 30_000));
 }
 if (!rel.ok) throw new Error(`Release ${tag} nicht gefunden (${rel.status}). Workflow „map-data“ gelaufen?`);
 const assets = Object.fromEntries((await rel.json()).assets.map((a) => [a.name, a]));

@@ -7,6 +7,7 @@
  */
 import { Simulation, type RouteGeom } from './engine';
 import { parseRoadGraph, unproject, type RoadGraph } from './roadgraph';
+import { parseFields } from './fields';
 import {
   MAX_SNAPSHOTS_PER_SECOND,
   STEPS_PER_SECOND_AT_1X,
@@ -139,7 +140,8 @@ self.onmessage = (ev: MessageEvent<ToWorker>) => {
   try {
     if (msg.type === 'init') {
       graph = parseRoadGraph(msg.graph);
-      sim = new Simulation(graph, { seed: msg.seed, vehicleCount: msg.vehicleCount });
+      const fields = msg.fields ? parseFields(msg.fields) : undefined;
+      sim = new Simulation(graph, { seed: msg.seed, vehicleCount: msg.vehicleCount, fields });
       post({
         type: 'ready',
         vehicles: sim.vehicleInfo,
@@ -148,6 +150,7 @@ self.onmessage = (ev: MessageEvent<ToWorker>) => {
         radiusM: graph.radiusM,
         nodeCount: graph.nodeCount,
         edgeCount: graph.edgeCount,
+        fieldCount: fields?.count ?? 0,
       });
       setSpeed(speed);
     } else if (msg.type === 'speed') {

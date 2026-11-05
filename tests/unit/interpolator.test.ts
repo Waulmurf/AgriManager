@@ -9,7 +9,7 @@ const route = (id: number): WireRoute => ({
   coords: Float64Array.from([0, 0, 0.01, 0, 0.01, 0.01]),
   cum: Float64Array.from([0, 1000, 2000]),
 });
-const pos = (rid: number, d: number, st = 1) => Float64Array.from([rid, d, st]);
+const pos = (rid: number, d: number, st = 1) => Float64Array.from([rid, d, st, -1]);
 
 describe('VehicleInterpolator', () => {
   it('interpoliert entlang der Route statt über die Luftlinie', () => {

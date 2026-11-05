@@ -13,6 +13,7 @@ import { addVehicleIcons, vehicleIconId } from '../map/icons';
 import { VehicleInterpolator, type VehicleSample } from '../map/interpolator';
 import type { FromWorker, Speed, ToWorker, WorkerStats } from '../sim/protocol';
 import type { VehicleInfo } from '../sim/engine';
+import { FieldSource, fieldId, parseFields, type FieldSet } from '../sim/fields';
 
 export interface RegionInfo {
   tag: string;
@@ -21,6 +22,7 @@ export interface RegionInfo {
   protomapsBuild?: string;
   osmTimestamp?: string;
   attribution?: string;
+  fieldAttribution?: string;
 }
 
 export interface GameStatus {
@@ -37,6 +39,8 @@ export interface GameStatus {
   updateMs: number;
   region: RegionInfo | null;
   graph: { nodes: number; edges: number } | null;
+  /** Anzahl Felder (0 = keine Felddaten) */
+  fieldCount: number;
   tilesLoaded: boolean;
   tileErrors: number;
 }
@@ -60,9 +64,11 @@ export class GameController {
   private updateCost = 0;
   private notifyAt = 0;
   private tileTimer: ReturnType<typeof setInterval> | undefined;
+  private fields: FieldSet | null = null;
+  private activeFields = new Set<number>();
   status: GameStatus = {
     phase: 'loading', speed: 0, time: 0, simTime: 0, vehicles: 0, stats: null, fps: 0, frameP95: 0, updateMs: 0,
-    region: null, graph: null, tilesLoaded: false, tileErrors: 0,
+    region: null, graph: null, fieldCount: 0, tilesLoaded: false, tileErrors: 0,
   };
 
   subscribe(fn: (s: GameStatus) => void): () => void {
@@ -78,10 +84,13 @@ export class GameController {
 
   async start(container: HTMLElement): Promise<void> {
     try {
-      const [region, graphBuf] = await Promise.all([
+      const [region, graphBuf, fieldsBuf] = await Promise.all([
         fetchJson<RegionInfo>(mapDataUrl('region.json')),
         fetchBuffer(mapDataUrl('roadgraph.bin')),
+        fetchOptionalBuffer(mapDataUrl('fields.bin')),
       ]);
+      // eigene Kopie für Feld-Infos auf der Karte; das Original geht an den Worker
+      this.fields = fieldsBuf ? parseFields(fieldsBuf.slice(0)) : null;
       this.emit({ region });
 
       if (!protocolRegistered) {
@@ -130,11 +139,14 @@ export class GameController {
           res();
         });
       });
-      this.addGameLayers(center, region.radiusKm * 1000);
+      this.addGameLayers(center, region.radiusKm * 1000, region);
 
       this.worker = new Worker(new URL('../sim/worker.ts', import.meta.url), { type: 'module' });
       this.worker.onmessage = (ev: MessageEvent<FromWorker>) => this.onWorker(ev.data);
-      this.post({ type: 'init', graph: graphBuf, seed: SEED, vehicleCount: VEHICLE_COUNT }, [graphBuf]);
+      this.post(
+        { type: 'init', graph: graphBuf, fields: fieldsBuf ?? undefined, seed: SEED, vehicleCount: VEHICLE_COUNT },
+        fieldsBuf ? [graphBuf, fieldsBuf] : [graphBuf],
+      );
       // „idle“ kommt nicht, solange Fahrzeuge sich bewegen – daher Kachelstatus prüfen
       const checkTiles = () => {
         // nur die Grundkarte: die Fahrzeugquelle wird ständig neu befüllt
@@ -210,7 +222,7 @@ export class GameController {
       (this.map!.getSource('home') as GeoJSONSource).setData({
         type: 'Feature', properties: { name: 'Hof' }, geometry: { type: 'Point', coordinates: msg.home },
       });
-      this.emit({ phase: 'running', vehicles: msg.vehicles.length, graph: { nodes: msg.nodeCount, edges: msg.edgeCount } });
+      this.emit({ phase: 'running', vehicles: msg.vehicles.length, graph: { nodes: msg.nodeCount, edges: msg.edgeCount }, fieldCount: msg.fieldCount });
     } else if (msg.type === 'tick') {
       this.interp.addTick(msg.time, msg.speed, msg.positions, msg.routes, performance.now());
       this.status.stats = msg.stats;
@@ -241,6 +253,7 @@ export class GameController {
       f.properties!.state = s.state;
     }
     (map.getSource('vehicles') as GeoJSONSource).setData({ type: 'FeatureCollection', features: this.features });
+    if (this.fields) this.updateActiveFields(map, n);
     const cost = performance.now() - t0;
     this.updateCost = this.updateCost * 0.95 + cost * 0.05;
 
@@ -257,8 +270,87 @@ export class GameController {
     }
   };
 
-  private addGameLayers(center: [number, number], radiusM: number) {
+  /** Felder, auf denen gerade gearbeitet wird, über feature-state hervorheben. */
+  private updateActiveFields(map: MlMap, n: number) {
+    const now = new Set<number>();
+    for (let i = 0; i < n; i++) if (this.samples[i].field >= 0) now.add(this.samples[i].field);
+    for (const id of this.activeFields) {
+      if (!now.has(id)) map.setFeatureState({ source: 'fields', sourceLayer: 'fields', id }, { active: false });
+    }
+    for (const id of now) {
+      if (!this.activeFields.has(id)) map.setFeatureState({ source: 'fields', sourceLayer: 'fields', id }, { active: true });
+    }
+    this.activeFields = now;
+  }
+
+  /** Feld-Infos für die Anzeige (Klick auf ein Feld). */
+  fieldInfo(i: number): { id: string; ha: number; kind: string; source: string } | null {
+    const f = this.fields;
+    if (!f || i < 0 || i >= f.count) return null;
+    return {
+      id: fieldId(f, i),
+      ha: Math.round(f.areaHa[i] * 100) / 100,
+      kind: f.kind[i] === 2 ? 'Grünland' : 'Acker',
+      source: FieldSource[f.src[i] as keyof typeof FieldSource] ?? '–',
+    };
+  }
+
+  private addFieldLayers(region: RegionInfo) {
     const map = this.map!;
+    map.addSource('fields', {
+      type: 'vector',
+      url: `pmtiles://${mapDataUrl('fields.pmtiles')}`,
+      attribution: region.fieldAttribution ?? '',
+    });
+    // unter den Straßen der Grundkarte einfügen
+    const before = map.getStyle().layers.find((l) => l.id.startsWith('roads'))?.id;
+    map.addLayer({
+      id: 'fields-fill',
+      type: 'fill',
+      source: 'fields',
+      'source-layer': 'fields',
+      minzoom: 10,
+      paint: {
+        'fill-color': [
+          'case',
+          ['boolean', ['feature-state', 'active'], false], '#e8a33d',
+          ['==', ['get', 'k'], 2], '#cfe3b0',
+          '#efe2c4',
+        ],
+        'fill-opacity': ['interpolate', ['linear'], ['zoom'], 10, 0.35, 13, 0.7],
+      },
+    }, before);
+    map.addLayer({
+      id: 'fields-line',
+      type: 'line',
+      source: 'fields',
+      'source-layer': 'fields',
+      minzoom: 12,
+      paint: {
+        'line-color': ['case', ['boolean', ['feature-state', 'active'], false], '#b86e12', '#b7a47a'],
+        'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.5, 16, 1.5],
+      },
+    }, before);
+    map.on('click', 'fields-fill', (e) => {
+      const feat = e.features?.[0];
+      if (!feat || feat.id === undefined) return;
+      const info = this.fieldInfo(Number(feat.id));
+      if (!info) return;
+      new maplibregl.Popup({ closeButton: true, maxWidth: '260px' })
+        .setLngLat(e.lngLat)
+        .setHTML(
+          `<strong>Feld ${info.id}</strong><br>${info.kind}, ${info.ha.toLocaleString('de-DE')} ha<br>` +
+            `<small>Quelle: ${info.source}</small>`,
+        )
+        .addTo(map);
+    });
+    map.on('mouseenter', 'fields-fill', () => (map.getCanvas().style.cursor = 'pointer'));
+    map.on('mouseleave', 'fields-fill', () => (map.getCanvas().style.cursor = ''));
+  }
+
+  private addGameLayers(center: [number, number], radiusM: number, region: RegionInfo) {
+    const map = this.map!;
+    if (this.fields) this.addFieldLayers(region);
     addVehicleIcons(map);
     map.addSource('region', { type: 'geojson', data: circlePolygon(center, radiusM) });
     map.addLayer({
@@ -308,6 +400,16 @@ async function fetchJson<T>(url: string): Promise<T> {
   const r = await fetch(url);
   if (!r.ok) throw new Error(`${url}: HTTP ${r.status} – Kartendaten fehlen? (npm run map-data)`);
   return r.json() as Promise<T>;
+}
+
+/** Optionale Datei (z. B. fields.bin älterer Kartendaten): null statt Fehler. */
+async function fetchOptionalBuffer(url: string): Promise<ArrayBuffer | null> {
+  try {
+    const r = await fetch(url);
+    return r.ok ? await r.arrayBuffer() : null;
+  } catch {
+    return null;
+  }
 }
 
 async function fetchBuffer(url: string): Promise<ArrayBuffer> {

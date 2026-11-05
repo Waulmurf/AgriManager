@@ -8,11 +8,12 @@
 import { Rng } from './rng';
 import { PROFILES, Router, type ProfileKey, type VehicleProfile } from './astar';
 import { BRANDS, COMPANY_CAR } from '../data/brands';
+import { fieldPattern, type FieldSet } from './fields';
 import { appendEdgePoints, nearestNode, RoadClass, type RoadGraph } from './roadgraph';
 
 export const STEP_SECONDS = 60;
 /** Werte je Fahrzeug im Positions-Schnappschuss */
-export const SNAPSHOT_STRIDE = 3;
+export const SNAPSHOT_STRIDE = 4;
 
 export const VehicleState = { Waiting: 0, Driving: 1, Working: 2 } as const;
 export type VehicleState = (typeof VehicleState)[keyof typeof VehicleState];
@@ -55,14 +56,22 @@ interface Vehicle extends VehicleInfo {
 export interface SimOptions {
   seed: number;
   vehicleCount: number;
+  /** Echte Felder (fields.bin); ohne Felder wird neben Feldwegen ein gedachtes Feld bearbeitet */
+  fields?: FieldSet;
   /** Hof (Startpunkt), lokale Meter; Standard: Kartenmitte */
   homeX?: number;
   homeY?: number;
 }
 
 
-const WORK_SPEED = 8 / 3.6; // Feldarbeit 8 km/h
-const LANE_WIDTH = 12; // Arbeitsbreite einer Bahn (m)
+const WORK_SPEED = 8 / 3.6; // Feldarbeit 8 km/h (gedachte Felder)
+const LANE_WIDTH = 12; // Arbeitsbreite einer Bahn (m, gedachte Felder)
+/**
+ * Testfahrzeuge auf echten Feldern: Grubber 4 m, Flächenleistung 1,7 ha/h
+ * (LWK-Erfahrungssätze 1,49–1,89 ha/h, siehe docs/maschinen.md).
+ */
+const TEST_WORK_WIDTH = 4;
+const TEST_HA_PER_HOUR = 1.7;
 
 export class Simulation {
   readonly graph: RoadGraph;
@@ -72,6 +81,7 @@ export class Simulation {
   private nextRouteId = 1;
   private pending: RouteGeom[] = [];
   private fieldNodes: Uint32Array;
+  readonly fields: FieldSet | null;
   readonly homeNode: number;
   /** Spielzeit in Minuten seit Start */
   time = 0;
@@ -81,6 +91,7 @@ export class Simulation {
     this.rng = new Rng(opts.seed);
     this.router = new Router(graph);
     this.homeNode = nearestNode(graph, opts.homeX ?? 0, opts.homeY ?? 0);
+    this.fields = opts.fields ?? null;
     this.fieldNodes = collectFieldNodes(graph);
     for (let i = 0; i < opts.vehicleCount; i++) {
       const profile: ProfileKey = i % 5 === 4 ? 'car' : 'tractor';
@@ -132,14 +143,16 @@ export class Simulation {
     return r;
   }
 
-  /** Positionen aller Fahrzeuge: [routeId, Distanz entlang der Route, Zustand] je Fahrzeug. */
+  /** Positionen aller Fahrzeuge: [routeId, Distanz, Zustand, bearbeitetes Feld oder -1] je Fahrzeug. */
   snapshot(out?: Float64Array): Float64Array {
     const a = out ?? new Float64Array(this.vehicles.length * SNAPSHOT_STRIDE);
     for (let i = 0; i < this.vehicles.length; i++) {
       const v = this.vehicles[i];
-      a[i * 3] = v.route ? v.route.id : 0;
-      a[i * 3 + 1] = v.dist;
-      a[i * 3 + 2] = v.state;
+      const k = i * SNAPSHOT_STRIDE;
+      a[k] = v.route ? v.route.id : 0;
+      a[k + 1] = v.dist;
+      a[k + 2] = v.state;
+      a[k + 3] = v.state === VehicleState.Working && this.fields ? v.fieldNode : -1;
     }
     return a;
   }
@@ -231,6 +244,11 @@ export class Simulation {
     let target: number;
     if (v.next === 'home') {
       target = this.homeNode;
+    } else if (this.fields) {
+      // echtes Feld: fieldNode enthält den Feld-Index, Ziel ist die Feldzufahrt
+      const fi = this.rng.int(this.fields.count);
+      v.fieldNode = fi;
+      target = this.fields.access[fi];
     } else {
       target = this.fieldNodes[this.rng.int(this.fieldNodes.length)];
       v.fieldNode = target;
@@ -263,7 +281,7 @@ export class Simulation {
       return;
     }
     // am Feld angekommen: Feldarbeit als Bahnenmuster
-    this.startRoute(v, this.buildFieldRoute(v.node));
+    this.startRoute(v, this.fields ? this.buildRealFieldRoute(v.node, v.fieldNode) : this.buildFieldRoute(v.node));
     v.state = VehicleState.Working;
   }
 
@@ -290,7 +308,28 @@ export class Simulation {
     return this.makeRoute(xs, ys, speeds, 'road');
   }
 
-  /** Bahnen über ein gedachtes Feld neben dem Feldzugang (bis echte Feldblöcke da sind). */
+  /**
+   * Bahnen über ein echtes Feld: von der Zufahrt ins Feld, Bahnen im Feldumriss, zurück.
+   * Die Dauer folgt der Flächenleistung (ha/h), nicht der Bahnlänge.
+   */
+  private buildRealFieldRoute(node: number, fi: number): RouteGeom {
+    const g = this.graph;
+    const f = this.fields!;
+    const s0 = f.ptStart[fi], n = f.ptCount[fi];
+    const pat = fieldPattern(f.px.subarray(s0, s0 + n), f.py.subarray(s0, s0 + n), TEST_WORK_WIDTH, 150);
+    const xs = [g.x[node], ...pat.xs, g.x[node]];
+    const ys = [g.y[node], ...pat.ys, g.y[node]];
+    let len = 0;
+    for (let i = 1; i < xs.length; i++) {
+      const dx = xs[i] - xs[i - 1], dy = ys[i] - ys[i - 1];
+      len += Math.sqrt(dx * dx + dy * dy);
+    }
+    const seconds = (f.areaHa[fi] / TEST_HA_PER_HOUR) * 3600;
+    const speed = len > 0 && seconds > 0 ? len / seconds : WORK_SPEED;
+    return this.makeRoute(xs, ys, new Array(xs.length - 1).fill(speed), 'field');
+  }
+
+  /** Bahnen über ein gedachtes Feld neben dem Feldzugang (ohne Felddaten, z. B. in Tests). */
   private buildFieldRoute(node: number): RouteGeom {
     const g = this.graph;
     const x0 = g.x[node], y0 = g.y[node];

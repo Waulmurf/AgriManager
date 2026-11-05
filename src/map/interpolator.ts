@@ -19,6 +19,8 @@ export interface VehicleSample {
   /** Fahrtrichtung in Grad, 0 = Nord, im Uhrzeigersinn */
   bearing: number;
   state: number;
+  /** bearbeitetes Feld (Index in fields.bin) oder -1 */
+  field: number;
 }
 
 const MAX_SNAPS = 12;
@@ -105,6 +107,7 @@ export class VehicleInterpolator {
       const rb = b.positions[k];
       const db = b.positions[k + 1];
       const st = f < 1 ? a.positions[k + 2] : b.positions[k + 2];
+      const fieldIdx = f < 1 ? a.positions[k + 3] : b.positions[k + 3];
       let rid = rb;
       let d = db;
       if (a.positions[k] === rb) {
@@ -126,14 +129,15 @@ export class VehicleInterpolator {
           d = db * f;
         }
       }
-      const s = out[v] ?? (out[v] = { lon: 0, lat: 0, bearing: 0, state: 0 });
+      const s = out[v] ?? (out[v] = { lon: 0, lat: 0, bearing: 0, state: 0, field: -1 });
       s.state = st;
+      s.field = fieldIdx;
       const r = this.routes.get(rid);
       if (!r) continue;
       pointOn(r, d, s);
       // Richtung aus einem kurzen Stück voraus bzw. zurück
-      const p1: VehicleSample = { lon: 0, lat: 0, bearing: 0, state: 0 };
-      const p2: VehicleSample = { lon: 0, lat: 0, bearing: 0, state: 0 };
+      const p1 = { lon: 0, lat: 0 };
+      const p2 = { lon: 0, lat: 0 };
       const total = r.cum[r.cum.length - 1];
       pointOn(r, Math.max(0, Math.min(d, total - 4)), p1);
       pointOn(r, Math.min(total, Math.max(d, 0) + 4), p2);

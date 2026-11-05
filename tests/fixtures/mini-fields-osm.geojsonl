@@ -1,0 +1,2 @@
+{"type":"Feature","properties":{"landuse":"farmland","@type":"way","@id":42},"geometry":{"type":"Polygon","coordinates":[[[10.712,53.092],[10.714,53.092],[10.714,53.093],[10.712,53.092]]]}}
+{"type":"Feature","properties":{"landuse":"farmland","@type":"way","@id":43},"geometry":{"type":"Polygon","coordinates":[[[11.0,53.3],[11.01,53.3],[11.01,53.31],[11.0,53.3]]]}}

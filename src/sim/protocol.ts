@@ -9,7 +9,7 @@ export const MAX_SNAPSHOTS_PER_SECOND = 10;
 export type Speed = 0 | 1 | 10 | 100;
 
 export type ToWorker =
-  | { type: 'init'; graph: ArrayBuffer; seed: number; vehicleCount: number }
+  | { type: 'init'; graph: ArrayBuffer; fields?: ArrayBuffer; seed: number; vehicleCount: number }
   | { type: 'speed'; speed: Speed }
   | { type: 'stepOnce' };
 
@@ -44,13 +44,14 @@ export type FromWorker =
       radiusM: number;
       nodeCount: number;
       edgeCount: number;
+      fieldCount: number;
     }
   | {
       type: 'tick';
       /** Spielzeit (Minuten) dieses Schnappschusses */
       time: number;
       speed: Speed;
-      /** je Fahrzeug [routeId, Distanz, Zustand] */
+      /** je Fahrzeug [routeId, Distanz, Zustand, Feld-Index oder -1] */
       positions: Float64Array;
       routes: WireRoute[];
       stats: WorkerStats;

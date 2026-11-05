@@ -45,6 +45,8 @@ jobs:
           path: src-tauri/resources/map
           key: map-${{ hashFiles('data/map-data.json') }}
       - run: npm run map-data
+        env:
+          MAP_DATA_WAIT_MIN: '45'
       # gleiche Referenz-Hashes auf allen Systemen = plattformunabhängiger Determinismus
       - run: npx vitest run --silent=false
       - name: Rust-Tests (Range-Protokoll)
@@ -75,6 +77,8 @@ jobs:
           path: src-tauri/resources/map
           key: map-${{ hashFiles('data/map-data.json') }}
       - run: npm run map-data
+        env:
+          MAP_DATA_WAIT_MIN: '45'
       - run: npx playwright install --with-deps chromium
       - run: npm run build
       - name: Playwright
@@ -131,6 +135,8 @@ jobs:
           path: src-tauri/resources/map
           key: map-${{ hashFiles('data/map-data.json') }}
       - run: npm run map-data
+        env:
+          MAP_DATA_WAIT_MIN: '45'
       - name: Tauri-Build
         run: npx tauri build ${{ matrix.args }}
 
