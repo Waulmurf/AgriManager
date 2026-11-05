@@ -80,10 +80,11 @@ export async function runSelftest(
   try {
     game.setSpeed(0);
     await wait(500);
-    const t = game.status.business?.time ?? -1;
     const m1 = await game.saveGame('Selbsttest');
+    // maßgeblich ist die Zeit im gespeicherten Stand (die Anzeige kann bei langsamen Rechnern nachhinken)
+    const t = game.lastSavedTime;
     const m2 = await game.loadGame('Selbsttest');
-    await wait(500);
+    for (let i = 0; i < 30 && game.status.business?.time !== t; i++) await wait(200);
     saveOk = m1.startsWith('Gespeichert') && m2.startsWith('Geladen') && game.status.business?.time === t;
     await game.deleteSave('Selbsttest');
     saveMessage = `${m1}; ${m2}; Zeit ${t} → ${game.status.business?.time}`;

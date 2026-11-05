@@ -389,6 +389,9 @@ export class GameController {
   }
 
   /** Spielstand speichern (Name; Standard: Autosave) */
+  /** Spielzeit des zuletzt gespeicherten Stands (Selbsttest) */
+  lastSavedTime = -1;
+
   async saveGame(name: string = AUTOSAVE): Promise<string> {
     if (this.saving) return 'Speichern läuft bereits';
     this.saving = true;
@@ -398,6 +401,7 @@ export class GameController {
         this.pendingSaves.set(id, res);
         this.post({ type: 'save', id });
       });
+      this.lastSavedTime = state.time;
       await this.store.save(name, state, {
         dataTag: this.status.region?.tag ?? '',
         business: this.status.business,
