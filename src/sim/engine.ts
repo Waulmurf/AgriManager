@@ -68,6 +68,26 @@ interface Vehicle extends VehicleInfo {
   chargedRoute: number;
 }
 
+export const SAVE_VERSION = 1;
+
+export interface SaveState {
+  version: number;
+  time: number;
+  chefMinutes: number;
+  nextRouteId: number;
+  rng: [number, number, number, number];
+  company: Company;
+  business: ReturnType<Business['serialize']>;
+  /** je Betrieb [bekannt 0/1, Zufriedenheit] */
+  farms: [number, number][];
+  vehicles: {
+    state: VehicleState; node: number; seg: number; segOff: number; dist: number; waitMin: number;
+    next: 'field' | 'home' | 'leave-field'; fieldNode: number; trips: number; restUntil: number; chargedRoute: number;
+    task: PlayerTask | null;
+    route: { id: number; kind: RouteGeom['kind']; xs: number[]; ys: number[]; speed: number[] } | null;
+  }[];
+}
+
 export interface PlayerUnitInfo {
   machineId: number;
   vehicle: number;
@@ -343,6 +363,70 @@ export class Simulation {
         return `${v.name} fährt zurück zum Hof`;
       }
     }
+  }
+
+  /**
+   * Spielstand: gesamter veränderlicher Zustand als JSON-fähiges Objekt.
+   * Betriebe, Felder und Graph entstehen beim Laden wieder aus Seed und Kartendaten.
+   */
+  serialize(): SaveState {
+    const route = (r: RouteGeom | null) =>
+      r ? { id: r.id, kind: r.kind, xs: Array.from(r.xs), ys: Array.from(r.ys), speed: Array.from(r.speed) } : null;
+    return {
+      version: SAVE_VERSION,
+      time: this.time,
+      chefMinutes: this.chefMinutes,
+      nextRouteId: this.nextRouteId,
+      rng: this.rng.getState(),
+      company: structuredClone(this.company),
+      business: structuredClone(this.business.serialize()),
+      farms: this.farms ? this.farms.farms.map((f) => [f.known ? 1 : 0, f.satisfaction] as [number, number]) : [],
+      vehicles: this.vehicles.map((v) => ({
+        state: v.state, node: v.node, route: route(v.route), seg: v.seg, segOff: v.segOff, dist: v.dist,
+        waitMin: v.waitMin, next: v.next, fieldNode: v.fieldNode, trips: v.trips,
+        task: v.task ? structuredClone(v.task) : null, restUntil: v.restUntil, chargedRoute: v.chargedRoute,
+      })),
+    };
+  }
+
+  /** Spielstand laden (Simulation muss mit denselben Kartendaten, Seed und Fahrzeugzahl erzeugt sein) */
+  restore(s: SaveState): void {
+    if (s.version !== SAVE_VERSION) throw new Error(`Spielstand-Version ${s.version} wird nicht unterstützt`);
+    if (s.vehicles.length !== this.vehicles.length) throw new Error('Spielstand passt nicht zu den Fahrzeugen');
+    this.time = s.time;
+    this.chefMinutes = s.chefMinutes;
+    this.nextRouteId = s.nextRouteId;
+    this.rng.setState(s.rng);
+    Object.assign(this.company, structuredClone(s.company));
+    this.business.restore(s.business);
+    if (this.farms) s.farms.forEach(([known, sat], i) => {
+      const f = this.farms!.farms[i];
+      if (f) { f.known = known === 1; f.satisfaction = sat; }
+    });
+    this.pending = [];
+    s.vehicles.forEach((d, i) => {
+      const v = this.vehicles[i];
+      Object.assign(v, {
+        state: d.state, node: d.node, seg: d.seg, segOff: d.segOff, dist: d.dist, waitMin: d.waitMin,
+        next: d.next, fieldNode: d.fieldNode, trips: d.trips, task: d.task ? structuredClone(d.task) : undefined,
+        restUntil: d.restUntil, chargedRoute: d.chargedRoute,
+      });
+      if (d.route) {
+        const r = d.route;
+        const n = r.xs.length;
+        const cum = new Float64Array(n);
+        for (let k = 1; k < n; k++) {
+          const dx = r.xs[k] - r.xs[k - 1], dy = r.ys[k] - r.ys[k - 1];
+          cum[k] = cum[k - 1] + Math.sqrt(dx * dx + dy * dy);
+        }
+        let duration = 0;
+        for (let k = 1; k < n; k++) duration += (cum[k] - cum[k - 1]) / (r.speed[k - 1] || 1);
+        v.route = { id: r.id, kind: r.kind, xs: Float64Array.from(r.xs), ys: Float64Array.from(r.ys), speed: Float64Array.from(r.speed), cum, total: cum[n - 1], duration };
+        this.pending.push(v.route);
+      } else {
+        v.route = null;
+      }
+    });
   }
 
   run(steps: number): void {
@@ -666,6 +750,7 @@ export class Simulation {
       const m = this.company.machines.find((x) => x.id === v.machineId);
       const hours = (partial ? v.dist / Math.max(1, r.total) : 1) * r.duration / 3600;
       if (m) m.hours = Math.round((m.hours + hours) * 10) / 10;
+      if (o) o.tractorHours = Math.round((o.tractorHours + hours) * 100) / 100;
     }
   }
 
@@ -674,6 +759,7 @@ export class Simulation {
     const fi = t.queue[t.current];
     const hours = this.fields!.areaHa[fi] / t.haPerHour;
     const o = this.business.orders.find((x) => x.id === t.orderId);
+    if (o) o.tractorHours = Math.round((o.tractorHours + hours) * 100) / 100;
     for (const id of [v.machineId, o?.implementId]) {
       const m = this.company.machines.find((x) => x.id === id);
       if (m) m.hours = Math.round((m.hours + hours) * 10) / 10;

@@ -13,7 +13,7 @@ Jeder Schritt endet mit einer spielbaren Windows-Version.
 | 2 | Kunden-Betriebe auf echten Feldern, Hof mit Startschlepper und Startkapital | umgesetzt |
 | 3 | Anfrage → Auftrag (zuerst Grubbern), Annehmen/Ablehnen/Verhandeln, Fahrer und Maschine zuweisen, einfache Planungstafel; Anfragen als Liste (Smartphone in Phase 3) | umgesetzt (mit Besuch per Firmenwagen und Gerätekauf) |
 | 4 | Fahrt und Arbeit mit LWK-Flächenleistung, Anfahrt, Diesel, Betriebsstunden | umgesetzt (dazu Fahrprofile, Kurven, Rüstzeiten, Arbeitszeit des Chefs, Rechtsklick-Menü) |
-| 5 | Rechnung, Kontostand, Kundenzufriedenheit; Spielstand in SQLite | offen |
+| 5 | Rechnung, Kontostand, Kundenzufriedenheit; Spielstand in SQLite | umgesetzt |
 
 ## Vorgemerkt (aus Rückmeldungen von Nils)
 
@@ -94,3 +94,19 @@ Feldblock als ein Feld; eine Aufteilung in Schläge ist später möglich.
   Felder zählen.
 - **Karte:** kein Umkreis mehr. Verschieben und Zoomen nur innerhalb der Kartendaten,
   Hintergrund in Landfarbe, damit keine grauen Ränder entstehen.
+
+## Rechnung, Konto, Spielstand (Schritt 5)
+
+- **Rechnung (AK-09):** Nach Abschluss eines Auftrags automatisch, netto, Nummer `RE-Jahr-0001`,
+  Zahlungsziel 14 Tage. Wann der Kunde zahlt, hängt von seiner Zufriedenheit ab: ab 60 % nach
+  3–12 Tagen, 40–60 % nach 10–20 Tagen, darunter nach 18–35 Tagen (dann oft überfällig).
+- **Konto (WF-08):** Buchungen für Zahlungseingänge, Maschinenkäufe und Diesel (täglich
+  zusammengefasst), Monatsübersicht nach Kategorien im Reiter „Finanzen“.
+- **Auswertung je Auftrag (WF-09):** Erlös minus Diesel minus kalkulatorische Maschinenkosten
+  (Annahmen: Reparatur Schlepper 8 €/h, Verschleiß Grubber 3 €/ha). Lohn des Chefs nicht eingerechnet.
+- **Spielstand:** In der App eine SQLite-Datei je Spielstand im App-Datenordner
+  (`spielstand-<name>.db`, Verzeichnis `spielstaende.db`). Die Datei enthält Tabellen `meta` (mit
+  Schema-Version), `zustand` (vollständiger Zustand als JSON), `buchungen`, `rechnungen` und
+  `kunden`. Im Browser landet der Spielstand im localStorage. Autosave einmal je Spieltag; beim
+  Start geht es mit dem Autosave weiter (`?neu` startet ein neues Spiel). Laden ist bitgleich:
+  Ein geladener Stand rechnet exakt so weiter wie das Original.

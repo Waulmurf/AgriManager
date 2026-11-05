@@ -1,8 +1,8 @@
 /** Nachrichten zwischen Oberfläche und Simulations-Worker. */
-import type { PlayerUnitInfo, VehicleInfo } from './engine';
+import type { PlayerUnitInfo, SaveState, VehicleInfo } from './engine';
 import type { Company } from './economy';
 import type { ContactPreference } from './farms';
-import type { Command, GameEvent, Order, Request } from './business';
+import type { Command, GameEvent, Invoice, LedgerEntry, Order, Request } from './business';
 import type { MarketOffer } from './economy';
 
 /** Spielminuten pro Sekunde Echtzeit bei 1x. 10x/100x vervielfachen die Schrittzahl. */
@@ -16,7 +16,9 @@ export type ToWorker =
   | { type: 'init'; graph: ArrayBuffer; fields?: ArrayBuffer; seed: number; vehicleCount: number }
   | { type: 'speed'; speed: Speed }
   | { type: 'stepOnce' }
-  | { type: 'command'; id: number; cmd: Command };
+  | { type: 'command'; id: number; cmd: Command }
+  | { type: 'save'; id: number }
+  | { type: 'load'; id: number; state: SaveState };
 
 export interface WireRoute {
   id: number;
@@ -60,6 +62,11 @@ export interface BusinessState {
   knownFarms: number[];
   satisfaction: Record<number, number>;
   events: GameEvent[];
+  invoices: Invoice[];
+  /** letzte Buchungen (neueste zuletzt) */
+  ledger: LedgerEntry[];
+  /** Auswertung je Auftrag (WF-09) */
+  results: Record<number, { revenue: number; diesel: number; machines: number; margin: number }>;
 }
 
 export interface WorkerStats {
@@ -104,4 +111,6 @@ export type FromWorker =
     }
   | { type: 'business'; state: BusinessState }
   | { type: 'commandResult'; id: number; message: string }
+  | { type: 'saveData'; id: number; state: SaveState }
+  | { type: 'loaded'; id: number; ok: boolean; message: string }
   | { type: 'error'; message: string };

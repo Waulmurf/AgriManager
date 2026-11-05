@@ -30,6 +30,9 @@ export interface SelftestResult {
   devicePixelRatio: number;
   minFps: number;
   minSps: number;
+  /** Spielstand speichern und laden (SQLite in der App) */
+  saveOk: boolean;
+  saveMessage: string;
   failures: string[];
 }
 
@@ -71,6 +74,25 @@ export async function runSelftest(
   log(`Messung fertig: ${Math.round(simMinutes)} Spielminuten, fps ${fps.map((f) => f.toFixed(0)).join('/')}`);
   game.setSpeed(1);
 
+  // Spielstand: speichern, laden, Zeit muss übereinstimmen
+  let saveOk = false;
+  let saveMessage = '';
+  try {
+    game.setSpeed(0);
+    await wait(500);
+    const t = game.status.business?.time ?? -1;
+    const m1 = await game.saveGame('Selbsttest');
+    const m2 = await game.loadGame('Selbsttest');
+    await wait(500);
+    saveOk = m1.startsWith('Gespeichert') && m2.startsWith('Geladen') && game.status.business?.time === t;
+    await game.deleteSave('Selbsttest');
+    saveMessage = `${m1}; ${m2}; Zeit ${t} → ${game.status.business?.time}`;
+  } catch (e) {
+    saveOk = false;
+    saveMessage = e instanceof Error ? e.message : String(e);
+  }
+  log(`Spielstand: ${saveMessage}`);
+
   const avg = (a: number[]) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
   const positions = game.vehiclePositions();
   const r = game.status.region;
@@ -105,6 +127,8 @@ export async function runSelftest(
     devicePixelRatio: window.devicePixelRatio,
     minFps,
     minSps,
+    saveOk,
+    saveMessage,
     failures,
   };
   if (!webgl2) failures.push('kein WebGL2');
@@ -112,6 +136,7 @@ export async function runSelftest(
   if (result.tileErrors > 0) failures.push(`${result.tileErrors} Kartenfehler`);
   if (result.vehicles !== 30 || result.vehiclesOnMap < 30) failures.push('nicht alle 30 Fahrzeuge auf der Karte');
   if (result.stepsPerSecond < minSps) failures.push(`nur ${result.stepsPerSecond} Schritte/s bei 100x`);
+  if (!saveOk) failures.push(`Spielstand: ${saveMessage}`);
   if (result.fpsAvg < minFps) failures.push(`Bildrate ${result.fpsAvg} fps unter ${minFps} fps`);
   result.ok = failures.length === 0;
   await reportSelftest(result);

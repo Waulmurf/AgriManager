@@ -303,3 +303,140 @@ export function VehicleMenu({ status, game }: { status: GameStatus; game: GameCo
     </div>
   );
 }
+
+const CATEGORIES = ['Rechnung', 'Diesel', 'Maschinenkauf', 'Sonstiges'] as const;
+
+/** Finanzen: Konto, Monatsübersicht, Rechnungen, Auswertung je Auftrag (WF-08, WF-09) */
+export function FinanceTab({ status, game }: { status: GameStatus; game: GameController | null }) {
+  const b = status.business;
+  const c = status.company;
+  if (!b || !c) return <p className="hint">–</p>;
+  // Monatsübersicht aus den Buchungen
+  const months = new Map<string, Record<string, number>>();
+  for (const l of b.ledger) {
+    const t = formatGameTime(l.time).date; // „Mo, 01.03.2027“
+    const key = t.slice(-7); // „03.2027“
+    const m = months.get(key) ?? {};
+    m[l.category] = (m[l.category] ?? 0) + l.amount;
+    months.set(key, m);
+  }
+  const openInv = b.invoices.filter((i) => i.status === 'offen');
+  const finished = b.orders.filter((o) => o.status === 'fertig').slice().reverse();
+  return (
+    <>
+      <h2>Konto</h2>
+      <dl>
+        <dt>Kontostand</dt><dd data-testid="cash-finance">{eur(c.cash)}</dd>
+        <dt>Offene Rechnungen</dt><dd>{eur(openInv.reduce((a, i) => a + i.amount, 0))} ({openInv.length})</dd>
+        <dt>Kreditrahmen frei</dt><dd>{eur(c.creditLimit - c.loan)}</dd>
+      </dl>
+      <h2>Monatsübersicht</h2>
+      {months.size ? (
+        <table className="tbl">
+          <thead><tr><th>Monat</th>{CATEGORIES.map((k) => <th key={k}>{k === 'Maschinenkauf' ? 'Maschinen' : k}</th>)}<th>Saldo</th></tr></thead>
+          <tbody>
+            {[...months.entries()].reverse().map(([m, v]) => {
+              const sum = Object.values(v).reduce((a, x) => a + x, 0);
+              return (
+                <tr key={m}>
+                  <td>{m}</td>
+                  {CATEGORIES.map((k) => <td key={k}>{v[k] ? eur(v[k]) : '–'}</td>)}
+                  <td className={sum < 0 ? 'neg' : 'pos'}>{eur(sum)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      ) : (
+        <p className="hint">Noch keine Buchungen.</p>
+      )}
+      <h2>Rechnungen</h2>
+      {b.invoices.length ? (
+        <ul className="list" data-testid="invoices">
+          {b.invoices.slice().reverse().map((i) => (
+            <li key={i.id}>
+              <span>
+                {i.number} · {game?.farmById(i.farmId)?.name} · <strong>{eur(i.amount)}</strong>
+              </span>
+              <small className={i.status === 'offen' && b.time > i.dueAt ? 'warn' : 'hint'}>
+                {i.text} · {i.status === 'bezahlt' ? `bezahlt am ${fmtDay(i.paidAt!)}` : `fällig ${fmtDay(i.dueAt)}${b.time > i.dueAt ? ' – überfällig' : ''}`}
+              </small>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="hint">Rechnungen entstehen automatisch, wenn ein Auftrag fertig ist.</p>
+      )}
+      <h2>Auswertung je Auftrag</h2>
+      {finished.length ? (
+        <table className="tbl">
+          <thead><tr><th>Kunde</th><th>Erlös</th><th>Diesel</th><th>Maschinen*</th><th>Ergebnis</th></tr></thead>
+          <tbody>
+            {finished.map((o) => {
+              const r = b.results[o.id];
+              return r ? (
+                <tr key={o.id}>
+                  <td>{game?.farmById(o.farmId)?.name}</td>
+                  <td>{eur(r.revenue)}</td>
+                  <td>{eur(r.diesel)}</td>
+                  <td>{eur(r.machines)}</td>
+                  <td className={r.margin < 0 ? 'neg' : 'pos'}>{eur(r.margin)}</td>
+                </tr>
+              ) : null;
+            })}
+          </tbody>
+        </table>
+      ) : (
+        <p className="hint">Noch keine abgeschlossenen Aufträge.</p>
+      )}
+      <p className="hint">* kalkulatorisch: Reparaturkosten Schlepper 8 €/h, Verschleiß Grubber 3 €/ha (Annahmen); Lohn des Chefs nicht eingerechnet.</p>
+      <h2>Letzte Buchungen</h2>
+      <ul className="list">
+        {b.ledger.slice(-15).reverse().map((l, i) => (
+          <li key={i}>
+            <span className={l.amount < 0 ? 'neg' : 'pos'}>{eur(l.amount)}</span>
+            <small className="hint">{formatGameTime(l.time).date} · {l.text}</small>
+          </li>
+        ))}
+      </ul>
+    </>
+  );
+}
+
+/** Spielstände: speichern, laden, löschen */
+export function SavePanel({ status, game, onClose }: { status: GameStatus; game: GameController | null; onClose: () => void }) {
+  const [name, setName] = useState(status.saveName && status.saveName !== 'Autosave' ? status.saveName : 'Mein Betrieb');
+  const fb = useFeedback();
+  return (
+    <div className="save-panel" data-testid="save-panel">
+      <div className="card-head">
+        <strong>Spielstand</strong>
+        <button className="close" onClick={onClose} aria-label="Schließen">×</button>
+      </div>
+      <div className="card-actions">
+        <input value={name} onChange={(e) => setName(e.target.value)} aria-label="Name des Spielstands" />
+        <button onClick={async () => fb.show(await game!.saveGame(name.trim() || 'Mein Betrieb'))} data-testid="save-now">Speichern</button>
+      </div>
+      <small className="hint">Automatisch gespeichert wird einmal je Spieltag („Autosave“). Beim Start geht es mit dem Autosave weiter.</small>
+      <ul className="list">
+        {status.saves.map((sv) => {
+          const t = formatGameTime(sv.gameTime);
+          return (
+            <li key={sv.name}>
+              <span><strong>{sv.name}</strong> · {t.date} {t.time} · {eur(sv.cash)}</span>
+              <span className="card-actions">
+                <button onClick={async () => { fb.show(await game!.loadGame(sv.name)); }} data-testid="load">Laden</button>
+                {sv.name !== 'Autosave' && <button onClick={() => game!.deleteSave(sv.name)}>Löschen</button>}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+      {!status.saves.length && <p className="hint">Noch keine Spielstände.</p>}
+      <div className="card-actions">
+        <button onClick={() => { window.location.search = '?neu'; }}>Neues Spiel</button>
+      </div>
+      {fb.msg && <small className="feedback">{fb.msg}</small>}
+    </div>
+  );
+}

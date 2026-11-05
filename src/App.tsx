@@ -4,13 +4,15 @@ import { formatGameTime } from './game/clock';
 import { runSelftest } from './game/selftest';
 import { forwardLogsToHost, platformName, selftestConfig } from './platform';
 import type { Speed } from './sim/protocol';
-import { BusinessTab, MarketTab, NewsTab, OrdersTab, VehicleMenu } from './ui/Panels';
+import { BusinessTab, FinanceTab, MarketTab, NewsTab, OrdersTab, SavePanel, VehicleMenu } from './ui/Panels';
+import { AUTOSAVE } from './game/savegame';
 
 const TABS = [
   { id: 'betrieb', label: 'Betrieb' },
   { id: 'auftraege', label: 'Aufträge' },
+  { id: 'finanzen', label: 'Finanzen' },
   { id: 'markt', label: 'Markt' },
-  { id: 'nachrichten', label: 'Nachrichten' },
+  { id: 'nachrichten', label: 'Meldungen' },
   { id: 'technik', label: 'Technik' },
 ] as const;
 type TabId = (typeof TABS)[number]['id'];
@@ -28,6 +30,7 @@ export function App() {
   const [status, setStatus] = useState<GameStatus | null>(null);
   const [selftest, setSelftest] = useState<string | null>(null);
   const [tab, setTab] = useState<TabId>('betrieb');
+  const [saveOpen, setSaveOpen] = useState(false);
 
   useEffect(() => {
     const g = new GameController();
@@ -42,10 +45,15 @@ export function App() {
       if (cancelled) return;
       log?.(`Spielstatus ${g.status.phase}${g.status.message ? ': ' + g.status.message : ''}`);
       if (cfg.enabled) {
+        g.autosave = false;
         setSelftest('läuft …');
         const r = await runSelftest(g, cfg.seconds, cfg.minFps, cfg.minSps, log ?? undefined);
         setSelftest(r.ok ? 'bestanden' : `fehlgeschlagen: ${r.failures.join(', ')}`);
       } else {
+        // Weiterspielen: Autosave laden, sofern vorhanden (nicht bei ?neu)
+        const saves = await g.refreshSaves();
+        const fresh = new URLSearchParams(window.location.search).has('neu');
+        if (!fresh && saves.some((x) => x.name === AUTOSAVE)) await g.loadGame(AUTOSAVE);
         g.setSpeed(1);
       }
     });
@@ -87,6 +95,12 @@ export function App() {
           <span className="date">{clock.date}</span>
           <span className="time">{clock.time}</span>
         </div>
+        <div className="save-wrap">
+          <button className="save-btn" onClick={() => { setSaveOpen((o) => !o); void game?.refreshSaves(); }} data-testid="save-menu">
+            Spielstand{status?.saveName ? `: ${status.saveName}` : ''}
+          </button>
+          {saveOpen && status && <SavePanel status={status} game={game} onClose={() => setSaveOpen(false)} />}
+        </div>
         <div className="speeds" role="group" aria-label="Spielgeschwindigkeit">
           {SPEEDS.map((s) => (
             <button
@@ -127,6 +141,7 @@ export function App() {
             <>
               <section hidden={tab !== 'betrieb'}><BusinessTab status={status} game={game} /></section>
               <section hidden={tab !== 'auftraege'}><OrdersTab status={status} game={game} /></section>
+              <section hidden={tab !== 'finanzen'}><FinanceTab status={status} game={game} /></section>
               <section hidden={tab !== 'markt'}><MarketTab status={status} game={game} /></section>
               <section hidden={tab !== 'nachrichten'}><NewsTab status={status} game={game} /></section>
             </>

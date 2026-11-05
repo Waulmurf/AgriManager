@@ -54,7 +54,9 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
   `src/sim/business.ts`, Spielerfahrzeuge in `engine.ts`, Oberfläche `src/ui/Panels.tsx`.
 - Phase 2, Schritt 4 fertig: Kartendaten v4 (Tempolimits), Fahrprofile, Kurven, Arbeitstempo,
   Rüstzeiten, Diesel, Chef-Arbeitszeit, Rechtsklick-Menü (Rückruf).
-- Nächster Schritt: Schritt 5 (Rechnung, Konto, Kundenzufriedenheit, SQLite-Spielstand).
+- Phase 2, Schritt 5 fertig: Rechnungen, Zahlungen, Buchungen, Finanzen-Reiter, Spielstand
+  (SQLite in der App über tauri-plugin-sql, localStorage im Browser), Autosave je Spieltag.
+- Phase 2 (Prototyp der Kern-Schleife) damit komplett → Gate „Nils spielt“.
 
 ## CI (GitHub Actions)
 

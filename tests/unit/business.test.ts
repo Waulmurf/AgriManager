@@ -218,3 +218,74 @@ describe('Rückruf, Rüstzeit, Arbeitszeit', () => {
     expect(g.command({ kind: 'recall', vehicle: 999 })).toMatch(/Nur eigene/);
   });
 });
+
+describe('Rechnung, Zahlung, Buchungen', () => {
+  it('stellt nach dem Auftrag eine Rechnung, der Kunde zahlt, alles wird gebucht', () => {
+    const s = world(5);
+    for (const farm of s.farms!.farms) {
+      s.command({ kind: 'visit', farmId: farm.id });
+      runUntil(s, () => !s.chefBusy);
+      if (s.business.requests.some((r) => r.status === 'offen')) break;
+    }
+    const req = s.business.requests.find((r) => r.status === 'offen')!;
+    s.command({ kind: 'respond', requestId: req.id, action: 'accept' });
+    s.command({ kind: 'buy', offerId: 1 });
+    const order = s.business.orders[0];
+    const grubber = s.company.machines.find((m) => m.type === 'grubber')!;
+    s.command({ kind: 'startJob', orderId: order.id, tractorId: 1, implementId: grubber.id });
+    runUntil(s, () => order.status === 'fertig', 20000);
+    const inv = s.business.invoices.find((i) => i.orderId === order.id)!;
+    expect(inv).toBeDefined();
+    expect(inv.amount).toBeCloseTo(order.priceHa * order.areaHa, 2);
+    expect(inv.number).toMatch(/^RE-2027-0001$/);
+    expect(inv.dueAt - inv.issuedAt).toBe(14 * 1440);
+    const cash = s.company.cash;
+    runUntil(s, () => inv.status === 'bezahlt', 40 * 1440);
+    expect(inv.status).toBe('bezahlt');
+    expect(s.company.cash).toBeGreaterThan(cash + inv.amount - 50); // abzüglich weiterer Dieselbuchungen
+    const cats = new Set(s.business.ledger.map((l) => l.category));
+    expect(cats.has('Maschinenkauf')).toBe(true);
+    expect(cats.has('Diesel')).toBe(true);
+    expect(cats.has('Rechnung')).toBe(true);
+    // Auswertung: Erlös − Diesel − Maschinen
+    const r = s.business.orderResult(order);
+    expect(r.revenue).toBeCloseTo(inv.amount, 2);
+    expect(r.margin).toBeCloseTo(r.revenue - r.diesel - r.machines, 2);
+    expect(r.margin).toBeGreaterThan(0);
+  });
+});
+
+describe('Spielstand', () => {
+  it('läuft nach Speichern und Laden bitgleich weiter', () => {
+    const a = world(6);
+    // etwas spielen: Besuche, Auftrag annehmen und starten
+    for (const farm of a.farms!.farms.slice(0, 8)) {
+      a.command({ kind: 'visit', farmId: farm.id });
+      runUntil(a, () => !a.chefBusy);
+    }
+    const req = a.business.requests.find((r) => r.status === 'offen');
+    if (req) {
+      a.command({ kind: 'respond', requestId: req.id, action: 'accept' });
+      a.command({ kind: 'buy', offerId: 1 });
+      const g = a.company.machines.find((m) => m.type === 'grubber')!;
+      a.command({ kind: 'startJob', orderId: a.business.orders[0].id, tractorId: 1, implementId: g.id });
+    }
+    a.run(200); // mitten in der Fahrt/Arbeit speichern
+    const saved = JSON.parse(JSON.stringify(a.serialize()));
+    const b = world(6);
+    b.restore(saved);
+    expect(b.hash()).toBe(a.hash());
+    a.run(3000);
+    b.run(3000);
+    expect(b.hash()).toBe(a.hash());
+    expect(b.company.cash).toBe(a.company.cash);
+    expect(b.business.invoices.length).toBe(a.business.invoices.length);
+    expect(b.farms!.farms.filter((f) => f.known).length).toBe(a.farms!.farms.filter((f) => f.known).length);
+  });
+
+  it('weist unpassende Spielstände ab', () => {
+    const a = world(6);
+    const s = a.serialize();
+    expect(() => world(6).restore({ ...s, version: 99 })).toThrow();
+  });
+});

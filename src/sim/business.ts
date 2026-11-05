@@ -20,6 +20,11 @@ export const REPLY_MINUTES = 2 * 1440;
 export const MAX_REQUEST_FIELD_HA = 60;
 /** Dieselpreis netto (Annahme, Agrardiesel nach Rückvergütung, €/l) */
 export const DIESEL_PRICE = 1.35;
+/** Zahlungsziel für Rechnungen (Tage) */
+export const PAYMENT_TERM_DAYS = 14;
+/** kalkulatorische Maschinenkosten für die Auswertung (Annahmen, LWK-Größenordnung) */
+export const REPAIR_TRACTOR_EUR_H = 8;
+export const WEAR_GRUBBER_EUR_HA = 3;
 
 export type Service = 'grubbern';
 export const SERVICE_NAMES: Record<Service, string> = { grubbern: 'Grubbern' };
@@ -65,6 +70,38 @@ export interface Order {
   /** verbrauchter Diesel (l) und Kosten (€) für diesen Auftrag */
   dieselL: number;
   dieselCost: number;
+  /** Arbeitsstunden des Schleppers für diesen Auftrag (Straße + Feld) */
+  tractorHours: number;
+  invoiceId?: number;
+}
+
+export type InvoiceStatus = 'offen' | 'bezahlt';
+
+/** Rechnung (AK-09), netto */
+export interface Invoice {
+  id: number;
+  number: string;
+  orderId: number;
+  farmId: number;
+  text: string;
+  amount: number;
+  issuedAt: number;
+  /** Zahlungsziel */
+  dueAt: number;
+  /** wann der Kunde tatsächlich zahlt (intern, hängt von der Zufriedenheit ab) */
+  payAt: number;
+  paidAt?: number;
+  status: InvoiceStatus;
+}
+
+export type LedgerCategory = 'Rechnung' | 'Diesel' | 'Maschinenkauf' | 'Sonstiges';
+
+/** Buchung auf dem Konto (WF-08) */
+export interface LedgerEntry {
+  time: number;
+  text: string;
+  amount: number;
+  category: LedgerCategory;
 }
 
 export interface GameEvent {
@@ -84,6 +121,11 @@ export type Command =
 export class Business {
   readonly requests: Request[] = [];
   readonly orders: Order[] = [];
+  readonly invoices: Invoice[] = [];
+  readonly ledger: LedgerEntry[] = [];
+  /** heute verbrauchter Diesel, wird täglich als eine Buchung zusammengefasst */
+  private dieselTodayL = 0;
+  private dieselTodayEur = 0;
   readonly offers: MarketOffer[] = START_OFFERS.map((o) => ({ ...o, machine: { ...o.machine } }));
   private events: GameEvent[] = [];
   private rng: Rng;
@@ -100,6 +142,38 @@ export class Business {
     readonly fields: FieldSet | null,
   ) {
     this.rng = new Rng(seed ^ 0xb051e55);
+  }
+
+  /** Zustand für den Spielstand (ohne Betriebe/Felder, die aus dem Seed entstehen) */
+  serialize() {
+    return {
+      rng: this.rng.getState(),
+      nextId: this.nextId,
+      requests: this.requests,
+      orders: this.orders,
+      invoices: this.invoices,
+      ledger: this.ledger,
+      offers: this.offers,
+      dieselTotalL: this.dieselTotalL,
+      dieselTodayL: this.dieselTodayL,
+      dieselTodayEur: this.dieselTodayEur,
+    };
+  }
+
+  restore(s: ReturnType<Business['serialize']>) {
+    this.rng.setState(s.rng);
+    this.nextId = s.nextId;
+    const put = <T,>(dst: T[], src: T[]) => { dst.length = 0; dst.push(...structuredClone(src)); };
+    put(this.requests, s.requests);
+    put(this.orders, s.orders);
+    put(this.invoices, s.invoices);
+    put(this.ledger, s.ledger);
+    put(this.offers, s.offers);
+    this.dieselTotalL = s.dieselTotalL;
+    this.dieselTodayL = s.dieselTodayL;
+    this.dieselTodayEur = s.dieselTodayEur;
+    this.events = [];
+    this.version++;
   }
 
   drainEvents(): GameEvent[] {
@@ -193,6 +267,17 @@ export class Business {
 
   /** Täglich um 06:00: Anfragen per Anruf/Nachricht von bekannten Betrieben, Fristen prüfen */
   daily(time: number) {
+    this.bookDiesel(time);
+    for (const inv of this.invoices) {
+      if (inv.status === 'offen' && time >= inv.payAt) {
+        inv.status = 'bezahlt';
+        inv.paidAt = time;
+        this.company.cash = Math.round((this.company.cash + inv.amount) * 100) / 100;
+        this.ledger.push({ time, text: `Zahlung ${inv.number} ${this.farmName(inv.farmId)}`, amount: inv.amount, category: 'Rechnung' });
+        const late = time > inv.dueAt;
+        this.emit(time, 'info', `${this.farmName(inv.farmId)} hat Rechnung ${inv.number} bezahlt: ${fmtEur(inv.amount)}${late ? ' (verspätet)' : ''}.`, inv.farmId);
+      }
+    }
     for (const r of this.requests) {
       if (r.status === 'offen' && time >= r.replyBy) {
         r.status = 'abgelaufen';
@@ -253,6 +338,7 @@ export class Business {
       status: 'offen',
       dieselL: 0,
       dieselCost: 0,
+      tractorHours: 0,
     };
     this.orders.push(o);
     this.emit(time, 'auftrag', `Auftrag ${this.farmName(r.farmId)}: Grubbern ${fmtHa(o.areaHa)} zu ${fmtEur(price)}/ha, fertig bis ${fmtDay(o.latest)}`, r.farmId);
@@ -269,6 +355,7 @@ export class Business {
     const id = this.company.machines.reduce((m, x) => Math.max(m, x.id), 0) + 1;
     this.company.machines.push({ id, ...o.machine });
     this.offers.splice(idx, 1);
+    this.ledger.push({ time, text: `Kauf ${o.machine.brand} ${o.machine.model}`, amount: -o.price, category: 'Maschinenkauf' });
     this.emit(time, 'info', `Gekauft: ${o.machine.brand} ${o.machine.model} für ${fmtEur(o.price)}.`);
     return 'gekauft';
   }
@@ -291,6 +378,7 @@ export class Business {
       const onTime = time <= o.latest;
       if (farm) farm.satisfaction = Math.max(0, Math.min(100, farm.satisfaction + (onTime ? 5 : -10)));
       this.emit(time, 'auftrag', `Auftrag ${this.farmName(o.farmId)} fertig${onTime ? ', pünktlich' : ', verspätet'} (${fmtHa(o.areaHa)}).`, o.farmId);
+      this.issueInvoice(o, time);
     }
   }
 
@@ -300,11 +388,56 @@ export class Business {
     const cost = liters * DIESEL_PRICE;
     this.company.cash = Math.round((this.company.cash - cost) * 100) / 100;
     this.dieselTotalL += liters;
+    this.dieselTodayL += liters;
+    this.dieselTodayEur += cost;
     if (order) {
       order.dieselL = Math.round((order.dieselL + liters) * 10) / 10;
       order.dieselCost = Math.round((order.dieselCost + cost) * 100) / 100;
     }
     this.version++;
+  }
+
+  /** Dieselkosten des Tages als eine Buchung */
+  private bookDiesel(time: number) {
+    if (this.dieselTodayEur <= 0) return;
+    this.ledger.push({
+      time,
+      text: `Diesel ${this.dieselTodayL.toLocaleString('de-DE', { maximumFractionDigits: 0 })} l`,
+      amount: -Math.round(this.dieselTodayEur * 100) / 100,
+      category: 'Diesel',
+    });
+    this.dieselTodayL = 0;
+    this.dieselTodayEur = 0;
+  }
+
+  /** Rechnung nach Abschluss (AK-09); Zahltag hängt von der Zufriedenheit ab */
+  private issueInvoice(o: Order, time: number) {
+    const farm = this.farms?.farms[o.farmId];
+    const sat = farm?.satisfaction ?? 50;
+    const delay = sat >= 60 ? 3 + this.rng.int(10) : sat >= 40 ? 10 + this.rng.int(11) : 18 + this.rng.int(18);
+    const d = gameDate(time);
+    const inv: Invoice = {
+      id: this.nextId++,
+      number: `RE-${d.year}-${String(this.invoices.length + 1).padStart(4, '0')}`,
+      orderId: o.id,
+      farmId: o.farmId,
+      text: `${SERVICE_NAMES[o.service]} ${fmtHa(o.areaHa)} à ${fmtEur(o.priceHa)}/ha`,
+      amount: Math.round(o.priceHa * o.areaHa * 100) / 100,
+      issuedAt: time,
+      dueAt: time + PAYMENT_TERM_DAYS * 1440,
+      payAt: time + delay * 1440,
+      status: 'offen',
+    };
+    this.invoices.push(inv);
+    o.invoiceId = inv.id;
+    this.emit(time, 'info', `Rechnung ${inv.number} an ${this.farmName(o.farmId)}: ${fmtEur(inv.amount)}, zahlbar bis ${fmtDay(inv.dueAt)}.`, o.farmId);
+  }
+
+  /** Auswertung eines Auftrags (WF-09): Erlös minus Diesel minus kalkulatorische Maschinenkosten */
+  orderResult(o: Order): { revenue: number; diesel: number; machines: number; margin: number } {
+    const revenue = Math.round(o.priceHa * o.areaHa * 100) / 100;
+    const machines = Math.round((o.tractorHours * REPAIR_TRACTOR_EUR_H + o.areaHa * WEAR_GRUBBER_EUR_HA) * 100) / 100;
+    return { revenue, diesel: o.dieselCost, machines, margin: Math.round((revenue - o.dieselCost - machines) * 100) / 100 };
   }
 
   /** Auftrag unterbrochen (Fahrzeug zurückgerufen): bleibt offen, erledigte Felder zählen */

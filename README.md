@@ -5,7 +5,7 @@ Die Anforderungen stehen in [docs/anforderungen.md](docs/anforderungen.md) und
 [docs/maschinen.md](docs/maschinen.md). Technische Entscheidungen und Messwerte
 stehen in [docs/technik.md](docs/technik.md).
 
-**Stand:** technischer Prototyp (Karte, Simulation, 30 Testfahrzeuge, CI). Spielinhalte folgen erst danach.
+**Stand:** Prototyp der Kern-Schleife (Phase 2): Kunden besuchen, Anfragen annehmen, Grubber-Aufträge auf echten Feldern fahren, Rechnung, Konto, Spielstand.
 
 ## Schnellstart
 

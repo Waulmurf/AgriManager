@@ -17,6 +17,8 @@ import type { Company } from '../sim/economy';
 import { CROP_NAMES } from '../sim/farms';
 import type { VehicleInfo } from '../sim/engine';
 import { FieldSource, fieldId, parseFields, type FieldSet } from '../sim/fields';
+import { AUTOSAVE, createSaveStore, type SaveInfo } from './savegame';
+import type { SaveState } from '../sim/engine';
 
 export interface RegionInfo {
   tag: string;
@@ -53,6 +55,10 @@ export interface GameStatus {
   testVehiclesVisible: boolean;
   /** offenes Rechtsklick-Menü (Bildschirmposition relativ zur Karte) */
   contextMenu: { x: number; y: number; vehicle: number } | null;
+  /** vorhandene Spielstände */
+  saves: SaveInfo[];
+  /** zuletzt geladener/gespeicherter Spielstand */
+  saveName: string | null;
   /** letzte Ereignisse, neueste zuerst */
   events: GameEvent[];
   tilesLoaded: boolean;
@@ -82,12 +88,19 @@ export class GameController {
   private activeFields = new Set<number>();
   private farms: FarmSummary[] = [];
   private cmdId = 1;
+  private store = createSaveStore();
+  private pendingSaves = new Map<number, (s: SaveState) => void>();
+  private pendingLoads = new Map<number, (r: { ok: boolean; message: string }) => void>();
+  private lastAutosaveDay = 0;
+  private saving = false;
+  /** Autosave abschalten (Selbsttest) */
+  autosave = true;
   private pendingCmds = new Map<number, (msg: string) => void>();
   private fieldFarm: Int32Array = new Int32Array(0);
   private fieldCrop: Uint8Array = new Uint8Array(0);
   status: GameStatus = {
     phase: 'loading', speed: 0, time: 0, simTime: 0, vehicles: 0, stats: null, fps: 0, frameP95: 0, updateMs: 0,
-    region: null, graph: null, fieldCount: 0, company: null, farmCount: 0, knownFarms: 0, business: null, events: [], testVehiclesVisible: false, contextMenu: null, tilesLoaded: false, tileErrors: 0,
+    region: null, graph: null, fieldCount: 0, company: null, farmCount: 0, knownFarms: 0, business: null, events: [], testVehiclesVisible: false, contextMenu: null, saves: [], saveName: null, tilesLoaded: false, tileErrors: 0,
   };
 
   subscribe(fn: (s: GameStatus) => void): () => void {
@@ -277,6 +290,18 @@ export class GameController {
       if (changed) this.setFarmData();
       const events = [...st.events.slice().reverse(), ...this.status.events].slice(0, 60);
       this.emit({ business: st, company: st.company, knownFarms: st.knownFarms.length, events });
+      // Autosave einmal je Spieltag (beim Tageswechsel um 06:00)
+      const day = Math.floor(st.time / 1440);
+      if (this.autosave && day > this.lastAutosaveDay) {
+        this.lastAutosaveDay = day;
+        void this.saveGame(AUTOSAVE).catch((e) => console.warn('Autosave fehlgeschlagen', e));
+      }
+    } else if (msg.type === 'saveData') {
+      this.pendingSaves.get(msg.id)?.(msg.state);
+      this.pendingSaves.delete(msg.id);
+    } else if (msg.type === 'loaded') {
+      this.pendingLoads.get(msg.id)?.(msg);
+      this.pendingLoads.delete(msg.id);
     } else if (msg.type === 'commandResult') {
       this.pendingCmds.get(msg.id)?.(msg.message);
       this.pendingCmds.delete(msg.id);
@@ -350,6 +375,59 @@ export class GameController {
       crop: this.fieldCrop.length ? CROP_NAMES[this.fieldCrop[i]] : '–',
       farm: farm ? farm.name : '–',
     };
+  }
+
+  /** Spielstand speichern (Name; Standard: Autosave) */
+  async saveGame(name: string = AUTOSAVE): Promise<string> {
+    if (this.saving) return 'Speichern läuft bereits';
+    this.saving = true;
+    try {
+      const id = this.cmdId++;
+      const state = await new Promise<SaveState>((res) => {
+        this.pendingSaves.set(id, res);
+        this.post({ type: 'save', id });
+      });
+      await this.store.save(name, state, {
+        dataTag: this.status.region?.tag ?? '',
+        business: this.status.business,
+        farms: this.farms,
+      });
+      this.emit({ saveName: name });
+      await this.refreshSaves();
+      return `Gespeichert: ${name}`;
+    } finally {
+      this.saving = false;
+    }
+  }
+
+  /** Spielstand laden */
+  async loadGame(name: string): Promise<string> {
+    const data = await this.store.load(name);
+    if (!data) return 'Spielstand nicht gefunden';
+    const tag = this.status.region?.tag;
+    if (data.info.dataTag && tag && data.info.dataTag !== tag) {
+      console.warn(`Spielstand mit Kartendaten ${data.info.dataTag}, geladen sind ${tag}`);
+    }
+    const id = this.cmdId++;
+    const r = await new Promise<{ ok: boolean; message: string }>((res) => {
+      this.pendingLoads.set(id, res);
+      this.post({ type: 'load', id, state: data.state });
+    });
+    if (!r.ok) return `Laden fehlgeschlagen: ${r.message}`;
+    this.lastAutosaveDay = Math.floor(data.state.time / 1440);
+    this.emit({ saveName: name, speed: 0, events: [] });
+    return `Geladen: ${name}`;
+  }
+
+  async refreshSaves(): Promise<SaveInfo[]> {
+    const saves = await this.store.list().catch(() => [] as SaveInfo[]);
+    this.emit({ saves });
+    return saves;
+  }
+
+  async deleteSave(name: string) {
+    await this.store.remove(name);
+    await this.refreshSaves();
   }
 
   /** Spielerbefehl an die Simulation; liefert die Rückmeldung. */

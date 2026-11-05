@@ -102,6 +102,9 @@ function sendBusiness(force = false) {
     knownFarms: known,
     satisfaction,
     events: b.drainEvents(),
+    invoices: b.invoices.map((i) => ({ ...i })),
+    ledger: b.ledger.slice(-300).map((l) => ({ ...l })),
+    results: Object.fromEntries(b.orders.filter((o) => o.status === 'fertig').map((o) => [o.id, b.orderResult(o)])),
   };
   post({ type: 'business', state });
 }
@@ -110,7 +113,7 @@ let lastBizSend = 0;
 function send(now: number) {
   if (!sim) return;
   // während eigene Fahrzeuge unterwegs sind: Status/Tempo regelmäßig aktualisieren
-  const live = sim.chefBusy !== null && now - lastBizSend > 250;
+  const live = now - lastBizSend > (sim.chefBusy !== null ? 250 : 1000);
   if (live || sim.business.version !== sentBusinessVersion) lastBizSend = now;
   sendBusiness(live);
   const positions = sim.snapshot();
@@ -189,6 +192,7 @@ function setSpeed(s: Speed) {
   timer = null;
   if (sim) {
     send(now);
+    sendBusiness(true); // aktueller Stand auch beim Pausieren
     if (s > 0) loop();
   }
 }
@@ -222,6 +226,24 @@ self.onmessage = (ev: MessageEvent<ToWorker>) => {
       const message = sim ? sim.command(msg.cmd) : 'Simulation nicht bereit';
       post({ type: 'commandResult', id: msg.id, message });
       sendBusiness(true);
+    } else if (msg.type === 'save') {
+      if (sim) post({ type: 'saveData', id: msg.id, state: sim.serialize() });
+    } else if (msg.type === 'load') {
+      if (!sim) {
+        post({ type: 'loaded', id: msg.id, ok: false, message: 'Simulation nicht bereit' });
+      } else {
+        try {
+          sim.restore(msg.state);
+        } catch (e) {
+          post({ type: 'loaded', id: msg.id, ok: false, message: e instanceof Error ? e.message : String(e) });
+          return;
+        }
+        pendingRoutes = sim.drainRoutes().map(toWire);
+        lastSentTime = -1;
+        setSpeed(0);
+        sendBusiness(true);
+        post({ type: 'loaded', id: msg.id, ok: true, message: 'geladen' });
+      }
     } else if (msg.type === 'stepOnce') {
       if (sim) {
         doSteps(1);

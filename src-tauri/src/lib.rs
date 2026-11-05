@@ -66,6 +66,8 @@ fn selftest_log(msg: String) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Spielstände als SQLite-Dateien (eine Datei je Spielstand im App-Datenordner)
+        .plugin(tauri_plugin_sql::Builder::default().build())
         .invoke_handler(tauri::generate_handler![selftest_config, selftest_report, selftest_log])
         .register_asynchronous_uri_scheme_protocol("mapdata", |ctx, request, responder| {
             let root = map_dir(ctx.app_handle());
