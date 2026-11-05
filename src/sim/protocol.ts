@@ -71,6 +71,11 @@ export interface BusinessState {
   deliveries: Delivery[];
   discounts: Record<number, number>;
   machineValues: Record<number, number>;
+  /** Wetter (Phase 4, Schritt 2): heute und Vorhersage */
+  weather: {
+    temp: number; rain: number; rainFrom: number; soil: number; frost: boolean; blocked: string | null;
+    forecast: { day: number; rainChance: number; rainMm: number; temp: number; blocked: boolean }[];
+  };
   /** Finanzen (Phase 4): Dieselpreis, laufendes Jahr, Jahresabschlüsse, Steuer, Bilanz */
   dieselPrice: number;
   yearNow: { revenue: number; expenses: number; afa: number; profit: number };

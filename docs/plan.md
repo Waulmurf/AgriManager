@@ -502,3 +502,34 @@ Schritte:
   Jahresabschlüssen und Monatsübersicht (Finanzierung und Abgaben zusammengefasst).
   Leasingangebote im Markt, Leasingverträge im Fuhrpark.
 
+### Schritt 2: Wetter (Annahmen und Quellen)
+
+- Ein Wetter je Tag für das ganze Spielgebiet, deterministisch aus dem Seed (`src/sim/weather.ts`).
+- **Niederschlag und Regentage** je Monat nach der DWD-Station Uelzen
+  ([wetterdienst.de](https://www.wetterdienst.de/Deutschlandwetter/Bad_Bevensen/Klima/)):
+  zusammen etwa 700 mm an rund 180 Tagen.
+  - Regen als Markow-Kette: Nach einem Regentag ist Regen wahrscheinlicher.
+  - Menge schief verteilt mit dem Monatsmittel je Regentag; der Regen beginnt zu einer
+    zufälligen Stunde.
+- **Temperatur:** Monatsmittel (Annahme Lüneburger Heide, Jahresmittel etwa 9,6 °C laut
+  [klima.org](https://klima.org/deutschland/klima-uelzen/)) mit träger Abweichung. Frost unter
+  −1,5 °C.
+- **Bodenfeuchte:** Speicher von 40 mm im Oberboden.
+  - Zufluss: Regen zu 90 %.
+  - Abfluss: Verdunstung 0,3–4 mm am Tag nach Temperatur, Versickerung 12 % des Überschusses
+    über 20 mm (Sandböden um Uelzen).
+  - Über 30 mm gilt der Boden als zu nass.
+- **Feldarbeit ruht:**
+  - bei gefrorenem oder zu nassem Boden
+  - am Tag nach Starkregen (mindestens 10 mm)
+  - ab Regenbeginn bei Tagen mit mindestens 5 mm
+  - Ergebnis über vier Jahre: Januar und Februar zu 40–60 % gesperrt, Dezember etwa 40 %,
+    März wenige Tage, April bis Oktober etwa 5–10 %.
+- **Folgen:** Ein Gespann auf dem Feld wartet, die Wartezeit zählt nicht als Arbeitszeit.
+  Aufträge in der Warteschlange starten erst bei passendem Wetter. Bei Bodenfeuchte über 25 mm
+  ist die Arbeit 10 % langsamer (AK-07).
+- **Vorhersage** über 7 Tage mit Regenwahrscheinlichkeit, unsicherer je weiter weg. Die
+  Zeitschätzung überspringt die voraussichtlich gesperrten Tage der nächsten 5 Tage.
+- **Anzeige:** Wetter und „Feldarbeit möglich/ruht“ in der oberen Leiste, Vorhersage im Kopf des
+  Planungsboards (gesperrte Tage blau hinterlegt).
+

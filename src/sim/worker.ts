@@ -126,6 +126,11 @@ function sendBusiness(force = false) {
     busyMachines: sim.busyMachineIds(),
     plan: sim.planBoard(),
     dieselPrice: b.dieselPrice,
+    weather: (() => {
+      const day = Math.floor(sim!.time / 1440);
+      const w = sim!.weather.day(day);
+      return { ...w, blocked: sim!.weather.fieldBlocked(sim!.time), forecast: sim!.weather.forecast(day, 7) };
+    })(),
     yearNow: (() => {
       const f = b.yearFigures(b.yearStart(sim!.time), sim!.time + 1);
       return { ...f, profit: f.revenue - f.expenses - f.afa };

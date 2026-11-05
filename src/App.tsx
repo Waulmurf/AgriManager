@@ -27,6 +27,14 @@ const SPEEDS: { value: Speed; label: string; key: string }[] = [
   { value: 100, label: '100x', key: '3' },
 ];
 
+/** einfaches Wettersymbol */
+export function weatherIcon(rain: number, frost = false): string {
+  if (frost) return '❄';
+  if (rain >= 5) return '🌧';
+  if (rain > 0) return '🌦';
+  return '☀';
+}
+
 export function App() {
   const mapRef = useRef<HTMLDivElement>(null);
   const [game, setGame] = useState<GameController | null>(null);
@@ -101,6 +109,12 @@ export function App() {
           <span className="date">{clock.date}</span>
           <span className="time">{clock.time}</span>
         </div>
+        {status?.business && (
+          <div className="weather" data-testid="weather" title={`Bodenfeuchte ${status.business.weather.soil.toLocaleString('de-DE')} mm · ${status.business.weather.blocked ?? 'Feldarbeit möglich'}`}>
+            <span>{weatherIcon(status.business.weather.rain, status.business.weather.frost)} {Math.round(status.business.weather.temp)} °C</span>
+            <small className={status.business.weather.blocked ? 'wx-bad' : 'wx-ok'}>{status.business.weather.blocked ?? 'Feldarbeit möglich'}</small>
+          </div>
+        )}
         {overdue > 0 && (
           <button className="alert-btn" onClick={() => setTab('finanzen')} data-testid="overdue-alert" title="Kunden anrufen oder besuchen, sonst verfällt die Forderung">
             {overdue === 1 ? '1 Rechnung überfällig' : `${overdue} Rechnungen überfällig`}

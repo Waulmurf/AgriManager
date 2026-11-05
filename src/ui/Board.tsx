@@ -109,7 +109,14 @@ export function PlanningBoard({ status, game, onClose }: { status: GameStatus; g
         <div className="board-row board-days">
           <div className="board-name" />
           <div className="board-track">
-            {dayLabels.map((l, d) => <div key={d} className="board-day" style={{ left: `${(d / DAYS) * 100}%`, width: `${100 / DAYS}%` }}>{l}<small> 06–22</small></div>)}
+            {dayLabels.map((l, d) => {
+              const fc = b.weather.forecast.find((f) => f.day === Math.floor(viewStart / 1440) + d);
+              return (
+                <div key={d} className={`board-day${fc?.blocked ? ' wet' : ''}`} style={{ left: `${(d / DAYS) * 100}%`, width: `${100 / DAYS}%` }} title={fc ? `Regen ${fc.rainChance} % · ${fc.rainMm} mm · ${fc.temp} °C${fc.blocked ? ' · Feldarbeit voraussichtlich nicht möglich' : ''}` : 'keine Vorhersage'}>
+                  {l} {fc ? <span>{fc.blocked ? '🌧' : fc.rainChance >= 50 ? '🌦' : '☀'} {fc.temp}°</span> : <small> 06–22</small>}
+                </div>
+              );
+            })}
           </div>
         </div>
         {c.drivers.map((dr) => (

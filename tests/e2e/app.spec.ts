@@ -180,7 +180,8 @@ test('Kern-Schleife: Besuch → Anfrage → Gerät kaufen → Auftrag starten', 
   await page.getByTestId('accept').first().click();
   await expect(page.getByTestId('order').first()).toBeVisible();
   await page.getByTestId('start-job').first().click();
-  await expect(page.getByTestId('order').first()).toContainText('läuft');
+  // bei nassem Boden wird der Auftrag eingeplant statt gestartet (Wetter)
+  await expect(page.getByTestId('order').first()).toContainText(/läuft|Eingeplant/);
 });
 
 test('Personal: Bewerber einstellen, zweiten Schlepper kaufen – erscheint auf der Karte', async ({ page }) => {

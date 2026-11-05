@@ -79,6 +79,8 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
 - Phase 4 läuft (Schritte in docs/plan.md). Schritt 1 Finanzen fertig: `src/sim/finance.ts` (Annuität,
   Leasing, AfA, Steuer, Bonität), Darlehen/Kontokorrent/Leasing/Versicherung/Jahresabschluss/Diesel in
   `business.ts` (`financeDaily`, `closeYear`), Reiter Finanzen.
+- Schritt 2 Wetter fertig: `src/sim/weather.ts` (Regen, Temperatur, Bodenfeuchte, Vorhersage), Feldarbeit
+  ruht bei Nässe/Frost (`Simulation.weatherHold`, Warteschlange), Anzeige oben und im Board.
 
 ## CI (GitHub Actions)
 

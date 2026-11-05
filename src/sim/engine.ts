@@ -15,6 +15,7 @@ import { DEALERS } from '../data/catalog';
 import { Business, REMIND_CALL_MINUTES, VISIT_MINUTES, WEAR_GRUBBER_EUR_HA, fmtDay, fmtHa, fmtTime, type Command, type QueueCommand, type QueueItem } from './business';
 import { appendEdgePoints, nearestNode, project, RoadClass, unproject, type RoadGraph } from './roadgraph';
 import { surchargeFactor } from './calendar';
+import { Weather } from './weather';
 
 export const STEP_SECONDS = 60;
 /** Werte je Fahrzeug im Positions-Schnappschuss */
@@ -86,6 +87,7 @@ export interface SaveState {
   rng: [number, number, number, number];
   company: Company;
   business: ReturnType<Business['serialize']>;
+  weather?: ReturnType<Weather['serialize']>;
   /** je Betrieb [bekannt 0/1, Zufriedenheit, bei der Konkurrenz bis] */
   farms: [number, number, number?][];
   vehicles: {
@@ -225,6 +227,8 @@ export class Simulation {
   readonly company: Company;
   /** Anfragen, Aufträge, Markt, Ereignisse */
   readonly business: Business;
+  /** Wetter und Bodenfeuchte (Phase 4, Schritt 2) */
+  readonly weather: Weather;
   readonly homeNode: number;
   /** heutige Arbeitsminuten des Chefs */
   get chefMinutes(): number {
@@ -284,6 +288,7 @@ export class Simulation {
     this.testCount = this.vehicles.length;
     for (const m of this.company.machines) this.addPlayerVehicle(m, false);
     this.business = new Business(opts.seed, this.company, this.farms, this.fields);
+    this.weather = new Weather(opts.seed);
     // Abgestellt am Hof: Route aus einem Punkt, damit jedes Fahrzeug eine Position hat
     for (const v of this.vehicles) {
       v.route = this.makeRoute([graph.x[this.homeNode]], [graph.y[this.homeNode]], [], 'road');
@@ -293,6 +298,12 @@ export class Simulation {
 
   get vehicleInfo(): VehicleInfo[] {
     return this.vehicles.map(({ id, name, brand, profile, owner, machineId }) => ({ id, name, brand, profile, owner, machineId }));
+  }
+
+  /** Gespann wartet auf dem Feld auf besseres Wetter (zählt nicht als Arbeitszeit) */
+  private weatherHold(v: Vehicle): boolean {
+    const t = v.task;
+    return t?.kind === 'job' && (t.phase === 'setup' || t.phase === 'work') && this.weather.fieldBlocked(this.time) !== null;
   }
 
   /** Fahrbare Maschine des Spielers als Fahrzeug auf die Karte bringen (Schlepper, Firmenwagen) */
@@ -376,7 +387,7 @@ export class Simulation {
     }
     // Arbeitszeit je Fahrer: zählt, solange er unterwegs ist (nicht im Feierabend)
     for (const v of this.vehicles) {
-      if (v.owner === 'player' && v.task && v.restUntil <= this.time && !this.business.absence(v.task.driverId, this.time)) {
+      if (v.owner === 'player' && v.task && v.restUntil <= this.time && !this.business.absence(v.task.driverId, this.time) && !this.weatherHold(v)) {
         const d = v.task.driverId;
         this.driverMinutes[d] = (this.driverMinutes[d] ?? 0) + 1;
         const f = surchargeFactor(this.time);
@@ -484,6 +495,7 @@ export class Simulation {
       tried.add(d);
       if (this.driverBusy(d) || this.driverBlocked(d)) continue;
       if ((item.notBefore ?? 0) > this.time) continue; // geplanter Starttermin noch nicht erreicht
+      if (item.cmd.kind === 'startJob' && this.weather.fieldBlocked(this.time)) continue; // Wetter
       const err = this.checkQueueCommand(item.cmd, item.id);
       if (!err && this.machineInUse(item.cmd)) continue; // wartet auf die Maschine
       this.queue.splice(k, 1);
@@ -540,8 +552,12 @@ export class Simulation {
   }
 
   /** Ende, wenn ab jetzt `need` Minuten Chef-Arbeitszeit anfallen (10 h je Tag, Start 06:00) */
-  private finishAfter(need: number, driverId = 1, from = this.time): number {
+  private finishAfter(need: number, driverId = 1, from = this.time, field = true): number {
     let t = Math.max(from, this.time);
+    const today0 = Math.floor(this.time / 1440);
+    // Tage mit gesperrter Feldarbeit überspringen, soweit die Vorhersage reicht (5 Tage)
+    const skip = (day: number) => field && day - today0 <= 5 && this.weather.dayBlocked(day);
+    for (let k = 0; k < 10 && skip(Math.floor(t / 1440)); k++) t = (Math.floor(t / 1440) + 1) * 1440;
     const today = Math.floor(this.time / 1440) === Math.floor(t / 1440);
     let left = Math.max(0, CHEF_MAX_MINUTES - (today ? this.minutesOf(driverId) : 0));
     // nach 20:00 beginnt nichts Neues mehr
@@ -549,6 +565,7 @@ export class Simulation {
     while (need > left) {
       need -= left;
       t = (Math.floor(t / 1440) + 1) * 1440;
+      for (let k = 0; k < 10 && skip(Math.floor(t / 1440)); k++) t += 1440;
       left = CHEF_MAX_MINUTES;
     }
     return t + need;
@@ -676,7 +693,7 @@ export class Simulation {
       const d = q.driverId;
       const start = this.workStart(available(d, this.workStart(Math.max(cursor[d] ?? this.time, q.notBefore ?? 0))));
       const need = this.estimateQueueItem(q.cmd);
-      const end = this.finishAfter(need, d, start);
+      const end = this.finishAfter(need, d, start, q.cmd.kind === 'startJob');
       cursor[d] = end;
       const warnings: string[] = [];
       const err = this.checkQueueCommand(q.cmd, q.id);
@@ -966,7 +983,8 @@ export class Simulation {
     const busy = this.driverBusy(d);
     const blocked = this.driverBlocked(d);
     const tired = !!blocked;
-    const inUse = this.machineInUse(cmd);
+    const weather = cmd.kind === 'startJob' ? this.weather.fieldBlocked(this.time) : null;
+    const inUse = this.machineInUse(cmd) ?? weather;
     const mine = this.queue.filter((q) => q.driverId === d);
     if (busy || tired || inUse || mine.length) {
       if (cmd.kind === 'visit' && mine.some((q) => q.cmd.kind === 'visit' && q.cmd.farmId === cmd.farmId)) return 'Besuch ist schon eingeplant';
@@ -1043,6 +1061,7 @@ export class Simulation {
         }
         if (v.restUntil > this.time) status = `Feierabend (Arbeitszeit erreicht), weiter um 06:00 – ${status}`;
         if ((v.handoverUntil ?? 0) > this.time) status = `Fahrerwechsel – ${status}`;
+        if (this.weatherHold(v)) status = `wartet auf Wetter (${this.weather.fieldBlocked(this.time)}) – ${status}`;
         if (t && this.business.absence(t.driverId, this.time)) status = `Fahrer krank, Gespann wartet – ${status}`;
         if (t) status = `${this.driverName(t.driverId)}: ${status}`;
         const moving = v.route && v.seg < v.route.speed.length && (v.state === VehicleState.Driving || v.state === VehicleState.Working) && v.restUntil <= this.time;
@@ -1215,6 +1234,7 @@ export class Simulation {
       rng: this.rng.getState(),
       company: structuredClone(this.company),
       business: structuredClone(this.business.serialize()),
+      weather: structuredClone(this.weather.serialize()),
       farms: this.farms ? this.farms.farms.map((f) => [f.known ? 1 : 0, f.satisfaction, f.rivalUntil] as [number, number, number]) : [],
       vehicles: this.vehicles.map((v) => ({
         state: v.state, node: v.node, route: route(v.route), seg: v.seg, segOff: v.segOff, dist: v.dist,
@@ -1243,6 +1263,7 @@ export class Simulation {
     Object.assign(this.company, structuredClone(s.company));
     normalizeDrivers(this.company);
     this.business.restore(s.business);
+    if (s.weather) this.weather.restore(s.weather);
     if (this.farms) s.farms.forEach(([known, sat, rival], i) => {
       const f = this.farms!.farms[i];
       if (f) { f.known = known === 1; f.satisfaction = sat; f.rivalUntil = rival ?? 0; }
@@ -1460,6 +1481,7 @@ export class Simulation {
     const t = v.task;
     if (t && this.business.absence(t.driverId, this.time)) return; // Fahrer krank: Gespann wartet
     if ((v.handoverUntil ?? 0) > this.time) return; // Fahrerwechsel
+    if (t?.kind === 'job' && (t.phase === 'setup' || t.phase === 'work') && this.weather.fieldBlocked(this.time)) return; // Wetter: Feldarbeit ruht
     if (t?.kind === 'job' && (t.phase === 'to' || t.phase === 'setup' || t.phase === 'work') && this.minutesOf(t.driverId) >= CHEF_MAX_MINUTES) {
       v.restUntil = Math.max(this.time + (1440 - (this.time % 1440)), this.time + 11 * 60);
       this.business.warn(this.time, `${v.name}: Feierabend – Höchstarbeitszeit (${this.driverName(t.driverId)}) erreicht, weiter morgen um 06:00.`);
@@ -1631,7 +1653,9 @@ export class Simulation {
       } else if (t.phase === 'setup') {
         const fi = t.queue[t.current];
         v.fieldNode = fi;
-        this.startRoute(v, this.buildRealFieldRoute(v.node, fi, t.width, t.haPerHour, t.workKmh));
+        // feuchter Boden: etwas langsamer (AK-07)
+        const wf = this.weather.speedFactor(this.time);
+        this.startRoute(v, this.buildRealFieldRoute(v.node, fi, t.width, t.haPerHour * wf, t.workKmh * wf));
         t.phase = 'work';
       } else if (t.phase === 'unhitch') {
         v.task = undefined;
