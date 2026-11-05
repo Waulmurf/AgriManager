@@ -4,7 +4,7 @@ import { formatGameTime } from './game/clock';
 import { runSelftest } from './game/selftest';
 import { forwardLogsToHost, platformName, selftestConfig } from './platform';
 import type { Speed } from './sim/protocol';
-import { BusinessTab, MarketTab, NewsTab, OrdersTab } from './ui/Panels';
+import { BusinessTab, MarketTab, NewsTab, OrdersTab, VehicleMenu } from './ui/Panels';
 
 const TABS = [
   { id: 'betrieb', label: 'Betrieb' },
@@ -60,6 +60,7 @@ export function App() {
     if (!game) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement) return;
+      if (e.key === 'Escape') game.closeMenu();
       if (e.code === 'Space') {
         e.preventDefault();
         game.setSpeed(game.status.speed === 0 ? 1 : 0);
@@ -104,6 +105,7 @@ export function App() {
 
       <main className="main">
         <div ref={mapRef} className="map" data-testid="map" />
+        {status && <VehicleMenu status={status} game={game} />}
         {status?.phase === 'loading' && <div className="overlay">Karte und Straßengraph werden geladen …</div>}
         {status?.phase === 'error' && (
           <div className="overlay error" role="alert">

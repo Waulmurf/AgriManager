@@ -84,8 +84,8 @@ describe('Simulation', () => {
       s.step();
       for (let v = 0; v < 30; v++) {
         const p = s.position(v);
-        // Luftlinie pro Minute ≤ 60 km/h (Pkw) + Toleranz
-        expect(Math.hypot(p[0] - prev[v][0], p[1] - prev[v][1])).toBeLessThanOrEqual(1000 + 1e-6);
+        // Luftlinie pro Minute ≤ 100 km/h (Pkw) + Toleranz
+        expect(Math.hypot(p[0] - prev[v][0], p[1] - prev[v][1])).toBeLessThanOrEqual(1667 + 1e-6);
         prev[v] = p;
       }
     }

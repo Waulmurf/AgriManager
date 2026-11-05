@@ -1,5 +1,5 @@
 /** Nachrichten zwischen Oberfläche und Simulations-Worker. */
-import type { VehicleInfo } from './engine';
+import type { PlayerUnitInfo, VehicleInfo } from './engine';
 import type { Company } from './economy';
 import type { ContactPreference } from './farms';
 import type { Command, GameEvent, Order, Request } from './business';
@@ -51,7 +51,11 @@ export interface BusinessState {
   requests: Request[];
   orders: Order[];
   offers: MarketOffer[];
-  units: { machineId: number; vehicle: number; status: string }[];
+  units: PlayerUnitInfo[];
+  /** heutige Arbeitszeit des Chefs (min) und Höchstwert */
+  chefMinutes: number;
+  chefMaxMinutes: number;
+  dieselTotalL: number;
   chefBusy: string | null;
   knownFarms: number[];
   satisfaction: Record<number, number>;

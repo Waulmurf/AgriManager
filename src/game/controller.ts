@@ -26,6 +26,8 @@ export interface RegionInfo {
   osmTimestamp?: string;
   attribution?: string;
   fieldAttribution?: string;
+  /** [west, süd, ost, nord] der Kartendaten */
+  bbox?: [number, number, number, number];
 }
 
 export interface GameStatus {
@@ -49,6 +51,8 @@ export interface GameStatus {
   knownFarms: number;
   business: BusinessState | null;
   testVehiclesVisible: boolean;
+  /** offenes Rechtsklick-Menü (Bildschirmposition relativ zur Karte) */
+  contextMenu: { x: number; y: number; vehicle: number } | null;
   /** letzte Ereignisse, neueste zuerst */
   events: GameEvent[];
   tilesLoaded: boolean;
@@ -83,7 +87,7 @@ export class GameController {
   private fieldCrop: Uint8Array = new Uint8Array(0);
   status: GameStatus = {
     phase: 'loading', speed: 0, time: 0, simTime: 0, vehicles: 0, stats: null, fps: 0, frameP95: 0, updateMs: 0,
-    region: null, graph: null, fieldCount: 0, company: null, farmCount: 0, knownFarms: 0, business: null, events: [], testVehiclesVisible: false, tilesLoaded: false, tileErrors: 0,
+    region: null, graph: null, fieldCount: 0, company: null, farmCount: 0, knownFarms: 0, business: null, events: [], testVehiclesVisible: false, contextMenu: null, tilesLoaded: false, tileErrors: 0,
   };
 
   subscribe(fn: (s: GameStatus) => void): () => void {
@@ -122,8 +126,13 @@ export class GameController {
         style: buildStyle(mapDataUrl('region.pmtiles'), assetBase()),
         center,
         zoom: 9.3,
-        minZoom: 7,
+        // nur innerhalb der Kartendaten verschieben/zoomen: keine leeren (grauen) Ränder
+        minZoom: 8,
         maxZoom: 17.5,
+        maxBounds: region.bbox ? [[region.bbox[0], region.bbox[1]], [region.bbox[2], region.bbox[3]]] : undefined,
+        renderWorldCopies: false,
+        fadeDuration: 0,
+        maxTileCacheSize: 600,
         attributionControl: { compact: true },
         // keine Telemetrie, keine Online-Ressourcen
         localIdeographFontFamily: 'sans-serif',
@@ -154,7 +163,9 @@ export class GameController {
           res();
         });
       });
-      this.addGameLayers(center, region.radiusKm * 1000, region);
+      this.addGameLayers(region);
+      // Quellenangabe zugeklappt starten (Info-Knopf klappt sie auf)
+      container.querySelector('.maplibregl-ctrl-attrib')?.classList.remove('maplibregl-compact-show');
 
       this.worker = new Worker(new URL('../sim/worker.ts', import.meta.url), { type: 'module' });
       this.worker.onmessage = (ev: MessageEvent<FromWorker>) => this.onWorker(ev.data);
@@ -354,6 +365,25 @@ export class GameController {
     return this.farms[id];
   }
 
+  /** Rechtsklick-Menü schließen */
+  closeMenu() {
+    if (this.status.contextMenu) this.emit({ contextMenu: null });
+  }
+
+  /** Name, Besitzer und aktueller Zustand eines Fahrzeugs (für das Menü) */
+  vehicleDetails(id: number): { name: string; player: boolean; state: number; field: number } | null {
+    const v = this.vehicles[id];
+    if (!v) return null;
+    const smp = this.samples[id];
+    return { name: v.name, player: v.owner === 'player', state: smp?.state ?? 0, field: smp?.field ?? -1 };
+  }
+
+  /** Karte auf ein Fahrzeug zentrieren */
+  flyToVehicle(id: number) {
+    const smp = this.samples[id];
+    if (smp && this.map) this.map.flyTo({ center: [smp.lon, smp.lat], zoom: Math.max(this.map.getZoom(), 14), duration: 600 });
+  }
+
   /** Testfahrzeuge (zufälliger Verkehr für Leistungstests) ein- oder ausblenden */
   showTestVehicles(show: boolean) {
     const map = this.map;
@@ -459,17 +489,10 @@ export class GameController {
     map.on('mouseleave', 'fields-fill', () => (map.getCanvas().style.cursor = ''));
   }
 
-  private addGameLayers(center: [number, number], radiusM: number, region: RegionInfo) {
+  private addGameLayers(region: RegionInfo) {
     const map = this.map!;
     if (this.fields) this.addFieldLayers(region);
     addVehicleIcons(map);
-    map.addSource('region', { type: 'geojson', data: circlePolygon(center, radiusM) });
-    map.addLayer({
-      id: 'region-outline',
-      type: 'line',
-      source: 'region',
-      paint: { 'line-color': '#b5512b', 'line-width': 2, 'line-dasharray': [3, 2], 'line-opacity': 0.8 },
-    });
     map.addSource('home', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
     map.addLayer({
       id: 'home-dot',
@@ -533,6 +556,21 @@ export class GameController {
         if (out) out.textContent = msg;
       });
     });
+    // Rechtsklick auf ein Fahrzeug: Menü mit Status und Befehlen
+    const openMenu = (e: maplibregl.MapLayerMouseEvent) => {
+      const f = e.features?.[0];
+      if (!f || f.id === undefined) return;
+      e.originalEvent.preventDefault();
+      e.preventDefault();
+      this.emit({ contextMenu: { x: e.point.x, y: e.point.y, vehicle: Number(f.id) } });
+    };
+    map.on('contextmenu', 'vehicles', openMenu);
+    map.on('contextmenu', 'vehicles-player-halo', openMenu);
+    map.on('click', () => this.closeMenu());
+    map.on('movestart', (e) => { if ((e as { originalEvent?: unknown }).originalEvent) this.closeMenu(); });
+    map.getCanvas().addEventListener('contextmenu', (ev) => ev.preventDefault());
+    map.on('mouseenter', 'vehicles', () => (map.getCanvas().style.cursor = 'context-menu'));
+    map.on('mouseleave', 'vehicles', () => (map.getCanvas().style.cursor = ''));
     map.on('mouseenter', 'farms-dot', () => (map.getCanvas().style.cursor = 'pointer'));
     map.on('mouseleave', 'farms-dot', () => (map.getCanvas().style.cursor = ''));
     map.addSource('vehicles', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });

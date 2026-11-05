@@ -14,6 +14,10 @@ export function buildStyle(pmtilesUrl: string, glyphBase: string): StyleSpecific
   const base = layers(BASEMAP_SOURCE, flavor, { lang: 'de' }).filter(
     (l) => l.id !== 'pois' && l.id !== 'roads_shields',
   ) as LayerSpecification[];
+  // Hintergrund in Landfarbe: noch nicht geladene Kacheln wirken nicht als grauer Rand
+  for (const l of base) {
+    if (l.type === 'background') l.paint = { ...(l.paint ?? {}), 'background-color': flavor.earth };
+  }
   return {
     version: 8,
     // Platzhalter {fontstack}/{range} dürfen nicht URL-kodiert werden

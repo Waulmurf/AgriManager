@@ -18,6 +18,8 @@ export const VISIT_MINUTES = 30;
 export const REPLY_MINUTES = 2 * 1440;
 /** Sehr große Feldblöcke (z. B. Sonderflächen) kommen nicht als Einzelauftrag */
 export const MAX_REQUEST_FIELD_HA = 60;
+/** Dieselpreis netto (Annahme, Agrardiesel nach Rückvergütung, €/l) */
+export const DIESEL_PRICE = 1.35;
 
 export type Service = 'grubbern';
 export const SERVICE_NAMES: Record<Service, string> = { grubbern: 'Grubbern' };
@@ -60,6 +62,9 @@ export interface Order {
   implementId?: number;
   startedAt?: number;
   finishedAt?: number;
+  /** verbrauchter Diesel (l) und Kosten (€) für diesen Auftrag */
+  dieselL: number;
+  dieselCost: number;
 }
 
 export interface GameEvent {
@@ -73,7 +78,8 @@ export type Command =
   | { kind: 'visit'; farmId: number }
   | { kind: 'respond'; requestId: number; action: 'accept' | 'reject' | 'counter'; priceHa?: number }
   | { kind: 'startJob'; orderId: number; tractorId: number; implementId: number }
-  | { kind: 'buy'; offerId: number };
+  | { kind: 'buy'; offerId: number }
+  | { kind: 'recall'; vehicle: number };
 
 export class Business {
   readonly requests: Request[] = [];
@@ -82,6 +88,8 @@ export class Business {
   private events: GameEvent[] = [];
   private rng: Rng;
   private nextId = 1;
+  /** gesamter Dieselverbrauch (l) */
+  dieselTotalL = 0;
   /** Änderungszähler für die Oberfläche */
   version = 0;
 
@@ -243,6 +251,8 @@ export class Business {
       earliest: r.earliest,
       latest: r.latest,
       status: 'offen',
+      dieselL: 0,
+      dieselCost: 0,
     };
     this.orders.push(o);
     this.emit(time, 'auftrag', `Auftrag ${this.farmName(r.farmId)}: Grubbern ${fmtHa(o.areaHa)} zu ${fmtEur(price)}/ha, fertig bis ${fmtDay(o.latest)}`, r.farmId);
@@ -282,6 +292,25 @@ export class Business {
       if (farm) farm.satisfaction = Math.max(0, Math.min(100, farm.satisfaction + (onTime ? 5 : -10)));
       this.emit(time, 'auftrag', `Auftrag ${this.farmName(o.farmId)} fertig${onTime ? ', pünktlich' : ', verspätet'} (${fmtHa(o.areaHa)}).`, o.farmId);
     }
+  }
+
+  /** Diesel tanken/abrechnen: Kosten sofort vom Konto, beim Auftrag mitgeschrieben */
+  chargeDiesel(liters: number, order: Order | undefined, _time: number) {
+    if (liters <= 0) return;
+    const cost = liters * DIESEL_PRICE;
+    this.company.cash = Math.round((this.company.cash - cost) * 100) / 100;
+    this.dieselTotalL += liters;
+    if (order) {
+      order.dieselL = Math.round((order.dieselL + liters) * 10) / 10;
+      order.dieselCost = Math.round((order.dieselCost + cost) * 100) / 100;
+    }
+    this.version++;
+  }
+
+  /** Auftrag unterbrochen (Fahrzeug zurückgerufen): bleibt offen, erledigte Felder zählen */
+  orderInterrupted(o: Order, time: number) {
+    o.status = 'offen';
+    this.emit(time, 'warnung', `Auftrag ${this.farmName(o.farmId)} unterbrochen (${o.doneFields.length}/${o.fields.length} Felder fertig).`, o.farmId);
   }
 
   warn(time: number, text: string) {

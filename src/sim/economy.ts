@@ -36,6 +36,10 @@ export interface Machine {
   powerNeed?: number;
   /** Geräte: Flächenleistung (ha/h, LWK-Erfahrungssätze) */
   haPerHour?: number;
+  /** Geräte: Arbeitstempo auf der Bahn (km/h) */
+  workKmh?: number;
+  /** Geräte: Dieselverbrauch des Gespanns bei der Arbeit (l/ha) */
+  dieselLHa?: number;
 }
 
 export interface MarketOffer {
@@ -51,26 +55,27 @@ export interface MarketOffer {
  * Gebrauchtangebote zum Spielstart (Annahmen, angelehnt an Inserate auf landwirt.com:
  * Horsch Terrano 4 FX gebraucht 11.500–14.500 € netto, neu 23.500 € netto).
  * Flächenleistung nach LWK-Erfahrungssätzen (Stoppelgrubber 3–4 m 1,49–1,89 ha/h,
- * Kurzscheibenegge 3 m 2,0 ha/h). Ab Phase 3 ersetzt der Händlermarkt diese Liste.
+ * Kurzscheibenegge 3 m 2,0 ha/h). Diesel bei der Arbeit (Annahme, KTBL-Größenordnung):
+ * Grubber 9 l/ha, Kurzscheibenegge 6 l/ha. Ab Phase 3 ersetzt der Händlermarkt diese Liste.
  */
 export const START_OFFERS: MarketOffer[] = [
   {
     id: 1,
-    machine: { type: 'grubber', brand: 'Horsch', model: 'Terrano 4 FX', year: 2017, hours: 0, condition: 70, newPrice: 23_500, width: 4, powerNeed: 160, haPerHour: 1.7 },
+    machine: { type: 'grubber', brand: 'Horsch', model: 'Terrano 4 FX', year: 2017, hours: 0, condition: 70, newPrice: 23_500, width: 4, powerNeed: 160, haPerHour: 1.7, workKmh: 10, dieselLHa: 9 },
     price: 12_500,
     seller: 'Landtechnik Uelzen (Händler)',
     note: 'Grubber 4 m, Gewährleistung 6 Monate',
   },
   {
     id: 2,
-    machine: { type: 'grubber', brand: 'Köckerling', model: 'Trio 300', year: 2012, hours: 0, condition: 55, newPrice: 19_000, width: 3, powerNeed: 120, haPerHour: 1.5 },
+    machine: { type: 'grubber', brand: 'Köckerling', model: 'Trio 300', year: 2012, hours: 0, condition: 55, newPrice: 19_000, width: 3, powerNeed: 120, haPerHour: 1.5, workKmh: 10, dieselLHa: 9 },
     price: 7_900,
     seller: 'Privat, Bad Bevensen',
     note: 'Grubber 3 m, ohne Gewährleistung',
   },
   {
     id: 3,
-    machine: { type: 'kurzscheibenegge', brand: 'Horsch', model: 'Joker 3 CT', year: 2016, hours: 0, condition: 65, newPrice: 21_000, width: 3, powerNeed: 110, haPerHour: 2.0 },
+    machine: { type: 'kurzscheibenegge', brand: 'Horsch', model: 'Joker 3 CT', year: 2016, hours: 0, condition: 65, newPrice: 21_000, width: 3, powerNeed: 110, haPerHour: 2.0, workKmh: 12, dieselLHa: 6 },
     price: 11_900,
     seller: 'Landtechnik Uelzen (Händler)',
     note: 'Kurzscheibenegge 3 m – für Grubber-Aufträge nicht geeignet',

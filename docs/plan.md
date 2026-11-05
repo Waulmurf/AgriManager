@@ -12,12 +12,12 @@ Jeder Schritt endet mit einer spielbaren Windows-Version.
 | 1 | Echte Felder auf der Karte (feste IDs, Fläche, Zufahrt); Fahrzeuge arbeiten im echten Feld | umgesetzt (Kartendaten v3) |
 | 2 | Kunden-Betriebe auf echten Feldern, Hof mit Startschlepper und Startkapital | umgesetzt |
 | 3 | Anfrage → Auftrag (zuerst Grubbern), Annehmen/Ablehnen/Verhandeln, Fahrer und Maschine zuweisen, einfache Planungstafel; Anfragen als Liste (Smartphone in Phase 3) | umgesetzt (mit Besuch per Firmenwagen und Gerätekauf) |
-| 4 | Fahrt und Arbeit mit LWK-Flächenleistung, Anfahrt, Diesel, Betriebsstunden | offen |
+| 4 | Fahrt und Arbeit mit LWK-Flächenleistung, Anfahrt, Diesel, Betriebsstunden | umgesetzt (dazu Fahrprofile, Kurven, Rüstzeiten, Arbeitszeit des Chefs, Rechtsklick-Menü) |
 | 5 | Rechnung, Kontostand, Kundenzufriedenheit; Spielstand in SQLite | offen |
 
 ## Vorgemerkt (aus Rückmeldungen von Nils)
 
-- **Geschwindigkeiten je Fahrzeugart** (5. Nov. 2026): Pkw sind deutlich schneller als Schlepper
+- **Geschwindigkeiten je Fahrzeugart** (5. Nov. 2026, umgesetzt in Schritt 4 für Pkw und Schlepper): Pkw sind deutlich schneller als Schlepper
   und Selbstfahrer. Geplant sind eigene Fahrprofile mit Höchstgeschwindigkeit und Durchschnitt je
   Straßenklasse. Pkw/Firmenwagen fahren bis 100 km/h außerorts und 50 im Ort. Schlepper fahren 40
   oder 50 km/h je nach Zulassung, Selbstfahrer wie Feldhäcksler, Mähdrescher und Roder 20–40 km/h.
@@ -71,3 +71,26 @@ Feldblock als ein Feld; eine Aufteilung in Schläge ist später möglich.
   Köckerling Trio 300 7.900 €, Horsch Joker 3 CT 11.900 €.
 - Betriebsstunden: Schlepper und Gerät je Feld um Fläche / Flächenleistung.
 - Rechnung, Diesel- und Lohnkosten folgen mit Schritt 4/5.
+
+## Fahrt und Arbeit (Schritt 4, Annahmen)
+
+- **Fahrprofile:** Schlepper 40 km/h (Landstraße Ø 38, innerorts 30, Feldweg 15). Pkw bis
+  100 km/h (Landstraße Ø 85–95, innerorts 45, Feldweg 25). Tempolimits aus OSM (`maxspeed`,
+  `zone:maxspeed`); Pkw fahren im Schnitt 95 % des Limits. Selbstfahrer und Lkw folgen mit dem
+  Maschinenkatalog.
+- **Kurven:** Vor und nach Richtungswechseln wird auf einer Strecke von 25 m (Schlepper) bzw.
+  40 m (Pkw) abgebremst: über 90° 10/15 km/h, 60–90° 15/25, 30–60° 25/45, 15–30° 32/70 km/h.
+  Angefahren und angehalten wird ebenso langsam.
+- **Feldarbeit:** Bahnen im Arbeitstempo des Geräts (Grubber 10 km/h, Kurzscheibenegge 12 km/h),
+  Wenden 6 km/h. Die übrige Zeit bis zur LWK-Flächenleistung (ha/h) steht das Gespann am Vorgewende.
+- **Rüstzeiten:** 15 min Anbauen am Hof, 5 min Einrichten je Feld, 10 min Abbauen.
+- **Diesel:** Schlepper auf der Straße 0,35 l/km, bei der Arbeit Grubber 9 l/ha und
+  Kurzscheibenegge 6 l/ha, Pkw 0,07 l/km. Preis 1,35 €/l netto (Agrardiesel). Die Kosten gehen
+  sofort vom Konto ab und werden je Auftrag festgehalten.
+- **Arbeitszeit des Chefs:** höchstens 10 h am Tag (ArbZG § 3), Tageswechsel um 06:00. Danach
+  macht das Gespann Feierabend, wo es gerade ist, und fährt am nächsten Morgen weiter.
+- **Rechtsklick auf Fahrzeuge:** Status, Tempo, Betriebsstunden, Auftrag mit Diesel; Befehl
+  „Zurück zum Hof“, auch mitten im Feld. Ein unterbrochener Auftrag bleibt offen, erledigte
+  Felder zählen.
+- **Karte:** kein Umkreis mehr. Verschieben und Zoomen nur innerhalb der Kartendaten,
+  Hintergrund in Landfarbe, damit keine grauen Ränder entstehen.

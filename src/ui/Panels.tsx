@@ -33,7 +33,10 @@ export function BusinessTab({ status, game }: { status: GameStatus; game: GameCo
         <dt>Kreditrahmen</dt><dd>{eur(c.creditLimit - c.loan)} frei</dd>
         <dt>Standort</dt><dd>Groß Thondorf</dd>
         <dt>Chef</dt><dd>{b?.chefBusy ?? 'im Büro'}</dd>
+        <dt>Arbeitszeit heute</dt><dd>{b ? `${(b.chefMinutes / 60).toLocaleString('de-DE', { maximumFractionDigits: 1 })} von ${b.chefMaxMinutes / 60} h` : '–'}</dd>
+        <dt>Diesel gesamt</dt><dd>{b ? `${b.dieselTotalL.toLocaleString('de-DE')} l` : '–'}</dd>
       </dl>
+      <p className="hint">Rechtsklick auf ein Fahrzeug zeigt Status und Befehle (z. B. zurück zum Hof).</p>
       <h2>Fuhrpark</h2>
       <ul className="machines">
         {c.machines.map((m) => (
@@ -147,6 +150,7 @@ function OrderItem({ o, game, status }: { o: Order; game: GameController | null;
         {o.status === 'läuft' ? ` · ${o.doneFields.length}/${o.fields.length} Felder fertig` : ''}
         {o.finishedAt !== undefined ? ` · fertig ${formatGameTime(o.finishedAt).date.slice(4)} ${formatGameTime(o.finishedAt).time}` : ''}
         {late ? ' · verspätet!' : ''}
+        {o.dieselL > 0 ? ` · Diesel ${o.dieselL.toLocaleString('de-DE')} l (${eur(o.dieselCost)})` : ''}
       </small>
       {o.status === 'offen' && (
         <div className="card-actions">
@@ -246,5 +250,56 @@ export function NewsTab({ status, game }: { status: GameStatus; game: GameContro
         );
       })}
     </ul>
+  );
+}
+
+/** Rechtsklick-Menü für Fahrzeuge: Status und Befehle */
+export function VehicleMenu({ status, game }: { status: GameStatus; game: GameController | null }) {
+  const fb = useFeedback();
+  const menu = status.contextMenu;
+  if (!menu || !game) return null;
+  const d = game.vehicleDetails(menu.vehicle);
+  if (!d) return null;
+  const unit = status.business?.units.find((u) => u.vehicle === menu.vehicle);
+  const order = unit?.orderId !== undefined ? status.business?.orders.find((o) => o.id === unit.orderId) : undefined;
+  const stateText = ['steht', 'fährt', 'arbeitet auf dem Feld'][d.state] ?? '–';
+  const left = Math.min(menu.x + 12, window.innerWidth - 640);
+  return (
+    <div className="vehicle-menu" style={{ left: Math.max(8, left), top: menu.y + 8 }} data-testid="vehicle-menu" onContextMenu={(e) => e.preventDefault()}>
+      <div className="card-head">
+        <strong>{d.name}</strong>
+        <button className="close" onClick={() => game.closeMenu()} aria-label="Schließen">×</button>
+      </div>
+      {d.player && unit ? (
+        <>
+          <div data-testid="vehicle-status">{unit.status}</div>
+          <small className="hint">
+            {unit.kmh > 0 ? `${unit.kmh} km/h · ` : ''}
+            {unit.hours.toLocaleString('de-DE')} Betriebsstunden
+          </small>
+          {order && (
+            <small className="hint">
+              Auftrag {game.farmById(order.farmId)?.name}: {order.doneFields.length}/{order.fields.length} Felder · Diesel {order.dieselL.toLocaleString('de-DE')} l ({eur(order.dieselCost)})
+            </small>
+          )}
+          <div className="card-actions">
+            <button
+              disabled={!unit.busy}
+              data-testid="recall"
+              onClick={async () => fb.show(await game.command({ kind: 'recall', vehicle: menu.vehicle }))}
+            >
+              Zurück zum Hof
+            </button>
+            <button onClick={() => game.flyToVehicle(menu.vehicle)}>Hinzoomen</button>
+          </div>
+        </>
+      ) : (
+        <>
+          <div>Testfahrzeug ({stateText})</div>
+          <small className="hint">Zufälliger Verkehr für Leistungstests – keine Befehle möglich.</small>
+        </>
+      )}
+      {fb.msg && <small className="feedback">{fb.msg}</small>}
+    </div>
   );
 }

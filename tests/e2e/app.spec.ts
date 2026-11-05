@@ -122,8 +122,8 @@ test('Fahrzeuge bewegen sich flüssig und bleiben im Spielgebiet', async ({ page
     for (let i = 1; i < track.length; i++) {
       const dMin = track[i].t - track[i - 1].t; // Spielminuten zwischen zwei Bildern
       expect(dMin).toBeGreaterThanOrEqual(0);
-      // höchstens 60 km/h = 1000 m je Spielminute (+ Rundung)
-      expect(m(track[i - 1].p[v], track[i].p[v])).toBeLessThan(1000 * dMin * 1.05 + 5);
+      // höchstens 100 km/h (Pkw) = 1667 m je Spielminute (+ Rundung)
+      expect(m(track[i - 1].p[v], track[i].p[v])).toBeLessThan(1667 * dMin * 1.05 + 5);
     }
     expect(Math.abs(track[track.length - 1].p[v].lat - 53.128)).toBeLessThan(0.6);
   }

@@ -75,8 +75,10 @@ describe('Besuch, Anfrage, Auftrag', () => {
     const order = s.business.orders[0];
     // ohne Grubber geht es nicht
     expect(s.command({ kind: 'startJob', orderId: order.id, tractorId: 1, implementId: 2 })).toMatch(/Grubber/);
+    const cashBefore = s.company.cash; // Besuchsfahrten haben schon Diesel gekostet
+    expect(cashBefore).toBeLessThan(100_000);
     expect(s.command({ kind: 'buy', offerId: 1 })).toBe('gekauft');
-    expect(s.company.cash).toBe(100_000 - 12_500);
+    expect(s.company.cash).toBeCloseTo(cashBefore - 12_500, 2);
     const grubber = s.company.machines.find((m) => m.type === 'grubber')!;
     const hoursBefore = s.company.machines[0].hours;
     expect(s.command({ kind: 'startJob', orderId: order.id, tractorId: 1, implementId: grubber.id })).toBe('Auftrag gestartet');
@@ -90,9 +92,13 @@ describe('Besuch, Anfrage, Auftrag', () => {
     }, 20000);
     expect(order.status).toBe('fertig');
     expect(sawWork).toBe(true);
-    // Arbeitszeit mindestens Fläche / Flächenleistung (1,7 ha/h)
-    expect(s.time - start).toBeGreaterThanOrEqual((order.areaHa / 1.7) * 60 - 1);
-    expect(s.company.machines[0].hours).toBeCloseTo(hoursBefore + order.areaHa / 1.7, 0);
+    // Arbeitszeit mindestens Fläche / Flächenleistung (1,7 ha/h) plus Rüstzeiten
+    expect(s.time - start).toBeGreaterThanOrEqual((order.areaHa / 1.7) * 60 + 15 + 5 * order.fields.length - 1);
+    // Betriebsstunden: Feldarbeit plus Straßenfahrt
+    expect(s.company.machines[0].hours).toBeGreaterThan(hoursBefore + order.areaHa / 1.7 - 0.2);
+    // Diesel: 9 l/ha bei der Arbeit plus Anfahrt
+    expect(order.dieselL).toBeGreaterThan(order.areaHa * 9 - 1);
+    expect(order.dieselCost).toBeCloseTo(order.dieselL * 1.35, 0);
     runUntil(s, () => !s.chefBusy, 5000);
     expect(s.chefBusy).toBeNull();
   });
@@ -148,5 +154,67 @@ describe('Besuch, Anfrage, Auftrag', () => {
       return s.hash();
     };
     expect(play()).toBe(play());
+  });
+});
+
+describe('Rückruf, Rüstzeit, Arbeitszeit', () => {
+  const setupJob = (seed: number) => {
+    const s = world(seed);
+    for (const farm of s.farms!.farms) {
+      s.command({ kind: 'visit', farmId: farm.id });
+      runUntil(s, () => !s.chefBusy);
+      if (s.business.requests.some((r) => r.status === 'offen')) break;
+    }
+    const req = s.business.requests.find((r) => r.status === 'offen')!;
+    s.command({ kind: 'respond', requestId: req.id, action: 'accept' });
+    s.command({ kind: 'buy', offerId: 1 });
+    const order = s.business.orders[0];
+    const grubber = s.company.machines.find((m) => m.type === 'grubber')!;
+    return { s, order, grubber };
+  };
+
+  it('beginnt mit Rüstzeit am Hof', () => {
+    const { s, order, grubber } = setupJob(5);
+    s.command({ kind: 'startJob', orderId: order.id, tractorId: 1, implementId: grubber.id });
+    expect(s.playerUnits()[0].status).toMatch(/Rüstzeit/);
+    s.run(14);
+    expect(s.playerUnits()[0].status).toMatch(/Rüstzeit/);
+    s.run(2);
+    expect(s.playerUnits()[0].status).toMatch(/fährt zum Feld/);
+  });
+
+  it('zurückgerufener Schlepper fährt heim, Auftrag bleibt mit erledigten Feldern offen', () => {
+    const { s, order, grubber } = setupJob(5);
+    s.command({ kind: 'startJob', orderId: order.id, tractorId: 1, implementId: grubber.id });
+    runUntil(s, () => /grubbert/.test(s.playerUnits()[0].status), 3000);
+    s.run(30);
+    const tractor = s.playerUnits()[0].vehicle;
+    expect(s.command({ kind: 'recall', vehicle: tractor })).toMatch(/zurück zum Hof/);
+    expect(order.status).toBe('offen');
+    runUntil(s, () => !s.chefBusy, 3000);
+    expect(s.playerUnits()[0].status).toBe('am Hof');
+    // neu starten: nur die offenen Felder
+    expect(s.command({ kind: 'startJob', orderId: order.id, tractorId: 1, implementId: grubber.id })).toBe('Auftrag gestartet');
+    runUntil(s, () => order.status === 'fertig', 20000);
+    expect(order.status).toBe('fertig');
+    expect(new Set(order.doneFields).size).toBe(order.fields.length);
+  });
+
+  it('macht nach 10 Stunden Arbeit des Chefs Feierabend bis 06:00', () => {
+    const { s, order, grubber } = setupJob(5);
+    s.chefMinutes = 590; // Tag ist fast voll
+    s.command({ kind: 'startJob', orderId: order.id, tractorId: 1, implementId: grubber.id });
+    s.run(40);
+    expect(s.playerUnits()[0].status).toMatch(/Feierabend/);
+    const pos = s.position(s.playerUnits()[0].vehicle);
+    s.run(60);
+    expect(s.position(s.playerUnits()[0].vehicle)).toEqual(pos); // steht
+    s.run(1440 - (s.time % 1440) + 5);
+    expect(s.playerUnits()[0].status).not.toMatch(/Feierabend/);
+  });
+
+  it('Testfahrzeuge lassen sich nicht zurückrufen', () => {
+    const g = world(1);
+    expect(g.command({ kind: 'recall', vehicle: 999 })).toMatch(/Nur eigene/);
   });
 });

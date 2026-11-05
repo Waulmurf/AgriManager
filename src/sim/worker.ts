@@ -5,7 +5,7 @@
  * Positionen gehen höchstens 10-mal pro Sekunde als übertragbares Zahlenfeld
  * an die Oberfläche, neue Routen einmalig mit Geometrie.
  */
-import { Simulation, type RouteGeom } from './engine';
+import { CHEF_MAX_MINUTES, Simulation, type RouteGeom } from './engine';
 import { parseRoadGraph, unproject, type RoadGraph } from './roadgraph';
 import { parseFields } from './fields';
 import {
@@ -95,6 +95,9 @@ function sendBusiness(force = false) {
     orders: b.orders.map((o) => ({ ...o, fields: [...o.fields], doneFields: [...o.doneFields] })),
     offers: structuredClone(b.offers),
     units: sim.playerUnits(),
+    chefMinutes: sim.chefMinutes,
+    chefMaxMinutes: CHEF_MAX_MINUTES,
+    dieselTotalL: Math.round(b.dieselTotalL),
     chefBusy: sim.chefBusy,
     knownFarms: known,
     satisfaction,
@@ -103,9 +106,13 @@ function sendBusiness(force = false) {
   post({ type: 'business', state });
 }
 
+let lastBizSend = 0;
 function send(now: number) {
   if (!sim) return;
-  sendBusiness();
+  // während eigene Fahrzeuge unterwegs sind: Status/Tempo regelmäßig aktualisieren
+  const live = sim.chefBusy !== null && now - lastBizSend > 250;
+  if (live || sim.business.version !== sentBusinessVersion) lastBizSend = now;
+  sendBusiness(live);
   const positions = sim.snapshot();
   const routes = pendingRoutes;
   pendingRoutes = [];
