@@ -13,7 +13,8 @@
     "test:e2e": "playwright test",
     "map-data": "node scripts/fetch-map-data.mjs",
     "assets": "node scripts/fetch-map-assets.mjs",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "map-data:build": "node scripts/build-map-data-local.mjs"
   },
   "dependencies": {
     "@protomaps/basemaps": "5.7.2",

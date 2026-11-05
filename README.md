@@ -9,14 +9,21 @@ stehen in [docs/technik.md](docs/technik.md).
 
 ## Schnellstart
 
-Voraussetzungen: Node 22, Rust (stable), für Linux zusätzlich die
-[Tauri-Systempakete](https://v2.tauri.app/start/prerequisites/).
+Voraussetzungen: Node 22, Rust (stable) und die [Tauri-Voraussetzungen](https://v2.tauri.app/start/prerequisites/):
+unter Windows „Microsoft C++ Build Tools“ (Desktopentwicklung mit C++) und WebView2 (bei Windows 10/11 vorhanden),
+unter macOS die Xcode Command Line Tools (`xcode-select --install`).
 
 ```bash
 npm ci
 npm run map-data      # Kartendaten (Release map-data-vN) nach src-tauri/resources/map laden
 npm run dev           # im Browser: http://localhost:5173
 npm run tauri dev     # als Desktop-App
+```
+
+Kartendaten selbst bauen (ohne GitHub Actions, braucht [Docker Desktop](https://www.docker.com/products/docker-desktop/)):
+
+```bash
+npm run map-data:build
 ```
 
 Tastatur: Leertaste = Pause/Weiter, 1 = 1x, 2 = 10x, 3 = 100x.

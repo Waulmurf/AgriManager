@@ -1,0 +1,71 @@
+# CLAUDE.md – Lohnbetrieb-Simulation
+
+Managementspiel um ein Agrar-Lohnunternehmen in Groß Thondorf (50 km um 29584).
+Kommunikation mit Nils auf Deutsch, kurze Zwischenstände. Nur bei unumkehrbaren
+Entscheidungen fragen, sonst autonom arbeiten.
+
+## Pflichtlektüre
+
+- `docs/anforderungen.md` – Anforderungen (Quelle: Claude Doc https://claude.ai/artifact/8ixJJZJSEDKsVTwLeKeVeY, das Doc gilt)
+- `docs/maschinen.md` – Marken, Händler, Maschinen, Preise, LWK-Sätze
+- `docs/plan.md` – Arbeitsplan Phase 2, vorgemerkte Punkte (Fahrprofile, Lkw), Felddaten-Lizenzen
+- `docs/technik.md` – Architektur, Annahmen, Messwerte
+
+## Zielplattformen
+
+Windows und macOS (kein Linux). Tests vorerst nur unter Windows; macOS wird nur gebaut.
+
+## Befehle
+
+```bash
+npm ci
+npm run map-data          # Kartendaten (Release laut data/map-data.json) nach src-tauri/resources/map
+npm run map-data:build    # Kartendaten lokal bauen (Docker Desktop nötig, 15–30 min)
+npm run dev               # Browser: http://localhost:5173
+npm run tauri dev         # Desktop-App
+npm test                  # Vitest (Rechenmodell, Routing, Felder, Determinismus)
+npm run build && npx playwright test   # Oberfläche (Chromium ≙ WebView2)
+cd src-tauri && cargo test -p range_proto
+```
+
+Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SELFTEST=1`
+(+ `LOHNBETRIEB_SELFTEST_OUT=<datei>`).
+
+## Architektur in Kürze
+
+- `src/sim/` Web Worker: `engine.ts` deterministische Simulation (1 Spielminute je Schritt,
+  Seed, nur + − × ÷ √ im Zustand), `astar.ts` Routing + Fahrprofile, `roadgraph.ts` (RGR1),
+  `fields.ts` (FLD1, Bahnenmuster im Feld), `worker.ts`, `protocol.ts`
+- `src/map/` Kartenstil (Protomaps, lokale Schriften), Fahrzeugsymbole, Interpolation entlang der Route
+- `src/game/` `controller.ts` (Karte ↔ Worker, Feld-Layer), Uhr, Selbsttest
+- `src-tauri/` Protokoll `mapdata://` mit HTTP-Range (Crate `range/`), Selbsttest-Befehle
+- `scripts/data/` Kartendaten: `build-region.sh` (Protomaps-Ausschnitt, OSM → Straßengraph,
+  Feldblöcke → Felder), `build-roadgraph.mjs`, `build-fields.mjs`
+- Determinismus: Referenz-Hash in `tests/unit/__snapshots__/engine.test.ts.snap`. Bei bewusster
+  Änderung der Simulationslogik mit `npx vitest run tests/unit/engine.test.ts -u` aktualisieren.
+
+## Stand (5. Nov. 2026)
+
+- Phase 1 (technischer Prototyp) fertig: Windows getestet (läuft gut laut Nils), macOS arm64 gemessen.
+- Phase 2, Schritt 1 (echte Felder) programmiert und lokal mit synthetischen Feldern getestet.
+  **Offen:** Kartendaten `map-data-v3` (mit `fields.bin`, `fields.pmtiles`) sind noch nicht
+  gebaut. GitHub Actions war wegen Ausgabenlimit gesperrt. Lokal bauen mit `npm run map-data:build`,
+  danach `npx vitest run tests/unit/real-map-data.test.ts` (prüft echte Felder) und die App ansehen.
+  Ohne `fields.bin` läuft die App mit gedachten Feldern weiter.
+- Nächste Schritte: Phase 2, Schritte 2–5 laut `docs/plan.md` (Kunden/Hof, Anfrage→Auftrag
+  mit Grubbern, Fahrt+Arbeit mit LWK-Werten, Rechnung/Konto, SQLite-Spielstand).
+
+## CI (GitHub Actions)
+
+- `ci.yml`: Unit- und Oberflächentests sowie Build mit Selbsttest unter Windows. Der macOS-Build läuft nur bei
+  `[mac]` in der Commit-Nachricht, auf `main` oder bei manuellem Start (Minuten zählen dort zehnfach).
+- `map-data.yml`: baut Kartendaten bei Änderung von `data/map-data.json` oder `scripts/data/**`
+  und legt sie als Release ab. Für einen Neubau den Tag in `data/map-data.json` erhöhen.
+- Minutenkontingent beachten: Ein Push kostet ca. 80–100 abgerechnete Minuten.
+
+## Konventionen
+
+- Code-Kommentare, Oberfläche, Commits auf Deutsch
+- Entwicklung auf Branch `claude/lohnbetrieb-simulation-prototype-nki7j2`
+- Keine Marken-Logos, nur Namen und Farben (HM-03); Markenfarben in `src/data/brands.ts`
+- Quellen und Lizenzen der Daten im README pflegen
