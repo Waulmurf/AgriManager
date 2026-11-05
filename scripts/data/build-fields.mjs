@@ -270,7 +270,7 @@ out.forEach((f, i) => {
     coords.push([Math.round(unX(f.xs[j]) * 1e7) / 1e7, Math.round(unY(f.ys[j]) * 1e7) / 1e7]);
   }
   coords.push(coords[0]);
-  gj?.write(JSON.stringify({ type: 'Feature', properties: { i, k: f.kind, ha: Math.round(f.area / 100) / 100, s: f.src }, geometry: { type: 'Polygon', coordinates: [coords] } }) + '\n');
+  gj?.write(JSON.stringify({ type: 'Feature', properties: { fid: i + 1, i, k: f.kind, ha: Math.round(f.area / 100) / 100, s: f.src }, geometry: { type: 'Polygon', coordinates: [coords] } }) + '\n');
 });
 gj?.end();
 if (off !== size) throw new Error(`Größenfehler ${off} != ${size}`);

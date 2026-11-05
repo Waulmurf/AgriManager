@@ -94,7 +94,7 @@ osmium export --overwrite -f geojsonseq --geometry-types=polygon -a type,id -o "
 node "$ROOT/scripts/data/build-fields.mjs" "${OFFICIAL_ARGS[@]}" --osm "$WORK/osm-fields.geojsonl" \
   --roadgraph "$OUT/roadgraph.bin" --radius-km "$RADIUS_KM" \
   --out-bin "$OUT/fields.bin" --out-geojson "$WORK/fields.geojsonl"
-tippecanoe -o "$OUT/fields.pmtiles" --force -l fields -Z10 -z14 --use-attribute-for-id=i \
+tippecanoe -o "$OUT/fields.pmtiles" --force -l fields -Z10 -z14 --use-attribute-for-id=fid \
   --drop-densest-as-needed --simplify-only-low-zooms --detect-shared-borders \
   --name "Felder Spielregion" "$WORK/fields.geojsonl"
 pmtiles show "$OUT/fields.pmtiles" > "$WORK/fields-info.txt"; head -15 "$WORK/fields-info.txt"

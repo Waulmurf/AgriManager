@@ -280,6 +280,14 @@ export class Simulation {
       v.waitMin = this.rng.range(30, 90);
       return;
     }
+    if (v.profile === 'car') {
+      // Firmenwagen arbeiten nicht auf dem Feld: kurzer Halt (z. B. Kundenbesuch), dann weiter
+      v.trips++;
+      v.next = this.rng.next() < 0.7 ? 'field' : 'home';
+      v.state = VehicleState.Waiting;
+      v.waitMin = this.rng.range(15, 30);
+      return;
+    }
     // am Feld angekommen: Feldarbeit als Bahnenmuster
     this.startRoute(v, this.fields ? this.buildRealFieldRoute(v.node, v.fieldNode) : this.buildFieldRoute(v.node));
     v.state = VehicleState.Working;

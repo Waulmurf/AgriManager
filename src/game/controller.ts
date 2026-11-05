@@ -274,11 +274,12 @@ export class GameController {
   private updateActiveFields(map: MlMap, n: number) {
     const now = new Set<number>();
     for (let i = 0; i < n; i++) if (this.samples[i].field >= 0) now.add(this.samples[i].field);
-    for (const id of this.activeFields) {
-      if (!now.has(id)) map.setFeatureState({ source: 'fields', sourceLayer: 'fields', id }, { active: false });
+    // Kachel-ID = Feld-Index + 1 (tippecanoe erlaubt keine ID 0)
+    for (const fi of this.activeFields) {
+      if (!now.has(fi)) map.setFeatureState({ source: 'fields', sourceLayer: 'fields', id: fi + 1 }, { active: false });
     }
-    for (const id of now) {
-      if (!this.activeFields.has(id)) map.setFeatureState({ source: 'fields', sourceLayer: 'fields', id }, { active: true });
+    for (const fi of now) {
+      if (!this.activeFields.has(fi)) map.setFeatureState({ source: 'fields', sourceLayer: 'fields', id: fi + 1 }, { active: true });
     }
     this.activeFields = now;
   }
@@ -334,7 +335,7 @@ export class GameController {
     map.on('click', 'fields-fill', (e) => {
       const feat = e.features?.[0];
       if (!feat || feat.id === undefined) return;
-      const info = this.fieldInfo(Number(feat.id));
+      const info = this.fieldInfo(Number(feat.id) - 1);
       if (!info) return;
       new maplibregl.Popup({ closeButton: true, maxWidth: '260px' })
         .setLngLat(e.lngLat)
