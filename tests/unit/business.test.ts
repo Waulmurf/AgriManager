@@ -47,8 +47,10 @@ describe('Besuch, Anfrage, Auftrag', () => {
     const farm = s.farms!.farms.find((f) => f.homeNode !== s.homeNode)!;
     expect(s.command({ kind: 'visit', farmId: farm.id })).toMatch(/Fahrt zu/);
     expect(s.chefBusy).toMatch(/Besuch/);
-    // zweiter Befehl während der Fahrt: Chef ist beschäftigt
-    expect(s.command({ kind: 'visit', farmId: farm.id })).toMatch(/Besuch/);
+    // zweiter Befehl während der Fahrt: wird eingeplant, hier gleich wieder gestrichen
+    expect(s.command({ kind: 'visit', farmId: farm.id })).toMatch(/^Eingeplant als Nr\. 1: Besuch/);
+    expect(s.command({ kind: 'dequeue', queueId: s.queue[0].id })).toMatch(/Aus dem Plan/);
+    expect(s.queue.length).toBe(0);
     runUntil(s, () => farm.known);
     expect(farm.known).toBe(true);
     const ev = s.business.drainEvents();
@@ -275,6 +277,64 @@ function finishedInvoice(seed: number) {
   const inv = s.business.invoices[0];
   return { s, inv };
 }
+
+describe('Warteschlange des Chefs', () => {
+  it('plant Besuche, während der Chef grubbert, und arbeitet sie danach der Reihe nach ab', () => {
+    const { s } = (() => {
+      const s = world(5);
+      for (const farm of s.farms!.farms) {
+        s.command({ kind: 'visit', farmId: farm.id });
+        runUntil(s, () => !s.chefBusy);
+        if (s.business.requests.some((r) => r.status === 'offen')) break;
+      }
+      return { s };
+    })();
+    const req = s.business.requests.find((r) => r.status === 'offen')!;
+    s.command({ kind: 'respond', requestId: req.id, action: 'accept' });
+    s.command({ kind: 'buy', offerId: 1 });
+    const order = s.business.orders[0];
+    const grubber = s.company.machines.find((m) => m.type === 'grubber')!;
+    runUntil(s, () => s.time % 1440 > 30 && s.time % 1440 < 120, 1440); // morgens starten
+    expect(s.command({ kind: 'startJob', orderId: order.id, tractorId: 1, implementId: grubber.id })).toBe('Auftrag gestartet');
+    const others = s.farms!.farms.filter((f) => f.id !== order.farmId && f.homeNode !== s.homeNode);
+    const [f1, f2, f3] = others;
+    expect(s.command({ kind: 'visit', farmId: f1.id })).toMatch(/^Eingeplant als Nr\. 1/);
+    expect(s.command({ kind: 'visit', farmId: f2.id })).toMatch(/^Eingeplant als Nr\. 2/);
+    expect(s.command({ kind: 'visit', farmId: f1.id })).toBe('Besuch ist schon eingeplant');
+    expect(s.command({ kind: 'visit', farmId: f3.id })).toMatch(/^Eingeplant als Nr\. 3/);
+    // Reihenfolge ändern: f3 nach vorn
+    s.command({ kind: 'queueMove', queueId: s.queue[2].id, dir: -1 });
+    s.command({ kind: 'queueMove', queueId: s.queue[1].id, dir: -1 });
+    expect(s.queue.map((q) => (q.cmd as { farmId: number }).farmId)).toEqual([f3.id, f1.id, f2.id]);
+    expect(s.queue.length).toBe(3);
+    // erst nach dem Auftrag geht es los
+    const order1 = order;
+    const visited: number[] = [];
+    runUntil(s, () => {
+      for (const f of [f1, f2, f3]) if (f.known && !visited.includes(f.id)) visited.push(f.id);
+      return visited.length === 3;
+    }, 6 * 1440);
+    expect(order1.status).toBe('fertig');
+    expect(visited).toEqual([f3.id, f1.id, f2.id]);
+    expect(s.queue.length).toBe(0);
+  });
+
+  it('übersteht Speichern und Laden', () => {
+    const a = world(6);
+    const fs = a.farms!.farms.filter((f) => f.homeNode !== a.homeNode);
+    a.command({ kind: 'visit', farmId: fs[0].id });
+    a.command({ kind: 'visit', farmId: fs[1].id });
+    a.run(5);
+    const b = world(6);
+    b.restore(JSON.parse(JSON.stringify(a.serialize())));
+    expect(b.queue.length).toBe(1);
+    expect(b.hash()).toBe(a.hash());
+    a.run(400);
+    b.run(400);
+    expect(b.hash()).toBe(a.hash());
+    expect(b.farms!.farms[fs[1].id].known).toBe(a.farms!.farms[fs[1].id].known);
+  });
+});
 
 describe('Zahlungsmoral', () => {
   it('zahlt innerhalb von 30 Tagen an einem beliebigen Tag oder wird überfällig', () => {

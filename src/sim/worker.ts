@@ -99,6 +99,7 @@ function sendBusiness(force = false) {
     chefMaxMinutes: CHEF_MAX_MINUTES,
     dieselTotalL: Math.round(b.dieselTotalL),
     chefBusy: sim.chefBusy,
+    queue: sim.queue.map((q) => ({ ...q, cmd: { ...q.cmd } })),
     knownFarms: known,
     satisfaction,
     events: b.drainEvents(),

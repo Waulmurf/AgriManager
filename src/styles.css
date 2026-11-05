@@ -102,3 +102,7 @@ html, body, #root { margin: 0; height: 100%; }
 .save-panel { position: absolute; right: 0; top: 40px; z-index: 10; width: 340px; background: #fff; color: var(--ink); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.2); padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
 .save-panel input { flex: 1; font: inherit; padding: 4px 6px; }
 .save-panel .close { border: 0; background: none; font-size: 18px; cursor: pointer; color: var(--muted); }
+.queue { margin: 4px 0 8px; padding-left: 20px; font-size: 13px; }
+.queue li { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 2px 0; }
+.queue-actions { display: flex; gap: 2px; flex-shrink: 0; }
+.queue-actions button { font-size: 11px; padding: 1px 5px; cursor: pointer; }

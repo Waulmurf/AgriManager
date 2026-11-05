@@ -2,7 +2,7 @@
 import type { PlayerUnitInfo, SaveState, VehicleInfo } from './engine';
 import type { Company } from './economy';
 import type { ContactPreference } from './farms';
-import type { Command, GameEvent, Invoice, LedgerEntry, Order, Request } from './business';
+import type { Command, GameEvent, Invoice, LedgerEntry, Order, QueueItem, Request } from './business';
 import type { MarketOffer } from './economy';
 
 /** Spielminuten pro Sekunde Echtzeit bei 1x. 10x/100x vervielfachen die Schrittzahl. */
@@ -59,6 +59,8 @@ export interface BusinessState {
   chefMaxMinutes: number;
   dieselTotalL: number;
   chefBusy: string | null;
+  /** geplante Aufgaben des Chefs */
+  queue: QueueItem[];
   knownFarms: number[];
   satisfaction: Record<number, number>;
   events: GameEvent[];

@@ -11,7 +11,7 @@ import { BRANDS, COMPANY_CAR } from '../data/brands';
 import { fieldPattern, type FieldSet } from './fields';
 import { generateFarms, type FarmSet } from './farms';
 import { startCompany, type Company } from './economy';
-import { Business, REMIND_CALL_MINUTES, VISIT_MINUTES, type Command } from './business';
+import { Business, REMIND_CALL_MINUTES, VISIT_MINUTES, fmtHa, type Command, type QueueCommand, type QueueItem } from './business';
 import { appendEdgePoints, nearestNode, RoadClass, type RoadGraph } from './roadgraph';
 
 export const STEP_SECONDS = 60;
@@ -86,6 +86,9 @@ export interface SaveState {
     task: PlayerTask | null;
     route: { id: number; kind: RouteGeom['kind']; xs: number[]; ys: number[]; speed: number[] } | null;
   }[];
+  /** Warteschlange des Chefs (ab Phase 3 je Mitarbeiter) */
+  queue?: QueueItem[];
+  nextQueueId?: number;
 }
 
 export interface PlayerUnitInfo {
@@ -143,6 +146,8 @@ export const RUEST_FELD_MIN = 5;
 export const RUEST_ABBAU_MIN = 10;
 /** Höchstarbeitszeit des Chefs je Tag (ArbZG § 3: 10 h), Tageswechsel 06:00 */
 export const CHEF_MAX_MINUTES = 600;
+/** Geplante Aufgaben starten nur tagsüber: bis 20:00 (Minute des Tages ab 06:00) */
+export const QUEUE_LAST_START = 14 * 60;
 /** Dieselverbrauch (Annahmen): Schlepper 200 PS auf der Straße, Pkw */
 export const DIESEL_TRACTOR_ROAD_L_KM = 0.35;
 export const DIESEL_CAR_L_KM = 0.07;
@@ -167,6 +172,9 @@ export class Simulation {
   time = 0;
   /** heutige Arbeitsminuten des Chefs (Reset um 06:00) */
   chefMinutes = 0;
+  /** geplante Aufgaben des Chefs, werden nacheinander abgearbeitet */
+  queue: QueueItem[] = [];
+  private nextQueueId = 1;
 
   constructor(graph: RoadGraph, opts: SimOptions) {
     this.graph = graph;
@@ -253,6 +261,93 @@ export class Simulation {
       if (v.owner === 'player') this.stepPlayer(v);
       else this.stepVehicle(v);
     }
+    if (this.queue.length) this.runQueue();
+  }
+
+  /** Nächste geplante Aufgabe starten, sobald der Chef frei ist (tagsüber, mit Arbeitszeit übrig) */
+  private runQueue() {
+    if (this.time % 1440 >= QUEUE_LAST_START || this.chefMinutes >= CHEF_MAX_MINUTES) return;
+    while (this.queue.length && !this.chefBusy) {
+      const item = this.queue.shift()!;
+      this.business.version++;
+      const err = this.checkQueueCommand(item.cmd, item.id);
+      const msg = err ?? this.startNow(item.cmd);
+      if (this.chefBusy) this.business.info(this.time, `Plan: ${item.label} – ${msg}`);
+      else this.business.warn(this.time, `Geplant, aber nicht möglich: ${item.label} – ${msg}`);
+    }
+  }
+
+  /** Prüfungen, die unabhängig davon gelten, ob der Chef gerade frei ist; null = in Ordnung */
+  private checkQueueCommand(cmd: QueueCommand, ignoreQueueId = 0): string | null {
+    const b = this.business;
+    if (cmd.kind === 'visit') {
+      if (!this.farms?.farms[cmd.farmId]) return 'Betrieb unbekannt';
+      if (!this.vehicles.some((v) => v.owner === 'player' && v.profile === 'car')) return 'Kein Firmenwagen';
+      return null;
+    }
+    const o = b.orders.find((x) => x.id === cmd.orderId);
+    if (!o || o.status !== 'offen') return 'Auftrag nicht startbar';
+    const tractor = this.company.machines.find((m) => m.id === cmd.tractorId && m.type === 'schlepper');
+    const impl = this.company.machines.find((m) => m.id === cmd.implementId);
+    if (!tractor || !impl) return 'Maschine fehlt';
+    if (impl.type !== 'grubber') return 'Für Grubbern wird ein Grubber gebraucht';
+    if ((impl.powerNeed ?? 0) > (tractor.power ?? 0)) return 'Schlepper zu schwach für das Gerät';
+    if (!this.fields) return 'Keine Felddaten';
+    if (!o.fields.some((f) => !o.doneFields.includes(f))) return 'Alle Felder erledigt';
+    if (this.queue.some((q) => q.id !== ignoreQueueId && q.cmd.kind === 'startJob' && q.cmd.orderId === o.id)) return 'Auftrag ist schon eingeplant';
+    return null;
+  }
+
+  private queueLabel(cmd: QueueCommand): string {
+    const b = this.business;
+    if (cmd.kind === 'visit') return `Besuch ${b.farmName(cmd.farmId)}`;
+    const o = b.orders.find((x) => x.id === cmd.orderId);
+    return o ? `Grubbern ${b.farmName(o.farmId)} (${fmtHa(o.areaHa)})` : 'Auftrag';
+  }
+
+  /** Besuch oder Auftrag sofort starten oder, wenn der Chef beschäftigt ist, hinten einplanen */
+  private startOrQueue(cmd: QueueCommand): string {
+    const err = this.checkQueueCommand(cmd);
+    if (err) return err;
+    const busy = this.chefBusy;
+    const tired = this.chefMinutes >= CHEF_MAX_MINUTES;
+    if (busy || tired || this.queue.length) {
+      if (cmd.kind === 'visit' && this.queue.some((q) => q.cmd.kind === 'visit' && q.cmd.farmId === cmd.farmId)) return 'Besuch ist schon eingeplant';
+      const label = this.queueLabel(cmd);
+      this.queue.push({ id: this.nextQueueId++, cmd: { ...cmd }, label });
+      this.business.version++;
+      return `Eingeplant als Nr. ${this.queue.length}: ${label}${tired && !busy ? ' (ab 06:00)' : ''}`;
+    }
+    return this.startNow(cmd);
+  }
+
+  /** Startet die Aufgabe; der Chef muss frei sein (Prüfung vorher über checkQueueCommand) */
+  private startNow(cmd: QueueCommand): string {
+    const b = this.business;
+    const t = this.time;
+    if (cmd.kind === 'visit') {
+      const farm = this.farms!.farms[cmd.farmId];
+      const car = this.vehicles.find((v) => v.owner === 'player' && v.profile === 'car')!;
+      car.task = { kind: 'visit', farmId: farm.id, phase: 'to' };
+      if (!this.driveTo(car, farm.homeNode)) return 'Hof nicht erreichbar';
+      b.version++;
+      return `Fahrt zu ${farm.name}`;
+    }
+    const o = b.orders.find((x) => x.id === cmd.orderId)!;
+    const tractor = this.company.machines.find((m) => m.id === cmd.tractorId)!;
+    const impl = this.company.machines.find((m) => m.id === cmd.implementId)!;
+    const unit = this.vehicles.find((v) => v.owner === 'player' && v.machineId === tractor.id);
+    if (!unit || unit.task) return 'Schlepper nicht verfügbar';
+    const queue = o.fields.filter((f) => !o.doneFields.includes(f));
+    unit.task = {
+      kind: 'job', orderId: o.id, queue, current: 0, phase: 'prep',
+      width: impl.width ?? 3, haPerHour: impl.haPerHour ?? 1.5, workKmh: impl.workKmh ?? 10,
+      dieselLHa: impl.dieselLHa ?? 9,
+    };
+    unit.state = VehicleState.Waiting;
+    unit.waitMin = RUEST_HOF_MIN;
+    b.orderStarted(o, tractor.id, impl.id, t);
+    return 'Auftrag gestartet';
   }
 
   /** Der Chef ist der einzige Fahrer: beschäftigt, solange ein Spielerfahrzeug eine Aufgabe hat. */
@@ -310,44 +405,23 @@ export class Simulation {
         if (r === 'Kunde angerufen') this.chefMinutes += REMIND_CALL_MINUTES;
         return r;
       }
-      case 'visit': {
-        const farm = this.farms?.farms[cmd.farmId];
-        if (!farm) return 'Betrieb unbekannt';
-        const busy = this.chefBusy;
-        if (busy) return busy;
-        if (this.chefMinutes >= CHEF_MAX_MINUTES) return 'Arbeitszeit des Chefs für heute erreicht (ab 06:00 wieder)';
-        const car = this.vehicles.find((v) => v.owner === 'player' && v.profile === 'car');
-        if (!car) return 'Kein Firmenwagen';
-        car.task = { kind: 'visit', farmId: farm.id, phase: 'to' };
-        if (!this.driveTo(car, farm.homeNode)) return 'Hof nicht erreichbar';
+      case 'visit':
+      case 'startJob':
+        return this.startOrQueue(cmd);
+      case 'dequeue': {
+        const i = this.queue.findIndex((q) => q.id === cmd.queueId);
+        if (i < 0) return 'Nicht mehr geplant';
+        const [q] = this.queue.splice(i, 1);
         b.version++;
-        return `Fahrt zu ${farm.name}`;
+        return `Aus dem Plan genommen: ${q.label}`;
       }
-      case 'startJob': {
-        const o = b.orders.find((x) => x.id === cmd.orderId);
-        if (!o || o.status !== 'offen') return 'Auftrag nicht startbar';
-        const tractor = this.company.machines.find((m) => m.id === cmd.tractorId && m.type === 'schlepper');
-        const impl = this.company.machines.find((m) => m.id === cmd.implementId);
-        if (!tractor || !impl) return 'Maschine fehlt';
-        if (impl.type !== 'grubber') return 'Für Grubbern wird ein Grubber gebraucht';
-        if ((impl.powerNeed ?? 0) > (tractor.power ?? 0)) return 'Schlepper zu schwach für das Gerät';
-        const busy = this.chefBusy;
-        if (busy) return busy;
-        if (this.chefMinutes >= CHEF_MAX_MINUTES) return 'Arbeitszeit des Chefs für heute erreicht (ab 06:00 wieder)';
-        const unit = this.vehicles.find((v) => v.owner === 'player' && v.machineId === tractor.id);
-        if (!unit || unit.task) return 'Schlepper nicht verfügbar';
-        if (!this.fields) return 'Keine Felddaten';
-        const queue = o.fields.filter((f) => !o.doneFields.includes(f));
-        if (!queue.length) return 'Alle Felder erledigt';
-        unit.task = {
-          kind: 'job', orderId: o.id, queue, current: 0, phase: 'prep',
-          width: impl.width ?? 3, haPerHour: impl.haPerHour ?? 1.5, workKmh: impl.workKmh ?? 10,
-          dieselLHa: impl.dieselLHa ?? 9,
-        };
-        unit.state = VehicleState.Waiting;
-        unit.waitMin = RUEST_HOF_MIN;
-        b.orderStarted(o, tractor.id, impl.id, t);
-        return 'Auftrag gestartet';
+      case 'queueMove': {
+        const i = this.queue.findIndex((q) => q.id === cmd.queueId);
+        const j = i + cmd.dir;
+        if (i < 0 || j < 0 || j >= this.queue.length) return 'Nicht verschiebbar';
+        [this.queue[i], this.queue[j]] = [this.queue[j], this.queue[i]];
+        b.version++;
+        return 'Reihenfolge geändert';
       }
       case 'recall': {
         const v = this.vehicles[cmd.vehicle];
@@ -393,6 +467,8 @@ export class Simulation {
         waitMin: v.waitMin, next: v.next, fieldNode: v.fieldNode, trips: v.trips,
         task: v.task ? structuredClone(v.task) : null, restUntil: v.restUntil, chargedRoute: v.chargedRoute,
       })),
+      queue: structuredClone(this.queue),
+      nextQueueId: this.nextQueueId,
     };
   }
 
@@ -411,6 +487,8 @@ export class Simulation {
       if (f) { f.known = known === 1; f.satisfaction = sat; }
     });
     this.pending = [];
+    this.queue = structuredClone(s.queue ?? []);
+    this.nextQueueId = s.nextQueueId ?? 1;
     s.vehicles.forEach((d, i) => {
       const v = this.vehicles[i];
       Object.assign(v, {
@@ -487,6 +565,7 @@ export class Simulation {
     mix(this.chefMinutes);
     mix(this.business.requests.length);
     mix(this.business.orders.length);
+    for (const q of this.queue) mix(q.id);
     for (const v of this.vehicles) {
       mix(v.state); mix(v.node); mix(v.route ? v.route.id : 0); mix(v.seg); mix(v.segOff);
       mix(v.dist); mix(v.waitMin); mix(v.trips); mix(v.fieldNode);

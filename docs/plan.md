@@ -28,6 +28,13 @@ Jeder Schritt endet mit einer spielbaren Windows-Version.
   dazu. Auflieger bzw. Anhänger (Kipper, Schubboden, Tankauflieger für Gülle) kauft der Spieler
   separat. Das passt zu den geplanten Transportaufträgen (siehe „Abgrenzung“) und braucht einen
   Führerschein-Skill (LKW, PA-10). Vorschlag: zusammen mit den Transportaufträgen nach Phase 5.
+- **Warteschlange je Fahrer** (5. Nov. 2026, für den Chef umgesetzt): Ist der Chef unterwegs,
+  werden Besuche und Aufträge eingeplant statt abgelehnt. Sie starten nacheinander, sobald er
+  frei ist: zwischen 06:00 und 20:00 und nur, solange er noch Arbeitszeit übrig hat. Die
+  Reihenfolge lässt sich ändern, einzelne Einträge lassen sich streichen (Planungstafel im Reiter
+  Aufträge). Ein Eintrag, der beim Start nicht mehr möglich ist (z. B. Auftrag schon fertig),
+  wird mit einer Warnung übersprungen. In Phase 3 bekommt jeder Mitarbeiter eine eigene
+  Warteschlange.
 - **Arbeitsketten** (5. Nov. 2026): Häcksler arbeitet nur mit Abfahrer nebenher; Drescher und
   Roder laden auf Anhänger (angekoppelt oder abgestellt) im Feld bzw. am Feldrand ab; der
   Rübenroder legt eine Feldrandmiete an, die ein Reinigungslader („Rübenmaus“) auf Anhänger

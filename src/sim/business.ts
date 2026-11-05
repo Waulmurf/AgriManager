@@ -126,7 +126,17 @@ export type Command =
   | { kind: 'startJob'; orderId: number; tractorId: number; implementId: number }
   | { kind: 'buy'; offerId: number }
   | { kind: 'recall'; vehicle: number }
-  | { kind: 'remind'; invoiceId: number };
+  | { kind: 'remind'; invoiceId: number }
+  | { kind: 'dequeue'; queueId: number }
+  | { kind: 'queueMove'; queueId: number; dir: -1 | 1 };
+
+/** Befehle, die in die Warteschlange eines Fahrers passen */
+export type QueueCommand = Extract<Command, { kind: 'visit' } | { kind: 'startJob' }>;
+export interface QueueItem {
+  id: number;
+  cmd: QueueCommand;
+  label: string;
+}
 
 export class Business {
   readonly requests: Request[] = [];
@@ -498,6 +508,10 @@ export class Business {
 
   warn(time: number, text: string) {
     this.emit(time, 'warnung', text);
+  }
+
+  info(time: number, text: string) {
+    this.emit(time, 'info', text);
   }
 }
 

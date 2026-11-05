@@ -60,6 +60,7 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
 - Phase 2 (Prototyp der Kern-Schleife) damit komplett → Gate „Nils spielt“.
 - Zahlungsregeln nach Rückmeldung: Zahlungsziel 30 Tage, Warnung bei Überfälligkeit, Anruf/Besuch
   binnen 14 Tagen, sonst verfällt die Rechnung.
+- Warteschlange für den Chef (`Simulation.queue`, Befehle dequeue/queueMove), im Spielstand gespeichert.
 
 ## CI (GitHub Actions)
 

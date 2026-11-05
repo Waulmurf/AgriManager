@@ -32,7 +32,7 @@ export function BusinessTab({ status, game }: { status: GameStatus; game: GameCo
         <dt>Konto</dt><dd data-testid="cash">{eur(c.cash)}</dd>
         <dt>Kreditrahmen</dt><dd>{eur(c.creditLimit - c.loan)} frei</dd>
         <dt>Standort</dt><dd>Groß Thondorf</dd>
-        <dt>Chef</dt><dd>{b?.chefBusy ?? 'im Büro'}</dd>
+        <dt>Chef</dt><dd>{b?.chefBusy ?? 'im Büro'}{b?.queue.length ? ` · ${b.queue.length} geplant` : ''}</dd>
         <dt>Arbeitszeit heute</dt><dd>{b ? `${(b.chefMinutes / 60).toLocaleString('de-DE', { maximumFractionDigits: 1 })} von ${b.chefMaxMinutes / 60} h` : '–'}</dd>
         <dt>Diesel gesamt</dt><dd>{b ? `${b.dieselTotalL.toLocaleString('de-DE')} l` : '–'}</dd>
       </dl>
@@ -136,6 +136,7 @@ function OrderItem({ o, game, status }: { o: Order; game: GameController | null;
     fb.show(await game!.command({ kind: 'startJob', orderId: o.id, tractorId: tractor, implementId: implId }));
   };
   const late = status.business && o.status !== 'fertig' && status.business.time > o.latest;
+  const queued = !!status.business?.queue.some((q) => q.cmd.kind === 'startJob' && q.cmd.orderId === o.id);
   return (
     <li className="card" data-testid="order">
       <div className="card-head">
@@ -164,11 +165,42 @@ function OrderItem({ o, game, status }: { o: Order; game: GameController | null;
           ) : (
             <small className="warn">Kein Grubber – im Markt kaufen</small>
           )}
-          <button onClick={start} disabled={!implementsOk.length} data-testid="start-job">Fahrer: Chef · Starten</button>
+          <button onClick={start} disabled={!implementsOk.length || queued} data-testid="start-job">
+            {queued ? 'Eingeplant' : status.business?.chefBusy || status.business?.queue.length ? 'Fahrer: Chef · Einplanen' : 'Fahrer: Chef · Starten'}
+          </button>
         </div>
       )}
       {fb.msg && <small className="feedback">{fb.msg}</small>}
     </li>
+  );
+}
+
+/** Warteschlange des Chefs: geplante Besuche und Aufträge, der Reihe nach */
+function QueueList({ status, game }: { status: GameStatus; game: GameController | null }) {
+  const fb = useFeedback();
+  const q = status.business?.queue ?? [];
+  const send = async (cmd: Parameters<GameController['command']>[0]) => fb.show(await game!.command(cmd));
+  return (
+    <>
+      <h3>Geplant für den Chef ({q.length})</h3>
+      {q.length ? (
+        <ol className="queue" data-testid="queue">
+          {q.map((item, i) => (
+            <li key={item.id}>
+              <span>{item.label}</span>
+              <span className="queue-actions">
+                <button onClick={() => send({ kind: 'queueMove', queueId: item.id, dir: -1 })} disabled={i === 0} title="früher">▲</button>
+                <button onClick={() => send({ kind: 'queueMove', queueId: item.id, dir: 1 })} disabled={i === q.length - 1} title="später">▼</button>
+                <button onClick={() => send({ kind: 'dequeue', queueId: item.id })} title="aus dem Plan nehmen" data-testid="dequeue">✕</button>
+              </span>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="hint">Nichts geplant. Ist der Chef unterwegs, werden Besuche und Aufträge hier eingereiht und danach der Reihe nach gestartet (zwischen 06:00 und 20:00).</p>
+      )}
+      {fb.msg && <p className="feedback">{fb.msg}</p>}
+    </>
   );
 }
 
@@ -199,6 +231,7 @@ export function OrdersTab({ status, game }: { status: GameStatus; game: GameCont
           return <li key={u.machineId}><span>{m ? machineName(m) : u.machineId}</span><small>{u.status}</small></li>;
         })}
       </ul>
+      <QueueList status={status} game={game} />
     </>
   );
 }
