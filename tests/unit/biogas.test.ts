@@ -142,6 +142,47 @@ describe('Biogasanlage', () => {
     expect(p.gaer).toBe(5000 - Math.round(l.areaHa * 20));
   });
 
+  it('viehlose Kunden fragen Gärrest an: Preis je m³ niedriger als Gülle, Lager wird reserviert', () => {
+    const s = world(4);
+    const b = s.business;
+    const p = runningPlant(s);
+    p.gaer = 8000;
+    for (const f of s.farms!.farms) { f.known = true; f.satisfaction = 70; f.rivalUntil = 0; }
+    let req;
+    for (let d = 0; d < 40 && !req; d++) { s.run(1440); p.gaer = Math.max(p.gaer, 8000); req = b.requests.find((r) => r.status === 'offen' && r.gaerrest); }
+    expect(req).toBeDefined();
+    expect(s.farms!.farms[req!.farmId].livestock).toBe(false);
+    expect(req!.priceHa / req!.gabe!).toBeLessThan(3.5);
+    const before = p.gaer;
+    expect(s.command({ kind: 'respond', requestId: req!.id, action: 'accept' })).not.toMatch(/Zu wenig/);
+    const o = b.orders.find((x) => x.requestId === req!.id)!;
+    expect(o.gaerrest).toBe(true);
+    expect(o.sourceNode).toBe(s.company.sites![0].node);
+    expect(before - p.gaer).toBe(Math.round(o.areaHa * o.gabe!));
+  });
+
+  it('Güllevertrag mit Selbstabholung: Auftrag „Gülle holen“ füllt die Vorgrube', () => {
+    const s = world(4);
+    const b = s.business;
+    const p = runningPlant(s, 250);
+    const area = (f: { fields: number[] }) => f.fields.reduce((a, i) => a + s.fields!.areaHa[i], 0);
+    const farm = s.farms!.farms.filter((f) => f.livestock).sort((x, y) => area(y) - area(x))[0];
+    farm.known = true; farm.satisfaction = 80;
+    expect(s.command({ kind: 'guelleContract', farmId: farm.id, selfHaul: true })).toMatch(/eigenem Fass/);
+    s.run(2 * 1440);
+    expect(p.stock.guelle).toBe(0); // keine Anfuhr durch Dritte
+    expect(s.command({ kind: 'fetchSlurry', farmId: farm.id })).toMatch(/Auftrag/);
+    const o = b.orders.find((x) => x.slurrySupply)!;
+    s.company.machines.push({ id: 950, type: 'zubringer', brand: 'Kotte', model: 'VTR 24', year: 2022, hours: 0, condition: 95, newPrice: 78000, purchasePrice: 78000, afaYears: 10, boughtAt: 0, tankM3: 24, powerNeed: 100 });
+    const tractor = s.company.machines.find((m) => m.type === 'schlepper')!;
+    runUntil(s, () => s.time % 1440 > 10 && s.time % 1440 < 60, 2 * 1440);
+    expect(s.command({ kind: 'startJob', orderId: o.id, tractorId: tractor.id, implementId: 950 })).toMatch(/gestartet/);
+    runUntil(s, () => o.status === 'fertig', 10 * 1440);
+    expect(o.status).toBe('fertig');
+    expect(o.doneT).toBeCloseTo(o.tPerHa!, 0);
+    expect(b.invoices.some((i) => i.orderId === o.id)).toBe(false);
+  });
+
   it('Spielstand mit Biogasanlage läuft bitgleich weiter', () => {
     const a = world(4);
     runningPlant(a);

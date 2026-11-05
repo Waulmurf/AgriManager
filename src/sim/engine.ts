@@ -214,7 +214,7 @@ type PlayerTask =
     }
   | {
       /** Lkw-Transport: pendelt zwischen Ladestelle und Ziel, bis die Menge abgefahren ist */
-      kind: 'truck'; driverId: number; orderId: number; from: number; to: number; cap: number; load: number;
+      kind: 'truck'; driverId: number; orderId: number; from: number; to: number; cap: number; load: number; implementId?: number;
       loadMin: number; unloadMin: number; driveMin: number;
       phase: 'toLoad' | 'load' | 'toUnload' | 'unload' | 'break' | 'back' | 'night';
     }
@@ -414,7 +414,7 @@ export class Simulation {
 
   /** Maschine gerade bei einer Aufgabe (Schlepper/Wagen mit Aufgabe oder Gerät im Auftrag) */
   private machineBusy(machineId: number): boolean {
-    return this.vehicles.some((v) => v.owner === 'player' && !!v.task && (v.machineId === machineId || ((v.task.kind === 'job' || v.task.kind === 'feeder' || v.task.kind === 'haul') && v.task.implementId === machineId)));
+    return this.vehicles.some((v) => v.owner === 'player' && !!v.task && (v.machineId === machineId || ((v.task.kind === 'job' || v.task.kind === 'feeder' || v.task.kind === 'haul' || v.task.kind === 'truck') && v.task.implementId === machineId)));
   }
 
   busyMachineIds(): number[] {
@@ -1136,6 +1136,16 @@ export class Simulation {
     const tOrder = b.orders.find((x) => x.id === cmd.orderId);
     if (tOrder?.service === 'transport') {
       if (tOrder.status !== 'offen') return 'Auftrag nicht startbar';
+      if (tOrder.slurrySupply) {
+        // Gülle holen: Schlepper mit Zubringer- oder Güllefass
+        const tr = this.company.machines.find((m) => m.id === cmd.tractorId && m.type === 'schlepper');
+        const fass = this.company.machines.find((m) => m.id === cmd.implementId && (m.type === 'zubringer' || m.type === 'guellefass'));
+        if (!tr || !fass) return 'Schlepper und Zubringer- bzw. Güllefass wählen';
+        if ((fass.powerNeed ?? 0) > (tr.power ?? 0)) return 'Schlepper zu schwach für das Fass';
+        if ((driver.skills.boden ?? 0) < 1) return `${this.driverName(driver.id)} ist nicht als Traktorfahrer qualifiziert`;
+        if (!this.vehicles.some((v) => v.owner === 'player' && v.machineId === tr.id)) return 'Schlepper nicht verfügbar';
+        return null;
+      }
       const lkw = this.company.machines.find((m) => m.id === cmd.tractorId && m.type === 'lkw');
       if (!lkw) return 'Lkw wählen';
       if ((driver.skills.transport ?? 0) < 1) return `${this.driverName(driver.id)} hat keinen Lkw-Führerschein (CE)`;
@@ -1255,15 +1265,18 @@ export class Simulation {
     if (!unit || unit.task) return 'Schlepper nicht verfügbar';
     const driverId = cmd.driverId ?? 1;
     if (o.service === 'transport') {
-      const rueben = (o.tPerHa ?? 0) >= 50;
+      const rueben = (o.tPerHa ?? 0) >= 50 && !o.slurrySupply;
       const dest = DESTINATIONS.find((d) => d.name === o.destName);
+      // Gülle holen: Fass ansaugen/abpumpen je etwa 6 min (Annahme)
+      const slurry = !!o.slurrySupply;
       unit.task = {
         kind: 'truck', driverId, orderId: o.id, from: o.pickupNode ?? this.homeNode, to: o.destNode ?? this.homeNode,
-        cap: tractor.payloadT ?? 25, load: 0, loadMin: rueben ? TRUCK_LOAD_MIN.rueben : TRUCK_LOAD_MIN.korn, unloadMin: dest?.unloadMin ?? 15,
-        driveMin: 0, phase: 'toLoad',
+        cap: slurry ? impl.tankM3 ?? 15 : tractor.payloadT ?? 25, load: 0,
+        loadMin: slurry ? 6 : rueben ? TRUCK_LOAD_MIN.rueben : TRUCK_LOAD_MIN.korn, unloadMin: slurry ? 6 : dest?.unloadMin ?? 15,
+        driveMin: 0, phase: 'toLoad', implementId: slurry ? impl.id : undefined,
       };
       this.driveTo(unit, unit.task.from);
-      b.orderStarted(o, tractor.id, tractor.id, t, this.driverName(driverId));
+      b.orderStarted(o, tractor.id, impl.id, t, this.driverName(driverId));
       return `Transport gestartet (${this.driverName(driverId)})`;
     }
     const skill = this.company.drivers.find((d) => d.id === driverId)?.skills[SERVICE_SKILL[o.service]] ?? 1;
@@ -1354,7 +1367,7 @@ export class Simulation {
         if (t?.kind === 'truck') {
           const o = b.orders.find((x) => x.id === t.orderId);
           status = ({
-            toLoad: 'fährt zur Ladestelle', load: 'wird beladen', toUnload: `bringt ${Math.round(t.load)} t nach ${o?.destName ?? 'Ziel'}`,
+            toLoad: 'fährt zur Ladestelle', load: 'wird beladen', toUnload: `bringt ${Math.round(t.load)} ${o?.slurrySupply ? 'm³' : 't'} nach ${o?.destName ?? 'Ziel'}`,
             unload: 'lädt ab (Waage, Probe)', break: 'Lenkzeitpause', back: 'fährt zurück zum Hof', night: 'Feierabend, morgen weiter',
           } as Record<string, string>)[t.phase] + (o ? ` · ${Math.round(o.doneT ?? 0)} von ${Math.round(o.areaHa * (o.tPerHa ?? 0))} t` : '');
         }
@@ -1472,7 +1485,8 @@ export class Simulation {
       case 'biogasBid': return b.biogasBid(cmd.ct);
       case 'buySubstrate': return b.buySubstrate(cmd.substrate, cmd.t, t);
       case 'buyMaisField': return b.buyMaisField(cmd.farmId, t);
-      case 'guelleContract': return b.guelleContract(cmd.farmId, t);
+      case 'guelleContract': return b.guelleContract(cmd.farmId, t, cmd.selfHaul);
+      case 'fetchSlurry': return b.fetchSlurry(cmd.farmId, t);
       case 'spreadGaerrest': return b.spreadGaerrest(cmd.leaseId, t);
       case 'sellGaerrest': return b.sellGaerrest(cmd.m3, t);
       case 'buySite': {

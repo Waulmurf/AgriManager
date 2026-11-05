@@ -16,7 +16,7 @@ import { CATALOG, DEALERS, dealersFor, type CatalogModel } from '../data/catalog
 import { BUILDINGS, PERMIT, SITE_OFFERS, type BuildingKey } from '../data/sites';
 import { CROPS, IRRIGATION_EUR_HA, fieldIrrigated, fieldSoil, referenceRent, rotationFactor, soilFactor, type OwnCrop } from './farming';
 import {
-  BIOGAS, BIOGAS_AFA_YEARS, EEG_MAX_CT, FIXED_SHARE, GAER_GABE, GAER_SELL_EUR, GAER_VALUE_EUR, GUELLE_HAUL_EUR, OPEX_CT,
+  BIOGAS, BIOGAS_AFA_YEARS, EEG_MAX_CT, FIXED_SHARE, GAER_GABE, GAER_SERVICE_EUR_M3, GAER_SELL_EUR, GAER_VALUE_EUR, GUELLE_HAUL_EUR, OPEX_CT,
   SUBSTRATE_NAME, SUBSTRATE_PRICE, dailyTarget, farmSlurryPerDay, gaerBlocked, gaerOf, ration, type BiogasSize, type Feed, type Substrate,
 } from './biogas';
 import { DESTINATIONS } from '../data/destinations';
@@ -188,6 +188,8 @@ export interface Request {
   pickupNode?: number;
   destNode?: number;
   destName?: string;
+  /** Gärrest aus der eigenen Biogasanlage statt Gülle des Kunden */
+  gaerrest?: boolean;
   /** bestes Konkurrenzangebot (€/ha) und Anbieter (MK-02) */
   competitorPriceHa?: number;
   competitorId?: number;
@@ -229,6 +231,8 @@ export interface Order {
   gaerrest?: boolean;
   /** Mais auf dem Halm gekauft (€/t), Ernte ins eigene Silo */
   biogasPriceT?: number;
+  /** Gülle beim Vertragspartner selbst abholen (Eigenauftrag, Menge in tPerHa × areaHa m³) */
+  slurrySupply?: boolean;
   earliest: number;
   latest: number;
   status: OrderStatus;
@@ -302,7 +306,7 @@ export interface BiogasPlant {
   stock: { guelle: number; mais: number; gps: number; gras: number };
   gaer: number;
   /** Gülle-Lieferverträge mit Viehbetrieben (nehmen Gärrest zurück) */
-  contracts: { farmId: number; m3Day: number; until: number }[];
+  contracts: { farmId: number; m3Day: number; until: number; selfHaul?: boolean }[];
   /** laufender Monat: Strom (kWh), Kosten (€); Ration heute */
   kwhMonth: number;
   costMonth: number;
@@ -435,7 +439,8 @@ export type Command =
   | { kind: 'biogasBid'; ct: number }
   | { kind: 'buySubstrate'; substrate: Substrate; t: number }
   | { kind: 'buyMaisField'; farmId: number }
-  | { kind: 'guelleContract'; farmId: number }
+  | { kind: 'guelleContract'; farmId: number; selfHaul?: boolean }
+  | { kind: 'fetchSlurry'; farmId: number }
   | { kind: 'spreadGaerrest'; leaseId: number }
   | { kind: 'sellGaerrest'; m3: number }
   | { kind: 'buySite'; offerKey: string }
@@ -1025,7 +1030,7 @@ export class Business {
   }
 
   /** Gülle-Liefervertrag mit einem Viehbetrieb (ein Jahr; der Betrieb nimmt Gärrest zurück) – zweiter Aufruf kündigt */
-  guelleContract(farmId: number, time: number): string {
+  guelleContract(farmId: number, time: number, selfHaul = false): string {
     const p = this.biogas;
     const farm = this.farms?.farms[farmId];
     if (!p) return 'Keine Biogasanlage';
@@ -1036,9 +1041,32 @@ export class Business {
     if (farm.satisfaction < 50) return `${farm.name} ist nicht zufrieden genug`;
     const m3Day = farmSlurryPerDay(farm.fields.reduce((a, x) => a + (this.fields?.areaHa[x] ?? 0), 0));
     if (m3Day < 0.5) return 'zu wenig Gülle';
-    p.contracts.push({ farmId, m3Day, until: time + 365 * 1440 });
+    p.contracts.push({ farmId, m3Day, until: time + 365 * 1440, selfHaul: selfHaul || undefined });
     this.version++;
-    return `Vertrag: ${m3Day.toLocaleString('de-DE')} m³ Gülle am Tag (Anfuhr ${fmtEur(GUELLE_HAUL_EUR)}/m³), Gärrest geht zurück`;
+    return selfHaul
+      ? `Vertrag: ${m3Day.toLocaleString('de-DE')} m³ Gülle am Tag, Abholung mit eigenem Fass (Auftrag „Gülle holen“), Gärrest geht zurück`
+      : `Vertrag: ${m3Day.toLocaleString('de-DE')} m³ Gülle am Tag (Anfuhr ${fmtEur(GUELLE_HAUL_EUR)}/m³), Gärrest geht zurück`;
+  }
+
+  /** Gülle beim Vertragspartner selbst holen: Eigenauftrag für Schlepper mit Zubringer- oder Güllefass */
+  fetchSlurry(farmId: number, time: number): string {
+    const p = this.biogas;
+    const c = p?.contracts.find((x) => x.farmId === farmId && x.selfHaul);
+    const farm = this.farms?.farms[farmId];
+    if (!p || p.status !== 'betrieb' || !c || !farm) return 'Kein Vertrag mit Selbstabholung';
+    if (this.orders.some((o) => o.slurrySupply && o.farmId === farmId && o.status !== 'fertig')) return 'Abholung läuft schon';
+    const pit = p.contracts.reduce((a, x) => a + x.m3Day, 0) * 30;
+    const m3 = Math.min(Math.round(c.m3Day * 14), Math.floor(pit - p.stock.guelle));
+    if (m3 < 10) return 'Vorgrube ist voll';
+    const node = this.biogasNode() ?? farm.homeNode;
+    const o: Order = {
+      id: this.nextId++, requestId: 0, farmId, service: 'transport', fields: farm.fields.slice(0, 1), doneFields: [], areaHa: 1, priceHa: 0,
+      earliest: time, latest: time + 7 * 1440, status: 'offen', dieselL: 0, dieselCost: 0, tractorHours: 0, doneT: 0,
+      tPerHa: m3, pickupNode: farm.homeNode, destNode: node, destName: 'Biogasanlage', slurrySupply: true,
+    };
+    this.orders.push(o);
+    this.version++;
+    return `Auftrag angelegt: ${m3} m³ Gülle bei ${farm.name} holen (Schlepper mit Fass, im Reiter Aufträge)`;
   }
 
   /** Gärrest auf eine eigene Pachtfläche (PB-09): Eigenauftrag mit dem Güllefass, außerhalb der Sperrfrist */
@@ -1128,10 +1156,10 @@ export class Business {
         if (farm && farm.satisfaction >= 40) c.until += 365 * 1440;
         else { p.contracts.splice(i, 1); this.emit(time, 'info', `Güllevertrag mit ${this.farmName(c.farmId)} ausgelaufen.`, c.farmId); continue; }
       }
-      delivered += c.m3Day;
+      if (!c.selfHaul) delivered += c.m3Day;
       if (!gaerBlocked(d.month) && d.month <= 9) back += (c.m3Day * 365 / 243) * 0.95;
     }
-    const pit = delivered * 30;
+    const pit = p.contracts.reduce((a, c) => a + c.m3Day, 0) * 30;
     const take = Math.max(0, Math.min(delivered, pit - p.stock.guelle));
     p.stock.guelle += take;
     p.costMonth += take * GUELLE_HAUL_EUR;
@@ -1416,8 +1444,9 @@ export class Business {
     if (this.isRival(farmId, time)) return null;
     if (this.requests.some((r) => r.farmId === farmId && r.status === 'offen')) return null;
     const trial = this.isTrial(farmId, time);
-    // Gülle gibt es nur auf Betrieben mit Vieh
-    const offered = season.filter((x) => x.service !== 'guelle' || farm.livestock);
+    // Gülle gibt es nur auf Betrieben mit Vieh; viehlose Betriebe fragen Gärrest aus der eigenen Anlage an
+    const gaerOk = this.biogas?.status === 'betrieb' && this.biogas.gaer >= 300;
+    const offered = season.filter((x) => x.service !== 'guelle' || farm.livestock || gaerOk);
     if (!offered.length) return null;
     season.length = 0;
     season.push(...offered);
@@ -1452,17 +1481,21 @@ export class Business {
     // Drusch: die meisten Betriebe fahren das Korn selbst ab
     const chain = sv.service === 'haeckseln' ? (this.rng.next() < 0.3 + 0.5 * farm.mechanization ? 'haecksler' : 'komplett')
       : sv.service === 'drusch' ? (this.rng.next() < 0.55 + 0.35 * farm.mechanization ? 'haecksler' : 'komplett') : undefined;
+    // Gärrest (viehloser Betrieb): kommt aus der eigenen Anlage, Kunde zahlt nur die Ausbringung (günstiger als Gülle)
+    const gaerReq = sv.service === 'guelle' && !farm.livestock;
     // Transport: Ladestelle (Miete am Feld bzw. Hoflager), nächstes passendes Ziel, Fracht je t
     const tr = sv.service === 'transport' ? this.transportTerms(farm.id, picked[0]) : null;
     const priceHa = tr
       ? tr.priceHa
+      : gaerReq && gabe
+      ? Math.round(GAER_SERVICE_EUR_M3 * (0.9 + this.rng.next() * 0.2) * 10) / 10 * gabe
       : gabe
       ? Math.round(SERVICE_BASE_PRICE.guelle * (0.9 + this.rng.next() * 0.25) * 10) / 10 * gabe
       : chain
         ? Math.round(((sv.service === 'drusch' ? THRESH_PRICE_HA : CHOP_PRICE_HA)[chain] * (0.92 + this.rng.next() * 0.16)) / 5) * 5
         : Math.round(SERVICE_BASE_PRICE[sv.service] * (0.92 + this.rng.next() * 0.16) * 2) / 2;
     // Kunde kennt das Angebot der Konkurrenz und bietet höchstens etwas darüber (Stammkunden mehr)
-    const comp = this.competitorOffer(farmId, sv.service, time, gabe, chain);
+    const comp = gaerReq ? null : this.competitorOffer(farmId, sv.service, time, gabe, chain);
     let offerHa = priceHa;
     if (comp) offerHa = Math.min(priceHa, Math.round(comp.priceHa * (this.isLoyal(farmId) ? 1.06 : 1.02) * 2) / 2);
     const req: Request = {
@@ -1478,6 +1511,7 @@ export class Business {
       competitorId: comp?.id,
       gabe,
       chain,
+      gaerrest: gaerReq || undefined,
       tPerHa: tr?.tPerHa,
       pickupNode: tr?.pickupNode,
       destNode: tr?.destNode,
@@ -1622,6 +1656,11 @@ export class Business {
       if (ratio > 1) this.satisfy(r.farmId, -1, time);
       price = p;
     }
+    if (r.gaerrest) {
+      const m3 = Math.round(r.areaHa * (r.gabe ?? GAER_GABE));
+      if (!this.biogas || this.biogas.gaer < m3) return `Zu wenig Gärrest im Lager (${Math.round(this.biogas?.gaer ?? 0)} m³, gebraucht ${m3} m³)`;
+      this.biogas.gaer -= m3;
+    }
     r.status = 'angenommen';
     this.won++;
     const o: Order = {
@@ -1641,6 +1680,8 @@ export class Business {
       pickupNode: r.pickupNode,
       destNode: r.destNode,
       destName: r.destName,
+      gaerrest: r.gaerrest,
+      sourceNode: r.gaerrest ? this.biogasNode() : undefined,
       earliest: r.earliest,
       latest: r.latest,
       status: 'offen',
@@ -2278,12 +2319,17 @@ export class Business {
       o.finishedAt = time;
       const onTime = time <= o.latest;
       this.emit(time, 'auftrag', `Auftrag ${this.farmName(o.farmId)} fertig${onTime ? ', pünktlich' : ', verspätet'} (${fmtHa(o.areaHa)}).`, o.farmId);
-      if (o.gaerrest) {
+      if (o.gaerrest && o.ownLeaseId !== undefined) {
         const m3 = Math.round(o.areaHa * (o.gabe ?? GAER_GABE));
         this.book(time, `Gärrest auf eigener Fläche: ${m3.toLocaleString('de-DE')} m³ (Mineraldünger gespart)`, m3 * GAER_VALUE_EUR, 'Ackerbau');
         return;
       }
       if (o.ownLeaseId !== undefined) { this.ownStepDone(o, time); return; }
+      if (o.slurrySupply) {
+        if (this.biogas) this.biogas.stock.guelle += o.doneT ?? 0;
+        this.emit(time, 'info', `${Math.round(o.doneT ?? 0)} m³ Gülle von ${this.farmName(o.farmId)} in der Vorgrube.`);
+        return;
+      }
       if (o.biogasPriceT !== undefined) {
         // Erntemenge aus Fläche × Ertrag (Wagen können noch unterwegs zum Silo sein)
         const harvested = Math.round(o.areaHa * SILAGE_YIELD_T_HA);

@@ -775,7 +775,7 @@ Nils wählt aus, was umgesetzt wird. Empfehlung für den nächsten Block: 4, 1, 
 
 ### B. Vertiefung der vorhandenen Systeme
 
-5. **Gärrest als Dienstleistung:** Viehlose Kunden fragen Gärrest aus der eigenen Anlage an.
+5. **Gärrest als Dienstleistung** (umgesetzt, siehe unten): Viehlose Kunden fragen Gärrest aus der eigenen Anlage an.
    Gülle-Anfuhr mit eigenen Fahrzeugen statt durch Dritte.
 6. **Vermarktung und Lager:** Vorkontrakte, Getreidelager am Hof, Preise schwanken übers Jahr,
    Verkauf zum besten Zeitpunkt.
@@ -899,3 +899,23 @@ Nils wählt aus, was umgesetzt wird. Empfehlung für den nächsten Block: 4, 1, 
   Rechnungen.
 - **Später:** Vergleich zum Vorjahr, Deckungsbeitrag je Maschine inkl. AfA und Zinsen, Export als
   CSV, Ziele und Warnungen (z. B. Maschine unter 50 % ausgelastet).
+
+## Umsetzung Vorschlag 5: Gärrest als Dienstleistung (5. Nov. 2026)
+
+- **Gärrest für viehlose Kunden:** Läuft die eigene Anlage und liegen mindestens 300 m³ im Lager,
+  fragen in der Gülle-Saison auch Betriebe ohne Vieh an.
+  - Der Gärrest ist für den Kunden gratis (er spart Mineraldünger). Er zahlt nur die Ausbringung,
+    etwa 3 €/m³ statt 4 €/m³ bei Gülle (Annahme).
+  - Keine Konkurrenz, weil der Gärrest aus der eigenen Anlage kommt.
+  - Beim Annehmen wird die Menge im Gärrestlager reserviert. Das Güllefass holt sie dort
+    (`Order.sourceNode`).
+  - Leert das Lager und bringt Umsatz statt 6 €/m³ Kosten an der Gärrestbörse.
+- **Gülle selbst abholen:** Ein Liefervertrag kann „Anfuhr durch Dritte“ (2,50 €/m³, täglich)
+  oder „selbst abholen“ sein.
+  - Bei Selbstabholung legt „Gülle holen“ einen Eigenauftrag über rund 14 Tage Liefermenge an
+    (höchstens bis die Vorgrube voll ist).
+  - Den Auftrag fährt ein Schlepper mit Zubringer- oder Güllefass: pendeln Hof des Lieferanten →
+    Anlage, Ansaugen und Abpumpen je 6 min.
+  - Spart die Anfuhrkosten und lastet Schlepper und Fass im Winter aus.
+- **Später:** Gärrest mit dem Lkw-Tankauflieger, Gärrestabgabe an Nachbarn im Tausch gegen
+  Substrat, Nährstoffbilanz je Feld (Vorschlag 8).

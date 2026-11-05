@@ -102,7 +102,10 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
   Nils hat „Mache weiter mit dem Plan“ gesagt: Reihenfolge laut Empfehlung 4 → 1 → 13 → 5.
 - Vorschlag 1 fertig: Lkw-Transport (`transport`, Task `truck` in `engine.ts`, Profil `truck`, Ziele `src/data/destinations.ts`,
   Fracht je t über `Order.tPerHa`, Lenkzeitpause, Maut `chargeToll`).
-- Vorschlag 13 fertig: Reiter Auswertung (`src/ui/Analytics.tsx`, `Business.analytics()`, Sparten `Branch`). Vorschläge für die nächsten Schichten
+- Vorschlag 13 fertig: Reiter Auswertung (`src/ui/Analytics.tsx`, `Business.analytics()`, Sparten `Branch`).
+- Vorschlag 5 fertig: Gärrest-Anfragen viehloser Kunden (`Request.gaerrest`, Reservierung beim Annehmen), Gülleverträge
+  mit Selbstabholung (`fetchSlurry`, `Order.slurrySupply`, Truck-Task mit Schlepper und Fass).
+- Empfohlener Block (4, 1, 13, 5) damit fertig. Weitere Vorschläge warten auf Nils' Auswahl (docs/plan.md). Vorschläge für die nächsten Schichten
   (Nr. 1–19) stehen am Ende von docs/plan.md und warten auf Nils' Auswahl.
 
 ## CI (GitHub Actions)

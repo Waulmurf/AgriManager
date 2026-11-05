@@ -134,7 +134,7 @@ function RequestItem({ r, game, time, estimate }: { r: Request; game: GameContro
       </div>
       <div>
         Angebot Kunde: <strong>{unitF ? `${(r.priceHa / unitF).toLocaleString('de-DE', { maximumFractionDigits: 2 })} ${unit}` : `${r.priceHa.toLocaleString('de-DE')} €/ha`}</strong> = {eur(r.priceHa * r.areaHa)}
-        {r.gabe ? <small className="hint"> · {r.gabe} m³/ha = {Math.round(r.areaHa * r.gabe).toLocaleString('de-DE')} m³ ab Güllelager des Kunden</small> : null}
+        {r.gabe ? <small className="hint"> · {r.gabe} m³/ha = {Math.round(r.areaHa * r.gabe).toLocaleString('de-DE')} m³ {r.gaerrest ? 'Gärrest aus der eigenen Biogasanlage (spart dem Kunden Dünger)' : 'ab Güllelager des Kunden'}</small> : null}
       </div>
       {r.competitorPriceHa !== undefined && r.status === 'offen' && (
         <small className="hint">Konkurrenz bietet etwa {r.gabe ? `${(r.competitorPriceHa / r.gabe).toLocaleString('de-DE', { maximumFractionDigits: 2 })} €/m³` : `${Math.round(r.competitorPriceHa).toLocaleString('de-DE')} €/ha`} – deutlich darüber verliert man den Auftrag</small>
@@ -253,10 +253,30 @@ function ChopStart({ o, game, status, show }: { o: Order; game: GameController |
 /** Lkw-Transport starten: Lkw und Fahrer mit Führerschein CE */
 function TruckStart({ o, game, status, show }: { o: Order; game: GameController | null; status: GameStatus; show: (m: string) => void }) {
   const c = status.company!;
-  const trucks = c.machines.filter((m) => m.type === 'lkw');
+  const slurry = !!o.slurrySupply;
+  const trucks = c.machines.filter((m) => m.type === (slurry ? 'schlepper' : 'lkw'));
+  const tanks = c.machines.filter((m) => m.type === 'zubringer' || m.type === 'guellefass');
   const drivers = c.drivers;
   const [lkw, setLkw] = useState(trucks[0]?.id ?? 0);
-  const [d, setD] = useState(drivers.find((x) => (x.skills.transport ?? 0) >= 1)?.id ?? 1);
+  const [tank, setTank] = useState(tanks[0]?.id ?? 0);
+  const [d, setD] = useState(slurry ? 1 : drivers.find((x) => (x.skills.transport ?? 0) >= 1)?.id ?? 1);
+  if (slurry) {
+    if (!tanks.length) return <small className="warn">Kein Zubringer- oder Güllefass im Fuhrpark</small>;
+    return (
+      <div className="card-actions">
+        <select value={lkw} onChange={(e) => setLkw(Number(e.target.value))} aria-label="Schlepper">
+          {trucks.map((m) => <option key={m.id} value={m.id}>{machineName(m)} ({m.power} PS)</option>)}
+        </select>
+        <select value={tank} onChange={(e) => setTank(Number(e.target.value))} aria-label="Fass">
+          {tanks.map((m) => <option key={m.id} value={m.id}>{machineName(m)} ({m.tankM3} m³)</option>)}
+        </select>
+        <select value={d} onChange={(e) => setD(Number(e.target.value))} aria-label="Fahrer">
+          {drivers.map((x) => <option key={x.id} value={x.id}>{x.isPlayer ? 'Chef' : x.name}</option>)}
+        </select>
+        <button onClick={async () => show(await game!.command({ kind: 'startJob', orderId: o.id, tractorId: lkw, implementId: tank, driverId: d }))} data-testid="start-fetch">Abholen</button>
+      </div>
+    );
+  }
   if (!trucks.length) return <small className="warn">Kein Lkw im Fuhrpark – im Markt beim Lkw-Zentrum kaufen oder leasen</small>;
   return (
     <div className="card-actions">
@@ -309,7 +329,8 @@ function OrderItem({ o, game, status }: { o: Order; game: GameController | null;
         <small className={`badge ${o.status === 'fertig' ? 'done' : o.status === 'läuft' ? 'run' : ''}`}>{o.status}</small>
       </div>
       <div>
-        {SERVICE_NAMES[o.service]}{o.chain ? ` (${chainName(o.service, o.chain)})` : ''} {ha(o.areaHa)}{o.gaerrest ? ' Gärrest (Eigenauftrag)' : o.ownLeaseId !== undefined ? ' (Eigenauftrag, keine Rechnung)' : o.biogasPriceT !== undefined ? ` (Mais auf dem Halm à ${o.biogasPriceT} €/t, ins eigene Silo)` : o.tPerHa ? ` nach ${o.destName}: ${Math.round(o.areaHa * o.tPerHa).toLocaleString('de-DE')} t à ${(o.priceHa / o.tPerHa).toLocaleString('de-DE', { maximumFractionDigits: 2 })} €/t = ${eur(o.priceHa * o.areaHa)}` : <> zu {o.gabe ? `${(o.priceHa / o.gabe).toLocaleString('de-DE', { maximumFractionDigits: 2 })} €/m³ (${Math.round(o.areaHa * o.gabe).toLocaleString('de-DE')} m³)` : `${o.priceHa.toLocaleString('de-DE')} €/ha`} = {eur(o.priceHa * o.areaHa)}</>}
+        {SERVICE_NAMES[o.service]}{o.chain ? ` (${chainName(o.service, o.chain)})` : ''} {ha(o.areaHa)}{o.gaerrest && o.ownLeaseId !== undefined ? ' Gärrest (Eigenauftrag)' : o.ownLeaseId !== undefined ? ' (Eigenauftrag, keine Rechnung)' : o.biogasPriceT !== undefined ? ` (Mais auf dem Halm à ${o.biogasPriceT} €/t, ins eigene Silo)` : o.slurrySupply ? ` Gülle holen: ${Math.round(o.tPerHa ?? 0)} m³ in die Vorgrube der Biogasanlage (Eigenauftrag)` : o.tPerHa ? ` nach ${o.destName}: ${Math.round(o.areaHa * o.tPerHa).toLocaleString('de-DE')} t à ${(o.priceHa / o.tPerHa).toLocaleString('de-DE', { maximumFractionDigits: 2 })} €/t = ${eur(o.priceHa * o.areaHa)}` : <> zu {o.gabe ? `${(o.priceHa / o.gabe).toLocaleString('de-DE', { maximumFractionDigits: 2 })} €/m³ (${Math.round(o.areaHa * o.gabe).toLocaleString('de-DE')} m³)` : `${o.priceHa.toLocaleString('de-DE')} €/ha`} = {eur(o.priceHa * o.areaHa)}</>}
+        {o.gaerrest && o.ownLeaseId === undefined ? <small className="hint"> · Gärrest aus der eigenen Anlage</small> : null}
         {o.gabe && o.status === 'läuft' ? <small className="hint"> · ausgebracht {Math.round(o.doneM3 ?? 0).toLocaleString('de-DE')} m³</small> : null}
         {(isHarvest(o.service) || o.tPerHa) && o.status !== 'offen' ? <small className="hint"> · {o.tPerHa ? 'abgeliefert' : o.service === 'roden' ? 'in der Miete' : o.service === 'drusch' ? 'abgefahren' : 'am Silo'} {Math.round(o.doneT ?? 0).toLocaleString('de-DE')} t</small> : null}
       </div>
@@ -1060,7 +1081,17 @@ export function BiogasTab({ status, game }: { status: GameStatus; game: GameCont
           <ul className="list" data-testid="slurry-contracts">
             {livestock.map((f) => (
               <li key={f.id}><span><button className="link" onClick={() => game?.flyToFarm(f.id)}>{f.name}</button> <small className="hint">etwa {n(farmSlurryPerDay(f.areaHa), 1)} m³/Tag</small></span>
-                <button onClick={() => send({ kind: 'guelleContract', farmId: f.id })}>{contracts.has(f.id) ? 'Vertrag beenden' : 'Vertrag anbieten'}</button></li>
+                {contracts.has(f.id) ? (
+                  <span className="card-actions">
+                    {p.contracts.find((x) => x.farmId === f.id)?.selfHaul && <button onClick={() => send({ kind: 'fetchSlurry', farmId: f.id })}>Gülle holen</button>}
+                    <button onClick={() => send({ kind: 'guelleContract', farmId: f.id })}>Vertrag beenden</button>
+                  </span>
+                ) : (
+                  <span className="card-actions">
+                    <button onClick={() => send({ kind: 'guelleContract', farmId: f.id })}>Vertrag (Anfuhr durch Dritte)</button>
+                    <button onClick={() => send({ kind: 'guelleContract', farmId: f.id, selfHaul: true })}>Vertrag (selbst abholen)</button>
+                  </span>
+                )}</li>
             ))}
             {livestock.length === 0 && <li className="hint">Noch keine bekannten Viehbetriebe.</li>}
           </ul>

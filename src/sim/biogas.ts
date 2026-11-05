@@ -97,3 +97,6 @@ export function gaerOf(f: Feed): number {
 export function farmSlurryPerDay(areaHa: number): number {
   return Math.round(((areaHa * 0.5 * 15) / 365) * 10) / 10;
 }
+
+/** Gärrest beim Kunden ausbringen (€/m³): Gärrest gratis, Kunde zahlt nur die Ausbringung (Annahme) */
+export const GAER_SERVICE_EUR_M3 = 3;
