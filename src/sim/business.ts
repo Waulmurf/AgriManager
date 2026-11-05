@@ -10,7 +10,7 @@ import { Crop, SURNAMES, hasBga, type FarmSet } from './farms';
 import type { FieldSet } from './fields';
 import {
   EMPLOYER_SV, MIN_WAGE, MONTH_HOURS, ROLES, SKILLS, VACATION_DAYS, marketWage, agencyRate, takeOverFee, AGENCY_MIN_HOURS, XP_MINUTES_PER_LEVEL, baseSkills, gameDate, marketValue,
-  serviceInterval, SELF_PROPELLED, START_OFFERS, START_YEAR, type Company, type Loan, type MachineType, type Site, type Employee, type Machine, type MarketOffer, type Repair, type Skill,
+  serviceInterval, SELF_PROPELLED, START_OFFERS, COURSES, DISPATCHER_MONTH, type CourseKey, START_YEAR, type Company, type Loan, type MachineType, type Site, type Employee, type Machine, type MarketOffer, type Repair, type Skill,
 } from './economy';
 import { CATALOG, DEALERS, dealersFor, type CatalogModel } from '../data/catalog';
 import { BUILDINGS, PERMIT, SITE_OFFERS, type BuildingKey } from '../data/sites';
@@ -493,6 +493,11 @@ export type Command =
   | { kind: 'askLand'; farmId: number }
   | { kind: 'setCrop'; leaseId: number; crop: OwnCrop }
   | { kind: 'buyLand'; offerId: number }
+  | { kind: 'dispatcher'; action: 'hire' | 'fire' | 'set'; autoAccept?: boolean; autoStart?: boolean; autoRemind?: boolean }
+  | { kind: 'course'; employeeId: number; course: CourseKey; skill?: Skill }
+  | { kind: 'hireApprentice' }
+  | { kind: 'poachAnswer'; employeeId: number; match: boolean }
+  | { kind: 'buyCompetitor'; competitorId: number }
   | { kind: 'frameAnswer'; offerId: number; accept: boolean }
   | { kind: 'sellCrop'; crop: OwnCrop; t: number }
   | { kind: 'forward'; crop: OwnCrop; t: number; months: number }
@@ -567,6 +572,8 @@ export class Business {
   readonly cropStock: Record<OwnCrop, number> = { weizen: 0, raps: 0, mais: 0, rueben: 0, kartoffeln: 0 };
   readonly forwards: { id: number; crop: OwnCrop; t: number; priceT: number; deliverBy: number }[] = [];
   storeHarvest = true;
+  /** Übernahmeangebot eines kleinen Konkurrenten (Vorschlag 12) */
+  takeoverOffer: { competitorId: number; price: number; until: number } | null = null;
   /** Rahmenverträge (Vorschlag 7): Angebote und laufende Verträge */
   readonly frameOffers: FrameContract[] = [];
   readonly frames: FrameContract[] = [];
@@ -649,6 +656,7 @@ export class Business {
       leases: this.leases,
       biogas: this.biogas,
       frameOffers: this.frameOffers,
+      takeoverOffer: this.takeoverOffer,
       frames: this.frames,
       marketing: { rng: this.priceRng.getState(), price: this.cropPrice, stock: this.cropStock, forwards: this.forwards, store: this.storeHarvest },
       market: { rng: this.marketRng.getState(), competitors: this.competitors, reputation: this.reputation, won: this.won, lost: this.lost },
@@ -688,6 +696,7 @@ export class Business {
     this.applyLeases();
     this.biogas = s.biogas ? structuredClone(s.biogas) : null;
     put(this.frameOffers, s.frameOffers ?? []);
+    this.takeoverOffer = s.takeoverOffer ?? null;
     put(this.frames, s.frames ?? []);
     if (s.marketing) {
       this.priceRng.setState(s.marketing.rng);
@@ -1583,6 +1592,7 @@ export class Business {
     let best: { priceHa: number; id: number } | null = null;
     for (const c of this.competitors) {
       if (!c.services.includes(service)) continue;
+      if (this.competitorBooked(c, service, time)) continue; // ausgebucht
       const km = kmBetween(c.lonLat, pos);
       if (km > COMPETITOR_RANGE_KM + 15) continue;
       const war = c.warUntil > time ? c.warCut : 0;
@@ -1608,7 +1618,11 @@ export class Business {
   private lostTo(r: Request): string {
     this.lost++;
     const c = this.competitors.find((x) => x.id === r.competitorId);
-    if (c) c.won++;
+    if (c) {
+      c.won++;
+      // Auftrag belegt eine Maschine des Konkurrenten (etwa 25 ha am Tag)
+      (c.busy ??= []).push({ service: r.service, until: this.lastTime + Math.ceil(r.areaHa / 25) * 1440 });
+    }
     return c ? ` Den Auftrag bekommt ${c.name} (${c.town}).` : '';
   }
 
@@ -1783,6 +1797,16 @@ export class Business {
       channel,
     };
     this.requests.push(req);
+    // Disponent: Routineanfragen zum Kundenpreis annehmen, wenn genug Gespanne da sind (Vorschlag 10)
+    const disp = this.company.dispatcher;
+    if (disp?.autoAccept && this.isRoutine(req.service) && !this.frameOf(farmId)) {
+      const open = this.orders.filter((o) => o.status !== 'fertig' && this.isRoutine(o.service)).length;
+      const gespanne = this.company.machines.filter((m) => m.type === 'schlepper').length;
+      const hasImpl = this.company.machines.some((m) => m.type === SERVICE_IMPLEMENT[req.service]);
+      if (hasImpl && open < gespanne * 2 && req.priceHa >= this.marketPriceHa(req.service, req.gabe, req.chain) * 0.95) {
+        if (this.respond(req.id, 'accept', time) === 'Auftrag angelegt') this.emit(time, 'auftrag', `Disponent: ${SERVICE_NAMES[req.service]} für ${farm.name} angenommen (${fmtHa(req.areaHa)}).`, farmId);
+      }
+    }
     // Rahmenvertrag: zum Vertragspreis automatisch annehmen (Vorschlag 7)
     const fr = this.frameOf(farmId);
     if (fr && fr.services.includes(req.service) && !req.liquid) {
@@ -1792,6 +1816,194 @@ export class Business {
       if (msg === 'Auftrag angelegt') this.emit(time, 'auftrag', `Rahmenvertrag ${farm.name}: ${SERVICE_NAMES[req.service]} ${fmtHa(req.areaHa)} automatisch eingeplant (bis ${fmtDay(req.latest)}).`, farmId);
     }
     return req;
+  }
+
+  // ---------- Disponent (Vorschlag 10) ----------
+
+  dispatcherCmd(cmd: { action: 'hire' | 'fire' | 'set'; autoAccept?: boolean; autoStart?: boolean; autoRemind?: boolean }, time: number): string {
+    const c = this.company;
+    if (cmd.action === 'hire') {
+      if (c.dispatcher) return 'Es gibt schon einen Disponenten';
+      if (!this.hasBuilding('buero')) return 'Erst ein Büro bauen (Reiter Standorte)';
+      c.dispatcher = { autoAccept: true, autoStart: true, autoRemind: true };
+      this.emit(time, 'info', `Disponent eingestellt (${fmtEur(DISPATCHER_MONTH)} im Monat): nimmt Routineanfragen an, startet Routineaufträge mit freien Fahrern und erinnert an Zahlungen.`);
+    } else if (cmd.action === 'fire') {
+      if (!c.dispatcher) return 'Kein Disponent';
+      c.dispatcher = undefined;
+    } else if (c.dispatcher) {
+      if (cmd.autoAccept !== undefined) c.dispatcher.autoAccept = cmd.autoAccept;
+      if (cmd.autoStart !== undefined) c.dispatcher.autoStart = cmd.autoStart;
+      if (cmd.autoRemind !== undefined) c.dispatcher.autoRemind = cmd.autoRemind;
+    }
+    this.version++;
+    return cmd.action === 'hire' ? 'Disponent eingestellt' : cmd.action === 'fire' ? 'Disponent entlassen' : 'Einstellung gespeichert';
+  }
+
+  /** Routinearbeit: einfache Feldarbeit mit Schlepper und Gerät (keine Ketten, keine Transporte) */
+  isRoutine(s: Service): boolean {
+    return s === 'grubbern' || s === 'stoppel' || s === 'saat' || s === 'einzelkorn' || s === 'pflanzenschutz' || s === 'pressen';
+  }
+
+  // ---------- Ausbildung (Vorschlag 11) ----------
+
+  startCourse(employeeId: number, key: CourseKey, skill: Skill | undefined, time: number): string {
+    const e = this.company.drivers.find((d) => d.id === employeeId);
+    const c = COURSES[key];
+    if (!e || e.kind === 'leih') return 'Nur eigene Mitarbeiter';
+    if (e.course) return `${e.name} ist schon auf einem Lehrgang`;
+    if (key === 'lehrgang' && !skill) return 'Tätigkeit wählen';
+    if (!this.canPay(c.cost)) return 'Nicht genug Geld';
+    const day0 = Math.floor(time / 1440) * 1440 + 1440;
+    const until = day0 + Math.ceil(c.days * 7 / 5) * 1440; // Arbeitstage → Kalendertage
+    (e.absences ??= []).push({ from: day0, to: until, kind: 'schulung' });
+    e.course = { key, skill, until };
+    this.book(time, `${c.name}: ${e.isPlayer ? 'Chef' : e.name}`, -c.cost, 'Personal');
+    this.version++;
+    return `${e.isPlayer ? 'Chef' : e.name} ist ab morgen auf dem Lehrgang „${c.name}“ bis ${fmtDay(until)}`;
+  }
+
+  /** Auszubildenden einstellen (3 Jahre, 1.100 € im Monat, lernt schneller) */
+  hireApprentice(time: number): string {
+    const id = this.company.drivers.reduce((a, d) => Math.max(a, d.id), 0) + 1;
+    const r = this.rng;
+    const first = ['Lukas', 'Jonas', 'Finn', 'Lea', 'Mia', 'Tim', 'Ben', 'Hanna', 'Paul', 'Emma'][r.int(10)];
+    const name = `${first} ${SURNAMES[r.int(SURNAMES.length)]} (Azubi)`;
+    const skills = Object.fromEntries(SKILLS.map((k) => [k.key, 0])) as Record<Skill, number>;
+    skills.boden = 1;
+    this.company.drivers.push({
+      id, name, isPlayer: false, kind: 'fest', wage: 6.4, skills, xp: {}, licenseC: false, hiredAt: time, age: 17 + r.int(3),
+      reliability: 0.8, resilience: 0.7, satisfaction: 75, vacationLeft: 26, absences: [], apprenticeUntil: time + 3 * 365 * 1440,
+    });
+    this.version++;
+    this.emit(time, 'info', `${name} beginnt die Ausbildung zum Landwirt bzw. zur Fachkraft Agrarservice (3 Jahre).`);
+    return `${name} eingestellt`;
+  }
+
+  /** Täglich: Lehrgänge beenden, Ausbildung abschließen */
+  private trainingDaily(time: number) {
+    for (const e of this.company.drivers) {
+      if (e.course && time >= e.course.until) {
+        const c = COURSES[e.course.key];
+        if (e.course.key === 'ce') { e.skills.transport = Math.max(1, e.skills.transport ?? 0); e.licenseC = true; }
+        else if (e.course.key === 'sachkunde') e.skills.pflanzenschutz = Math.max(1, e.skills.pflanzenschutz ?? 0);
+        else if (e.course.key === 'lehrgang' && e.course.skill) e.skills[e.course.skill] = Math.min(5, (e.skills[e.course.skill] ?? 0) + 1);
+        else if (e.course.key === 'meister') { for (const k of SKILLS) if ((e.skills[k.key] ?? 0) > 0) e.skills[k.key] = Math.min(5, e.skills[k.key] + 1); e.wage = Math.round((e.wage + 2) * 100) / 100; }
+        this.emit(time, 'info', `${e.isPlayer ? 'Chef' : e.name} hat „${c.name}“ abgeschlossen: ${c.text}.`);
+        e.course = undefined;
+        this.version++;
+      }
+      if (e.apprenticeUntil !== undefined && time >= e.apprenticeUntil) {
+        e.apprenticeUntil = undefined;
+        e.name = e.name.replace(' (Azubi)', '');
+        e.wage = Math.max(e.wage, marketWage(e));
+        this.emit(time, 'info', `${e.name} hat die Ausbildung bestanden und arbeitet jetzt als Facharbeiter (${fmtEur(e.wage)}/h).`);
+        this.version++;
+      }
+    }
+  }
+
+  // ---------- Konkurrenz mit Fuhrpark (Vorschlag 12) ----------
+
+  /** Maschinen je Dienst eines Konkurrenten (groß 3, mittel 2, klein 1) */
+  competitorCapacity(c: Competitor): number {
+    return c.size === 'gross' ? 3 : c.size === 'mittel' ? 2 : 1;
+  }
+
+  /** ausgebucht? Eigene gewonnene Aufträge plus Grundauslastung (in der Erntespitze hoch), deterministisch je Tag */
+  competitorBooked(c: Competitor, service: Service, time: number): boolean {
+    const day = Math.floor(time / 1440);
+    const own = (c.busy ?? []).filter((x) => x.service === service && x.until > time).length;
+    const d = gameDate(time);
+    const md = d.month * 100 + d.day;
+    const peak = isHarvest(service) && ((md >= 720 && md <= 825) || (md >= 915 && md <= 1031));
+    const load = peak ? 0.55 : service === 'grubbern' || service === 'stoppel' ? 0.15 : 0.25;
+    const h = (((day * 31 + c.id * 977 + service.length * 131) * 2654435761) % 4294967296) / 4294967296;
+    const base = h < load ? 1 : 0;
+    return own + base >= this.competitorCapacity(c);
+  }
+
+  /** Abwerben gute Leute (selten) und Übernahmeangebote kleiner Anbieter */
+  private rivalsDaily(time: number) {
+    const r = this.marketRng;
+    for (const c of this.competitors) if (c.busy) c.busy = c.busy.filter((x) => x.until > time);
+    // laufende Abwerbeversuche
+    for (const e of this.company.drivers) {
+      if (!e.poach || time < e.poach.until) continue;
+      this.emit(time, 'warnung', `${e.name} wechselt zu ${e.poach.competitor}.`);
+      e.leavesAt = time;
+      e.poach = undefined;
+      this.version++;
+    }
+    if (r.next() < 0.004) {
+      const cand = this.company.drivers.filter((e) => !e.isPlayer && e.kind === 'fest' && !e.poach && !e.apprenticeUntil && (e.satisfaction ?? 70) < 75);
+      if (cand.length) {
+        const e = cand.reduce((a, x) => (Object.values(x.skills).reduce((s, v) => s + v, 0) > Object.values(a.skills).reduce((s, v) => s + v, 0) ? x : a));
+        const c = this.competitors[r.int(this.competitors.length)];
+        e.poach = { competitor: c.name, wage: Math.round((e.wage + 1.5 + r.next() * 1.5) * 100) / 100, until: time + 7 * 1440 };
+        this.version++;
+        this.emit(time, 'warnung', `${c.name} will ${e.name} abwerben (${fmtEur(e.poach.wage)}/h). Gleichziehen oder gehen lassen – Antwort bis ${fmtDay(e.poach.until)} (Reiter Personal).`);
+      }
+    }
+    if (r.next() < 0.002 && !this.takeoverOffer) {
+      const small = this.competitors.filter((c) => c.size === 'klein');
+      if (small.length) {
+        const c = small[r.int(small.length)];
+        this.takeoverOffer = { competitorId: c.id, price: Math.round((150_000 + r.next() * 150_000) / 5000) * 5000, until: time + 30 * 1440 };
+        this.version++;
+        this.emit(time, 'info', `${c.name} (${c.town}) sucht einen Nachfolger: Übernahme für ${fmtEur(this.takeoverOffer.price)} mit Kunden und zwei Maschinen (Reiter Wettbewerb, bis ${fmtDay(this.takeoverOffer.until)}).`);
+      }
+    }
+    if (this.takeoverOffer && time >= this.takeoverOffer.until) { this.takeoverOffer = null; this.version++; }
+  }
+
+  poachAnswer(employeeId: number, match: boolean, time: number): string {
+    const e = this.company.drivers.find((d) => d.id === employeeId);
+    if (!e?.poach) return 'Kein Abwerbeversuch';
+    if (match) {
+      e.wage = e.poach.wage;
+      e.satisfaction = Math.min(100, (e.satisfaction ?? 70) + 10);
+      e.poach = undefined;
+      this.version++;
+      return `${e.name} bleibt (${fmtEur(e.wage)}/h)`;
+    }
+    e.leavesAt = time;
+    e.poach = undefined;
+    this.version++;
+    void time;
+    return `${e.name} geht`;
+  }
+
+  /** kleinen Konkurrenten übernehmen: Kunden im Umkreis kommen zurück, zwei Gebrauchtmaschinen */
+  buyCompetitor(competitorId: number, time: number): string {
+    const o = this.takeoverOffer;
+    const c = this.competitors.find((x) => x.id === competitorId);
+    if (!o || !c || o.competitorId !== competitorId) return 'Kein Übernahmeangebot';
+    if (!this.canPay(o.price)) return 'Nicht genug Geld – Darlehen?';
+    this.book(time, `Übernahme ${c.name}`, -o.price, 'Maschinenkauf');
+    this.competitors.splice(this.competitors.indexOf(c), 1);
+    let customers = 0;
+    for (const f of this.farms?.farms ?? []) {
+      const pos = this.farmLonLat(f.id);
+      if (!pos || kmBetween(pos, c.lonLat) > 20) continue;
+      f.known = true;
+      if (f.rivalUntil > time) f.rivalUntil = 0;
+      f.satisfaction = Math.max(f.satisfaction, 60);
+      customers++;
+    }
+    const nextId = () => this.company.machines.reduce((a, m) => Math.max(a, m.id), 0) + 1;
+    const add = (key: string, year: number) => {
+      const cat = CATALOG.find((x) => x.key === key);
+      if (!cat) return;
+      const { key: _k, deliveryWeeks: _d, ...rest } = cat;
+      this.company.machines.push({ ...rest, id: nextId(), year, hours: 4_000, condition: 60, purchasePrice: Math.round(cat.newPrice * 0.35), afaYears: 6, boughtAt: time } as Machine);
+    };
+    add(CATALOG.find((x) => x.type === 'schlepper')!.key, 2016);
+    add(CATALOG.find((x) => x.type === 'grubber')!.key, 2017);
+    this.takeoverOffer = null;
+    this.changeReputation(3);
+    this.version++;
+    this.emit(time, 'info', `${c.name} übernommen: ${customers} Betriebe im Umkreis kennen jetzt den eigenen Betrieb, zwei Maschinen kommen dazu.`);
+    return 'übernommen';
   }
 
   /** laufender Rahmenvertrag eines Betriebs */
@@ -1939,6 +2151,9 @@ export class Business {
     this.farmingDaily(time);
     this.marketingDaily(time);
     this.framesDaily(time);
+    this.trainingDaily(time);
+    this.rivalsDaily(time);
+    if (this.company.dispatcher && gameDate(time).day === 1) this.book(time, 'Disponent (Büro)', -DISPATCHER_MONTH, 'Personal');
     this.biogasDaily(time);
     // Auftrag steht wegen Panne: Kunde wartet und wird unzufriedener (MZ-07)
     for (const o of this.orders) {
@@ -2797,6 +3012,9 @@ export class Business {
         this.company.cash = Math.round((this.company.cash + inv.amount) * 100) / 100;
         this.ledger.push({ time, text: `Zahlung ${inv.number} ${this.farmName(inv.farmId)}`, amount: inv.amount, category: 'Rechnung' });
         this.emit(time, 'info', `${this.farmName(inv.farmId)} hat Rechnung ${inv.number} bezahlt: ${fmtEur(inv.amount)}${inv.overdueAt !== undefined ? ' (nach Erinnerung)' : ''}.`, inv.farmId);
+      } else if (inv.status === 'überfällig' && inv.remindedAt === undefined && this.company.dispatcher?.autoRemind) {
+        // Disponent ruft am nächsten Tag selbst an
+        this.remindInvoice(inv, time, 'anruf');
       } else if (inv.status === 'offen' && time >= inv.dueAt) {
         inv.status = 'überfällig';
         inv.overdueAt = time;
@@ -2971,7 +3189,7 @@ export class Business {
     if (!e || minutes <= 0) return;
     const lvl = e.skills[skill] ?? 1;
     if (lvl >= 5) return;
-    const xp = (e.xp[skill] ?? 0) + minutes;
+    const xp = (e.xp[skill] ?? 0) + (e.apprenticeUntil !== undefined ? Math.round(minutes * 1.5) : minutes);
     const need = lvl * XP_MINUTES_PER_LEVEL;
     if (xp >= need) {
       e.skills[skill] = lvl + 1;
@@ -3130,7 +3348,7 @@ export class Business {
   }
 
   /** Mitarbeiter heute bzw. zu dieser Minute abwesend (Urlaub, krank)? */
-  absence(employeeId: number, time: number): 'urlaub' | 'krank' | null {
+  absence(employeeId: number, time: number): 'urlaub' | 'krank' | 'schulung' | null {
     const e = this.company.drivers.find((d) => d.id === employeeId);
     for (const a of e?.absences ?? []) if (time >= a.from && time < a.to) return a.kind;
     return null;

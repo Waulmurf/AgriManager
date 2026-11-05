@@ -520,9 +520,38 @@ export class Simulation {
     return unproject(this.graph, this.graph.x[this.homeNode], this.graph.y[this.homeNode]);
   }
 
+  /** Disponent (Vorschlag 10): offene Routineaufträge mit freien Fahrern und Gespannen starten */
+  private dispatchTick() {
+    const b = this.business;
+    if (!b.company.dispatcher?.autoStart) return;
+    for (const o of b.orders) {
+      if (o.status !== 'offen' || !b.isRoutine(o.service)) continue;
+      if (this.queue.some((q) => q.cmd.kind === 'startJob' && q.cmd.orderId === o.id)) continue;
+      if (this.weatherFor(o.id)) return;
+      const implType = SERVICE_IMPLEMENT[o.service];
+      for (const d of this.company.drivers) {
+        if ((d.skills[SERVICE_SKILL[o.service]] ?? 0) < 1 || (d.skills.boden ?? 0) < 1) continue;
+        if (this.driverBusy(d.id) || this.driverBlocked(d.id) || this.queue.some((q) => q.driverId === d.id)) continue;
+        let started = false;
+        for (const impl of this.company.machines) {
+          if (impl.type !== implType || this.machineBusy(impl.id) || (impl.downUntil ?? 0) > this.time) continue;
+          const tractor = this.company.machines.find((m) => m.type === 'schlepper' && !this.machineBusy(m.id) && (m.downUntil ?? 0) <= this.time && (m.power ?? 0) >= (impl.powerNeed ?? 0));
+          if (!tractor) continue;
+          const cmd = { kind: 'startJob' as const, orderId: o.id, tractorId: tractor.id, implementId: impl.id, driverId: d.id };
+          if (this.checkQueueCommand(cmd)) continue;
+          const r = this.startNow(cmd);
+          if (r.startsWith('Auftrag gestartet')) { b.info(this.time, `Disponent: ${SERVICE_NAMES[o.service]} ${b.farmName(o.farmId)} gestartet (${this.driverName(d.id)}).`); started = true; }
+          break;
+        }
+        if (started) break;
+      }
+    }
+  }
+
   /** Ein Schritt = 1 Spielminute. */
   step(): void {
     this.time++;
+    if (this.time % 60 === 0 && this.time % 1440 < 8 * 60) this.dispatchTick();
     if (this.time % 1440 === 0) {
       const busyDrivers = new Set<number>();
       for (const v of this.vehicles) if (v.owner === 'player' && v.task) busyDrivers.add(v.task.driverId);
@@ -581,7 +610,7 @@ export class Simulation {
     if (e?.kind === 'leih' && this.time < (e.availableFrom ?? 0)) return `kommt ab ${fmtDay(e.availableFrom!)}`;
     if (e?.kind === 'leih' && this.time >= (e.contractUntil ?? Infinity)) return 'Einsatz beendet';
     const abs = this.business.absence(d, this.time);
-    if (abs) return abs === 'urlaub' ? 'hat Urlaub' : 'ist krank';
+    if (abs) return abs === 'urlaub' ? 'hat Urlaub' : abs === 'schulung' ? 'ist auf Lehrgang' : 'ist krank';
     if (this.minutesOf(d) >= CHEF_MAX_MINUTES) return 'Arbeitszeit für heute erreicht';
     const last = this.lastWork[d];
     if (last !== undefined && Math.floor(last / 1440) < Math.floor(this.time / 1440) && this.time - last < 11 * 60) return 'Ruhezeit (11 h)';
@@ -867,7 +896,7 @@ export class Simulation {
         if (down) warnings.push(`${down.brand} ${down.model}: ${down.downReason}`);
         if (o && end > o.latest) warnings.push(`Termin ${fmtDay(o.latest)} wird überschritten`);
         const ab = this.business.absence(t.driverId, this.time);
-        if (ab) warnings.push(`${this.driverName(t.driverId)} ist ${ab === 'krank' ? 'krank' : 'im Urlaub'} – Fahrer wechseln`);
+        if (ab) warnings.push(`${this.driverName(t.driverId)} ist ${ab === 'krank' ? 'krank' : ab === 'schulung' ? 'auf Lehrgang' : 'im Urlaub'} – Fahrer wechseln`);
         bars.push({ key: `r${v.id}`, driverId: t.driverId, kind: 'running', vehicle: v.id, orderId: t.orderId, farmId: o?.farmId, label: o ? `${SERVICE_NAMES[o.service]} ${b.farmName(o.farmId)}` : 'Auftrag', start: o?.startedAt ?? this.time, end, tractorId: v.machineId, implementId: t.implementId, latest: o?.latest, warnings });
         cursor[t.driverId] = Math.max(cursor[t.driverId] ?? this.time, end);
       } else {
@@ -1570,6 +1599,11 @@ export class Simulation {
       case 'setCrop':
         return b.setCrop(cmd.leaseId, cmd.crop, t);
       case 'buyLand': return b.buyLand(cmd.offerId, t);
+      case 'dispatcher': return b.dispatcherCmd(cmd, t);
+      case 'course': return b.startCourse(cmd.employeeId, cmd.course, cmd.skill, t);
+      case 'hireApprentice': { const r = b.hireApprentice(t); this.syncPlayerVehicles(); return r; }
+      case 'poachAnswer': return b.poachAnswer(cmd.employeeId, cmd.match, t);
+      case 'buyCompetitor': { const r = b.buyCompetitor(cmd.competitorId, t); this.syncPlayerVehicles(); return r; }
       case 'frameAnswer': return b.frameAnswer(cmd.offerId, cmd.accept, t);
       case 'sellCrop': return b.sellCrop(cmd.crop, cmd.t, t);
       case 'forward': return b.forward(cmd.crop, cmd.t, cmd.months, t);

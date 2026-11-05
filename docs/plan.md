@@ -999,3 +999,28 @@ Nils wählt aus, was umgesetzt wird. Empfehlung für den nächsten Block: 4, 1, 
   - Flexibilisierung (600 €/kW): Flexzuschlag 65 €/kW im Jahr und +0,8 ct/kWh.
   - Silo festfahren: Neue Silage muss gewalzt werden. Mit eigenem Radlader (Betriebsgewicht × 4 t/h)
     geht das als Aufgabe `compact`, sonst walzt nach 2 Tagen eine Fremdwalze (100 t/h, 110 €/h).
+
+## Umsetzung Paket 3: Disponent, Ausbildung, Konkurrenz mit Fuhrpark (5. Nov. 2026)
+
+- **10 Disponent:** braucht ein Büro und kostet 3.900 € im Monat (Annahme). Jede Aufgabe ist
+  einzeln schaltbar:
+  - Routineanfragen (Grubbern, Stoppel, Saat, Einzelkorn, Pflanzenschutz, Pressen) zum
+    Kundenpreis annehmen, wenn er mindestens 95 % des Marktpreises beträgt und höchstens zwei
+    offene Routineaufträge je Schlepper bestehen.
+  - Diese Aufträge stündlich zwischen 6 und 14 Uhr mit freien Fahrern und Gespannen starten.
+  - Bei überfälligen Rechnungen am nächsten Tag anrufen.
+- **11 Ausbildung:** Lehrgänge, während derer der Mitarbeiter als abwesend gilt („auf Lehrgang“):
+  - Lkw-Führerschein CE (3.500 €, 20 Arbeitstage)
+  - Pflanzenschutz-Sachkunde (300 €, 3 Tage)
+  - Fahrerlehrgang (600 €, 5 Tage, eine Tätigkeit +1)
+  - Landwirtschaftsmeister (8.000 €, 60 Tage, alle Tätigkeiten +1, Lohn +2 €/h)
+  - Auszubildende: 3 Jahre, 6,40 €/h (etwa 1.100 € im Monat), lernen 50 % schneller und werden
+    danach Facharbeiter zum Marktlohn.
+- **12 Konkurrenz mit Fuhrpark:** Große Anbieter haben je Dienst 3 Maschinen, mittlere 2, kleine 1.
+  - Gewonnene Aufträge belegen eine Maschine (etwa 25 ha am Tag).
+  - Dazu kommt eine Grundauslastung: in der Erntespitze 55 %, sonst 15–25 %, deterministisch je Tag.
+  - Ein ausgebuchter Anbieter bietet nicht mit.
+  - Abwerben: selten bietet ein Konkurrent einer guten, nicht ganz zufriedenen Kraft
+    1,50–3,00 €/h mehr. Gleichziehen oder gehen lassen (7 Tage Frist).
+  - Übernahme: Ein kleiner Anbieter sucht selten einen Nachfolger (150.000–300.000 €). Die Kunden
+    im Umkreis von 20 km kommen dazu, außerdem ein gebrauchter Schlepper und ein Grubber.

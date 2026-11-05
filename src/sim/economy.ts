@@ -294,6 +294,17 @@ export const MONTH_HOURS = 173;
 export const XP_MINUTES_PER_LEVEL = 100 * 60;
 
 /** Mitarbeiter (PA-01, PA-02, PA-13). Der Chef ist Mitarbeiter Nr. 1 ohne Lohn (KK-13, KK-15). */
+/** Lehrgänge (Vorschlag 11): Kosten, Dauer in Arbeitstagen */
+export type CourseKey = 'ce' | 'sachkunde' | 'lehrgang' | 'meister';
+export const COURSES: Record<CourseKey, { name: string; cost: number; days: number; text: string }> = {
+  ce: { name: 'Lkw-Führerschein CE', cost: 3_500, days: 20, text: 'Lkw fahren (Stufe 1)' },
+  sachkunde: { name: 'Pflanzenschutz-Sachkunde', cost: 300, days: 3, text: 'Pflanzenschutz (Stufe 1)' },
+  lehrgang: { name: 'Fahrerlehrgang', cost: 600, days: 5, text: 'eine Tätigkeit +1 Stufe' },
+  meister: { name: 'Landwirtschaftsmeister', cost: 8_000, days: 60, text: 'alle Tätigkeiten +1, Lohn +2 €/h' },
+};
+/** Disponent: Monatskosten (Arbeitgeberbrutto, Annahme) */
+export const DISPATCHER_MONTH = 3_900;
+
 export interface Employee {
   id: number;
   name: string;
@@ -323,7 +334,13 @@ export interface Employee {
   /** Resturlaub in Tagen (Jahresanspruch 26 Tage bei Festen) */
   vacationLeft?: number;
   /** Abwesenheiten (PA-05) */
-  absences?: { from: number; to: number; kind: 'urlaub' | 'krank' }[];
+  absences?: { from: number; to: number; kind: 'urlaub' | 'krank' | 'schulung' }[];
+  /** Lehrgang (Vorschlag 11): was nach dem Ende freigeschaltet wird */
+  course?: { key: CourseKey; skill?: Skill; until: number };
+  /** Auszubildender bis (danach Facharbeiter mit Marktlohn) */
+  apprenticeUntil?: number;
+  /** Abwerbeversuch der Konkurrenz (Vorschlag 12): Lohnangebot, Antwort bis */
+  poach?: { competitor: string; wage: number; until: number };
   /** gekündigt, verlässt den Betrieb an diesem Tag */
   leavesAt?: number;
   /** Überstunden der letzten 30 Tage (Minuten, gleitend) */
@@ -412,6 +429,8 @@ export interface Company {
   drivers: Employee[];
   /** Standorte (Phase „Standorte“): Stammhof Nr. 1 und weitere */
   sites?: Site[];
+  /** Disponent im Büro (Vorschlag 10) */
+  dispatcher?: { autoAccept: boolean; autoStart: boolean; autoRemind: boolean };
   /** Verschleißteillager am Hof (Warenwert €): Schare, Zinken, Filter, Riemen, Schläuche … */
   partsStock?: number;
   /** nachgekaufte Verschleißteile, Lieferung am Morgen */

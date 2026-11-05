@@ -314,3 +314,71 @@ describe('Zeitarbeit und Fahrerwechsel', () => {
     expect(o.status).toBe('fertig');
   });
 });
+
+describe('Paket 3: Disponent, Ausbildung, Konkurrenz', () => {
+  it('Disponent braucht ein Büro, nimmt Routineanfragen an und startet sie mit freiem Gespann', () => {
+    const s = world(5);
+    const b = s.business;
+    expect(s.command({ kind: 'dispatcher', action: 'hire' })).toMatch(/Büro/);
+    s.company.sites![0].buildings.buero = { done: true };
+    expect(s.command({ kind: 'dispatcher', action: 'hire' })).toBe('Disponent eingestellt');
+    s.company.machines.push({ id: 970, type: 'grubber', brand: 'Lemken', model: 'Karat', year: 2022, hours: 0, condition: 95, newPrice: 30000, purchasePrice: 30000, afaYears: 10, boughtAt: 0, width: 3, powerNeed: 90, haPerHour: 1.7, workKmh: 10, dieselLHa: 9 });
+    const biz = b as unknown as { maybeRequest(f: number, t: number, c: number, ch: string): unknown };
+    for (const f of s.farms!.farms) { f.known = true; f.satisfaction = 70; }
+    for (let k = 0; k < 300 && !b.orders.length; k++) {
+      for (const r of b.requests) if (r.status === 'offen') r.status = 'abgelehnt';
+      biz.maybeRequest(s.farms!.farms[k % s.farms!.farms.length].id, s.time, 1, 'anruf');
+    }
+    expect(b.orders.length).toBeGreaterThan(0);
+    const o = b.orders[0];
+    expect(['grubbern', 'stoppel', 'saat', 'einzelkorn', 'pflanzenschutz', 'pressen']).toContain(o.service);
+    runUntil(s, () => o.status !== 'offen', 3 * 1440);
+    if (o.service === 'grubbern') expect(o.status).not.toBe('offen');
+    // Monatskosten
+    s.run(32 * 1440);
+    expect(b.ledger.some((l) => l.text === 'Disponent (Büro)')).toBe(true);
+  });
+
+  it('Lehrgang CE: Mitarbeiter fehlt, danach Lkw-Führerschein; Azubi lernt schneller', () => {
+    const s = world(5);
+    const b = s.business;
+    s.command({ kind: 'hireApprentice' });
+    const azubi = s.company.drivers.at(-1)!;
+    expect(azubi.apprenticeUntil).toBeGreaterThan(s.time);
+    expect(azubi.wage).toBeLessThan(MIN_WAGE);
+    expect(s.command({ kind: 'course', employeeId: azubi.id, course: 'ce' })).toMatch(/Lehrgang/);
+    s.run(1440 + 60);
+    expect(s.business.absence(azubi.id, s.time)).toBe('schulung');
+    s.run(30 * 1440);
+    expect(azubi.course).toBeUndefined();
+    expect(azubi.skills.transport).toBeGreaterThanOrEqual(1);
+    expect(azubi.licenseC).toBe(true);
+    const before = azubi.xp.boden ?? 0;
+    b.addExperience(azubi.id, 'boden', 100, s.time);
+    expect((azubi.xp.boden ?? 0) - before === 150 || azubi.skills.boden > 1).toBe(true);
+  });
+
+  it('Konkurrenz: gewonnene Aufträge belegen Maschinen, Abwerben, Übernahme', () => {
+    const s = world(5);
+    const b = s.business;
+    const c = b.competitors.find((x) => x.size === 'klein')!;
+    // Abwerben
+    s.company.drivers.push({ ...structuredClone(s.company.drivers[0]), id: 50, name: 'Gute Kraft', isPlayer: false, kind: 'fest', wage: 16, satisfaction: 60, absences: [] });
+    const biz = b as unknown as { rivalsDaily(t: number): void };
+    for (let k = 0; k < 3000 && !s.company.drivers.find((d) => d.id === 50)!.poach; k++) biz.rivalsDaily(s.time);
+    const e = s.company.drivers.find((d) => d.id === 50)!;
+    expect(e.poach).toBeDefined();
+    expect(s.command({ kind: 'poachAnswer', employeeId: 50, match: true })).toMatch(/bleibt/);
+    expect(e.wage).toBeGreaterThan(16);
+    // ausgebucht: Kapazität eines kleinen Anbieters = 1
+    (c.busy ??= []).push({ service: 'grubbern', until: s.time + 5 * 1440 });
+    expect(b.competitorBooked(c, 'grubbern', s.time)).toBe(true);
+    // Übernahme
+    s.company.cash = 1_000_000;
+    b.takeoverOffer = { competitorId: c.id, price: 200_000, until: s.time + 1440 };
+    const machines = s.company.machines.length, comps = b.competitors.length;
+    expect(s.command({ kind: 'buyCompetitor', competitorId: c.id })).toBe('übernommen');
+    expect(b.competitors.length).toBe(comps - 1);
+    expect(s.company.machines.length).toBe(machines + 2);
+  });
+});

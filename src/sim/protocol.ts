@@ -86,6 +86,8 @@ export interface BusinessState {
   /** Rahmenverträge (Vorschlag 7) */
   frames: FrameContract[];
   frameOffers: FrameContract[];
+  /** Übernahmeangebot eines kleinen Konkurrenten (Vorschlag 12) */
+  takeoverOffer: { competitorId: number; price: number; until: number } | null;
   /** Auswertung (Vorschlag 13) */
   analytics: Analytics;
   /** eigene Biogasanlage (PB-07 bis PB-10) */

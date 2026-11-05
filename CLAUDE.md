@@ -115,6 +115,9 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
 - Paket 2 fertig: Vermarktung `src/sim/marketing.ts` (Preise, Lager, Vorkontrakte), Getreidelager-Gebäude `lager`, Rahmenverträge
   (`FrameContract`, `framesDaily`), Flächenkauf (`LeaseOffer.salePrice`, `Lease.owned`, `buyLand`), DüV-Grenze (`Lease.orgN`),
   Biogas-Ausbau (`biogasUpgrade`, `heatAt`/`flexAt`, Silo festfahren `compactSilo`, Task `compact`).
+- Paket 3 fertig: Disponent (`Company.dispatcher`, `Simulation.dispatchTick`, `isRoutine`), Ausbildung (`COURSES`, `Employee.course`,
+  Abwesenheit `schulung`, `apprenticeUntil`), Konkurrenz mit Fuhrpark (`competitorBooked`, `Competitor.busy`, Abwerben `Employee.poach`,
+  Übernahme `takeoverOffer`/`buyCompetitor`).
 
 ## CI (GitHub Actions)
 

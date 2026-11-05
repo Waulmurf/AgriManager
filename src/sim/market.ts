@@ -22,6 +22,8 @@ export interface Competitor {
   warCut: number;
   /** gewonnene Aufträge gegen den Spieler (Statistik) */
   won: number;
+  /** belegte Maschinen durch gewonnene Aufträge (Vorschlag 12) */
+  busy?: { service: Service; until: number }[];
 }
 
 /** Orte im Spielgebiet (Ortsmitte, gerundet) */

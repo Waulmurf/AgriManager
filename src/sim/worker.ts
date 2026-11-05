@@ -146,6 +146,7 @@ function sendBusiness(force = false) {
     analytics: structuredClone(b.analytics(sim.time)),
     frames: structuredClone(b.frames),
     frameOffers: structuredClone(b.frameOffers),
+    takeoverOffer: b.takeoverOffer ? { ...b.takeoverOffer } : null,
     marketing: {
       priceT: Object.fromEntries(Object.keys(b.cropPrice).map((k) => [k, b.cropPriceT(k as never, sim!.time)])),
       stock: { ...b.cropStock }, capacity: b.storeCapacity(), store: b.storeHarvest,

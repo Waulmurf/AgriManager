@@ -4,7 +4,7 @@
 import { useState } from 'react';
 import type { GameController, GameStatus } from '../game/controller';
 import type { JobEstimate } from '../sim/engine';
-import { MACHINE_SKILL, SELF_PROPELLED, MECHANIC_MIN, SKILLS, roleName, employerHourCost, employerMonthCost, machineValue, marketWage, takeOverFee, type Employee, type Machine } from '../sim/economy';
+import { COURSES, DISPATCHER_MONTH, type CourseKey, type Skill, MACHINE_SKILL, SELF_PROPELLED, MECHANIC_MIN, SKILLS, roleName, employerHourCost, employerMonthCost, machineValue, marketWage, takeOverFee, type Employee, type Machine } from '../sim/economy';
 import { HARVEST_TOWED, HAULER_TYPES, HAULER_TYPE, chainName, isHarvest, SERVICE_IMPLEMENT, SERVICE_NAMES, fmtDay, fmtTime, partsText, CHECK_COST, type Invoice, type Request, type Order } from '../sim/business';
 import { CATALOG, DEALERS } from '../data/catalog';
 import { BUILDINGS, SITE_OFFERS } from '../data/sites';
@@ -485,6 +485,8 @@ function EmployeeCard({ e, status, game, show }: { e: Employee; status: GameStat
   const [days, setDays] = useState('5');
   const [from, setFrom] = useState(1);
   const [wage, setWage] = useState(String(e.wage));
+  const [course, setCourse] = useState<CourseKey>('lehrgang');
+  const [cskill, setCskill] = useState<Skill>('boden');
   const send = async (cmd: Parameters<GameController['command']>[0]) => show(await game!.command(cmd));
   const today = Math.floor(b.time / 1440);
   const sat = e.satisfaction ?? 70;
@@ -498,6 +500,28 @@ function EmployeeCard({ e, status, game, show }: { e: Employee; status: GameStat
       <small className="hint">{skillShort(e)}{e.licenseC ? ' · Führerschein C/CE' : ''}{!e.isPlayer && e.kind !== 'leih' ? ` · ${e.age} Jahre · ${e.wage.toLocaleString('de-DE')} €/h brutto (Markt ${marketWage(e).toLocaleString('de-DE')} €)` : ''}</small>
       <small>{b.driverStatus[e.id] ?? (e.kind === 'leih' && b.time < (e.availableFrom ?? 0) ? `kommt ${fmtDay(e.availableFrom!)} 06:00` : 'frei')} · heute {((b.driverMinutes[e.id] ?? 0) / 60).toLocaleString('de-DE', { maximumFractionDigits: 1 })} von 10 h</small>
       {e.kind === 'leih' && <LeihActions e={e} status={status} send={send} />}
+      {e.apprenticeUntil !== undefined && <small className="hint">Auszubildender bis {fmtDay(e.apprenticeUntil)} · lernt 50 % schneller</small>}
+      {e.course && <small className="hint">Lehrgang „{COURSES[e.course.key].name}“ bis {fmtDay(e.course.until)}</small>}
+      {e.poach && (
+        <div className="card-actions">
+          <small className="warn">{e.poach.competitor} bietet {eur(e.poach.wage)}/h – Antwort bis {fmtDay(e.poach.until)}</small>
+          <button onClick={() => send({ kind: 'poachAnswer', employeeId: e.id, match: true })}>Gleichziehen</button>
+          <button onClick={() => send({ kind: 'poachAnswer', employeeId: e.id, match: false })}>Gehen lassen</button>
+        </div>
+      )}
+      {e.kind !== 'leih' && !e.course && (
+        <div className="card-actions">
+          <select value={course} onChange={(x) => setCourse(x.target.value as CourseKey)} aria-label="Lehrgang">
+            {(Object.keys(COURSES) as CourseKey[]).map((k) => <option key={k} value={k}>{COURSES[k].name} ({eur(COURSES[k].cost)}, {COURSES[k].days} Tage)</option>)}
+          </select>
+          {course === 'lehrgang' && (
+            <select value={cskill} onChange={(x) => setCskill(x.target.value as Skill)} aria-label="Tätigkeit">
+              {SKILLS.map((k) => <option key={k.key} value={k.key}>{k.name}</option>)}
+            </select>
+          )}
+          <button onClick={() => send({ kind: 'course', employeeId: e.id, course, skill: course === 'lehrgang' ? cskill : undefined })}>Anmelden</button>
+        </div>
+      )}
       {!e.isPlayer && e.kind !== 'leih' && (
         <>
           <small className={sat < 40 ? 'warn' : 'hint'}>
@@ -597,7 +621,22 @@ export function StaffTab({ status, game }: { status: GameStatus; game: GameContr
           </ul>
         </>
       )}
+      <h2>Büro: Disponent</h2>
+      {c.dispatcher ? (
+        <div className="card-actions" data-testid="dispatcher">
+          <label><input type="checkbox" checked={c.dispatcher.autoAccept} onChange={async (x) => fb.show(await game!.command({ kind: 'dispatcher', action: 'set', autoAccept: x.target.checked }))} /> Routineanfragen annehmen</label>
+          <label><input type="checkbox" checked={c.dispatcher.autoStart} onChange={async (x) => fb.show(await game!.command({ kind: 'dispatcher', action: 'set', autoStart: x.target.checked }))} /> Routineaufträge starten</label>
+          <label><input type="checkbox" checked={c.dispatcher.autoRemind} onChange={async (x) => fb.show(await game!.command({ kind: 'dispatcher', action: 'set', autoRemind: x.target.checked }))} /> Zahlungen erinnern</label>
+          <button onClick={async () => fb.show(await game!.command({ kind: 'dispatcher', action: 'fire' }))}>Entlassen</button>
+        </div>
+      ) : (
+        <div className="card-actions">
+          <button onClick={async () => fb.show(await game!.command({ kind: 'dispatcher', action: 'hire' }))} data-testid="hire-dispatcher">Disponent einstellen ({eur(DISPATCHER_MONTH)}/Monat)</button>
+          <small className="hint">Braucht ein Büro. Nimmt Routineanfragen (Grubbern, Stoppel, Saat, Pflanzenschutz, Pressen) zum Kundenpreis an, startet sie morgens mit freien Fahrern und Gespannen und ruft bei überfälligen Rechnungen an.</small>
+        </div>
+      )}
       <h2>Mitarbeiter ({c.drivers.length})</h2>
+      <div className="card-actions"><button onClick={async () => fb.show(await game!.command({ kind: 'hireApprentice' }))}>Auszubildenden einstellen (etwa 1.100 €/Monat, 3 Jahre)</button></div>
       <ul className="cards" data-testid="staff">
         {c.drivers.map((e) => <EmployeeCard key={e.id} e={e} status={status} game={game} show={fb.show} />)}
       </ul>
@@ -880,6 +919,16 @@ export function CompetitionTab({ status, game }: { status: GameStatus; game: Gam
           })}
         </ul>
       )}
+      {b.takeoverOffer && (
+        <>
+          <h2>Übernahmeangebot</h2>
+          <div className="card">
+            <div className="card-head"><strong>{m.competitors.find((x) => x.id === b.takeoverOffer!.competitorId)?.name}</strong><strong>{eur(b.takeoverOffer.price)}</strong></div>
+            <small className="hint">Kunden im Umkreis von 20 km lernen den eigenen Betrieb kennen, Wechsler kommen zurück; ein Schlepper und ein Grubber (gebraucht) kommen dazu. Angebot bis {fmtDay(b.takeoverOffer.until)}.</small>
+            <div className="card-actions"><button onClick={async () => fb.show(await game!.command({ kind: 'buyCompetitor', competitorId: b.takeoverOffer!.competitorId }))}>Übernehmen</button></div>
+          </div>
+        </>
+      )}
       <h2>Rahmenverträge</h2>
       <ul className="cards" data-testid="frames">
         {b.frameOffers.map((f) => (
@@ -903,7 +952,7 @@ export function CompetitionTab({ status, game }: { status: GameStatus; game: Gam
       {fb.msg && <p className="feedback">{fb.msg}</p>}
       <h2>Konkurrenz ({m.competitors.length})</h2>
       <table className="tbl" data-testid="competitors">
-        <thead><tr><th>Lohnunternehmen</th><th>Ort</th><th>Größe</th><th>Preise</th><th>gewonnen</th></tr></thead>
+        <thead><tr><th>Lohnunternehmen</th><th>Ort</th><th>Größe</th><th>Preise</th><th>gewonnen</th><th>belegt</th></tr></thead>
         <tbody>
           {m.competitors.map((c) => {
             const war = c.warUntil > b.time;
@@ -914,6 +963,7 @@ export function CompetitionTab({ status, game }: { status: GameStatus; game: Gam
                 <td>{sizeName[c.size]}</td>
                 <td className={war ? 'neg' : ''}>{Math.round((c.priceLevel * (war ? 1 - c.warCut : 1) - 1) * 100) >= 0 ? '+' : ''}{Math.round((c.priceLevel * (war ? 1 - c.warCut : 1) - 1) * 100)} %{war ? ` (Preiskampf bis ${fmtDay(c.warUntil)})` : ''}</td>
                 <td>{c.won}</td>
+                <td>{(c.busy ?? []).filter((x) => x.until > b.time).length}</td>
               </tr>
             );
           })}
