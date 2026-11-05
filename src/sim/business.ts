@@ -14,6 +14,7 @@ import {
 } from './economy';
 import { CATALOG, DEALERS, dealersFor, type CatalogModel } from '../data/catalog';
 import { BUILDINGS, PERMIT, SITE_OFFERS, type BuildingKey } from '../data/sites';
+import { CROPS, IRRIGATION_EUR_HA, fieldIrrigated, fieldSoil, referenceRent, rotationFactor, soilFactor, type OwnCrop } from './farming';
 import { COMPETITOR_RANGE_KM, PRICE_WAR_KM, generateCompetitors, kmBetween, type Competitor } from './market';
 import {
   DIESEL_MEAN, DIESEL_START, LEASE_BASE_RATE, LIABILITY_PER_YEAR, OVERDRAFT_RATE, RATING_SURCHARGE,
@@ -166,6 +167,8 @@ export interface Order {
   doneT?: number;
   /** Fremdleistungen (€), z. B. Fremdwalze */
   externalCost?: number;
+  /** Eigenauftrag auf eigener Pachtfläche (keine Rechnung) */
+  ownLeaseId?: number;
   earliest: number;
   latest: number;
   status: OrderStatus;
@@ -207,7 +210,53 @@ export interface Invoice {
 
 export type LedgerCategory =
   | 'Rechnung' | 'Diesel' | 'Maschinenkauf' | 'Personal' | 'Werkstatt'
-  | 'Kredit' | 'Tilgung' | 'Zinsen' | 'Leasing' | 'Versicherung' | 'Steuern' | 'Gebäude' | 'Bau' | 'Sonstiges';
+  | 'Kredit' | 'Tilgung' | 'Zinsen' | 'Leasing' | 'Versicherung' | 'Steuern' | 'Gebäude' | 'Bau'
+  | 'Pacht' | 'Ackerbau' | 'Ernte' | 'Sonstiges';
+
+/** Pachtangebot (PB-01 bis PB-03) */
+export interface LeaseOffer {
+  id: number;
+  farmId: number;
+  fields: number[];
+  areaHa: number;
+  soil: number;
+  irrigated: boolean;
+  /** ortsüblicher Preis je ha, Laufzeit, Angebotsfrist, Gebot der Konkurrenz (verdeckt), eigenes Gebot */
+  refRent: number;
+  years: number;
+  until: number;
+  competitorBid: number;
+  playerBid?: number;
+  reason: string;
+}
+
+/** Arbeitsgang einer eigenen Kultur */
+export interface StepState {
+  key: string;
+  from: number;
+  to: number;
+  status: 'geplant' | 'auftrag' | 'erledigt' | 'verpasst' | 'entfällt';
+  orderId?: number;
+}
+
+/** Pachtfläche mit Anbau (PB-02, PB-04) */
+export interface Lease {
+  id: number;
+  farmId: number;
+  fields: number[];
+  areaHa: number;
+  soil: number;
+  irrigated: boolean;
+  rentHa: number;
+  startAt: number;
+  endsAt: number;
+  crop?: OwnCrop;
+  steps: StepState[];
+  nextCrop?: OwnCrop;
+  lastCrop?: OwnCrop;
+  yieldFactor: number;
+  history: { year: number; crop: OwnCrop; tonnes: number; revenue: number }[];
+}
 
 /** Jahresabschluss (WF-08) */
 export interface YearResult {
@@ -279,6 +328,9 @@ export type Command =
   | { kind: 'repair'; machineId: number; mode: 'dealer' | 'own'; mechanicId?: number }
   | { kind: 'buyParts'; amount: number }
   | { kind: 'build'; siteId: number; building: BuildingKey }
+  | { kind: 'bidLease'; offerId: number; rentHa: number }
+  | { kind: 'askLand'; farmId: number }
+  | { kind: 'setCrop'; leaseId: number; crop: OwnCrop }
   | { kind: 'buySite'; offerKey: string }
   | { kind: 'sellSite'; siteId: number }
   | { kind: 'transfer'; machineId: number; siteId: number; driverId: number; implementId?: number }
@@ -325,6 +377,11 @@ export class Business {
   readonly staffRequests: StaffRequest[] = [];
   /** Zeitarbeitsfirma: verfügbare Leiharbeiter (Anfrage morgens, ab nächstem Tag im Einsatz) */
   readonly agencyPool: Applicant[] = [];
+  /** Pacht und eigener Ackerbau */
+  readonly leaseOffers: LeaseOffer[] = [];
+  readonly leases: Lease[] = [];
+  /** Wetterabfrage für Ertrag (Regen eines Tages in mm; setzt der Rechenkern) */
+  rainOfDay: ((day: number) => number) | null = null;
   /** Markt (Phase 5): Konkurrenten, Ruf, Statistik gewonnen/verloren */
   readonly competitors: Competitor[];
   reputation = 50;
@@ -389,6 +446,8 @@ export class Business {
       staffRequests: this.staffRequests,
       agencyPool: this.agencyPool,
       dieselPrice: this.dieselPrice,
+      leaseOffers: this.leaseOffers,
+      leases: this.leases,
       market: { rng: this.marketRng.getState(), competitors: this.competitors, reputation: this.reputation, won: this.won, lost: this.lost },
       years: this.years,
       yearSaleGain: this.yearSaleGain,
@@ -416,6 +475,9 @@ export class Business {
     put(this.staffRequests, s.staffRequests ?? []);
     put(this.agencyPool, s.agencyPool ?? []);
     this.dieselPrice = s.dieselPrice ?? DIESEL_START;
+    put(this.leaseOffers, s.leaseOffers ?? []);
+    put(this.leases, s.leases ?? []);
+    this.applyLeases();
     if (s.market) {
       this.marketRng.setState(s.market.rng);
       put(this.competitors, s.market.competitors);
@@ -465,6 +527,261 @@ export class Business {
       farm.rivalUntil = time + (RIVAL_MIN_DAYS + this.rng.int(RIVAL_EXTRA_DAYS + 1)) * 1440;
       for (const r of this.requests) if (r.farmId === farmId && r.status === 'offen') r.status = 'abgelaufen';
       this.emit(time, 'warnung', `${farm.name} ist unzufrieden und arbeitet ab jetzt mit einem anderen Lohnunternehmen. In einigen Wochen kann man es mit kleinen Aufträgen wieder versuchen.`, farmId);
+    }
+  }
+
+  // ---------- Pacht und eigener Ackerbau ----------
+
+  /** Pachtflächen aus den Kundenbetrieben herausnehmen (auch nach dem Laden) */
+  private applyLeases() {
+    const fs = this.farms;
+    if (!fs) return;
+    for (const l of this.leases) {
+      const farm = fs.farms[l.farmId];
+      if (farm) farm.fields = farm.fields.filter((f) => !l.fields.includes(f));
+      for (const f of l.fields) fs.fieldFarm[f] = -2;
+    }
+  }
+
+  /** Neues Pachtangebot eines Betriebs (Betriebsaufgabe, Generationswechsel, Anfrage) */
+  private makeLeaseOffer(farmId: number, time: number, reason: string): LeaseOffer | null {
+    const fs = this.farms, f = this.fields;
+    if (!fs || !f) return null;
+    const farm = fs.farms[farmId];
+    const cand = farm.fields.filter((i) => fs.fieldCrop[i] !== Crop.Gruenland && f.areaHa[i] <= 40);
+    if (!cand.length) return null;
+    const picked: number[] = [];
+    let ha = 0;
+    const start = this.marketRng.int(cand.length);
+    const want = 1 + this.marketRng.int(3);
+    for (let k = 0; k < cand.length && picked.length < want; k++) {
+      const i = cand[(start + k) % cand.length];
+      if (ha + f.areaHa[i] > 45) continue;
+      picked.push(i);
+      ha += f.areaHa[i];
+    }
+    if (!picked.length) return null;
+    let soil = 0, irr = 0;
+    for (const i of picked) { soil += fieldSoil(i) * f.areaHa[i]; if (fieldIrrigated(i)) irr += f.areaHa[i]; }
+    soil = Math.round(soil / ha);
+    const irrigated = irr >= ha / 2;
+    const refRent = referenceRent(soil, irrigated);
+    const offer: LeaseOffer = {
+      id: this.nextId++, farmId, fields: picked, areaHa: Math.round(ha * 100) / 100, soil, irrigated, refRent,
+      years: this.marketRng.next() < 0.5 ? 9 : 12, until: time + 21 * 1440,
+      // Konkurrenten und Nachbarn bieten mit (PB-03): 95–120 % des ortsüblichen Preises
+      competitorBid: Math.round((refRent * (0.95 + this.marketRng.next() * 0.25)) / 5) * 5,
+      reason,
+    };
+    this.leaseOffers.push(offer);
+    return offer;
+  }
+
+  bidLease(offerId: number, rentHa: number): string {
+    const o = this.leaseOffers.find((x) => x.id === offerId);
+    if (!o) return 'Angebot nicht mehr aktuell';
+    if (!(rentHa >= 100 && rentHa <= 2500)) return 'Gebot zwischen 100 und 2.500 €/ha';
+    o.playerBid = Math.round(rentHa);
+    this.version++;
+    return `Gebot ${fmtEur(o.playerBid)}/ha abgegeben – Entscheidung am ${fmtDay(o.until)}`;
+  }
+
+  /** Selbst nach Pachtland fragen (PB-01): nur bekannte, zufriedene Betriebe, je Betrieb einmal im Jahr */
+  askLand(farmId: number, time: number): string {
+    const farm = this.farms?.farms[farmId];
+    if (!farm?.known) return 'Erst den Betrieb besuchen';
+    if ((farm.landAskedAt ?? -1e9) > time - 365 * 1440) return 'Schon in diesem Jahr gefragt';
+    farm.landAskedAt = time;
+    if (farm.satisfaction < 55 || this.marketRng.next() > 0.25 + (farm.satisfaction - 55) / 100) {
+      this.emit(time, 'info', `${farm.name}: Zurzeit gibt es keine Flächen abzugeben.`, farmId);
+      return 'keine Flächen frei';
+    }
+    const o = this.makeLeaseOffer(farmId, time, 'auf Ihre Anfrage');
+    if (!o) return 'keine passenden Flächen';
+    this.emit(time, 'info', `${farm.name} bietet ${fmtHa(o.areaHa)} zur Pacht an (Ackerzahl ${o.soil}${o.irrigated ? ', beregnet' : ''}). Gebote bis ${fmtDay(o.until)}.`, farmId);
+    return 'Angebot erhalten';
+  }
+
+  /** Fenster (Monat*100+Tag) mit Beginn ab `minStart`, dessen Ende nicht vor `notBefore` liegt */
+  private window(from: number, to: number, minStart: number, notBefore: number): [number, number] {
+    let t = Math.floor(Math.max(0, minStart, notBefore - 370 * 1440) / 1440) * 1440;
+    for (let k = 0; k < 800; k++, t += 1440) {
+      const d = gameDate(t);
+      if (d.month * 100 + d.day !== from) continue;
+      let e = t;
+      for (let j = 0; j < 370; j++) { const g = gameDate(e); if (g.month * 100 + g.day === to) break; e += 1440; }
+      if (e + 1439 < notBefore) continue;
+      return [t, e + 1439];
+    }
+    return [notBefore, notBefore];
+  }
+
+  /** Arbeitsgänge einer Kultur ab einem Zeitpunkt terminieren (PB-04) */
+  private schedule(crop: OwnCrop, time: number): StepState[] {
+    const def = CROPS.find((c) => c.key === crop)!;
+    const out: StepState[] = [];
+    // Pflichtschritte nacheinander; offene Fenster zählen noch
+    let minStart = 0;
+    for (const st of def.steps) {
+      if (!st.required) continue;
+      const [a, e] = this.window(st.from, st.to, minStart, time);
+      out.push({ key: st.key, from: a, to: e, status: 'geplant' });
+      minStart = a;
+    }
+    // freiwillige Schritte (Stoppel) nur, wenn sie noch vor den Pflichtschritten passen
+    const res: StepState[] = [];
+    let k = 0;
+    for (const st of def.steps) {
+      if (st.required) { res.push(out[k++]); continue; }
+      const next = out[k];
+      const [a, e] = this.window(st.from, st.to, 0, time);
+      res.push({ key: st.key, from: a, to: e, status: next && a < next.from ? 'geplant' : 'entfällt' });
+    }
+    return res;
+  }
+
+  /** Kultur für die nächste Saison festlegen (PB-04) */
+  setCrop(leaseId: number, crop: OwnCrop, time: number): string {
+    const l = this.leases.find((x) => x.id === leaseId);
+    const def = CROPS.find((c) => c.key === crop);
+    if (!l || !def) return 'Unbekannt';
+    if (l.crop && l.steps.some((st) => st.status === 'auftrag' || st.status === 'erledigt')) {
+      l.nextCrop = crop;
+      this.version++;
+      return `${def.name} folgt nach der Ernte`;
+    }
+    l.crop = crop;
+    l.yieldFactor = 1;
+    l.steps = this.schedule(crop, time);
+    this.version++;
+    const harvest = l.steps[l.steps.length - 1];
+    return `${def.name} geplant, Ernte etwa ab ${fmtDay(harvest.from)}`;
+  }
+
+  /** Arbeitsgang eines Eigenauftrags erledigt */
+  private ownStepDone(o: Order, time: number) {
+    const l = this.leases.find((x) => x.id === o.ownLeaseId);
+    const st = l?.steps.find((x) => x.orderId === o.id);
+    if (!l || !st) return;
+    const def = CROPS.find((c) => c.key === l.crop)?.steps.find((x) => x.key === st.key);
+    if (time > st.to && def?.harvest) {
+      // späte Ernte: −2 % je Tag
+      l.yieldFactor *= Math.max(0.5, 1 - 0.02 * Math.ceil((time - st.to) / 1440));
+    }
+    if (st.status === 'verpasst' && !def?.harvest) { this.version++; return; }
+    st.status = 'erledigt';
+    if (st.key === 'stoppel') l.yieldFactor *= 1.03;
+    if (def?.harvest) this.harvest(l, time);
+    this.version++;
+  }
+
+  /** Ernte: Ertrag aus Boden, Fruchtfolge, Trockenheit, Termintreue; Verkauf zum Marktpreis (PB-05, PB-06) */
+  private harvest(l: Lease, time: number) {
+    const def = CROPS.find((c) => c.key === l.crop);
+    if (!def) return;
+    // Regen April–August dieses Jahres im Verhältnis zum Klimamittel (≈ 300 mm)
+    let rain = 0, days = 0;
+    if (this.rainOfDay) {
+      const d0 = Math.floor(time / 1440);
+      for (let d = Math.max(0, d0 - 200); d <= d0; d++) {
+        const m = gameDate(d * 1440).month;
+        if (m >= 4 && m <= 8) { rain += this.rainOfDay(d); days++; }
+      }
+    }
+    const ratio = days > 60 ? rain / (300 * (days / 153)) : 1;
+    const dry = l.irrigated ? 1 : Math.max(0.4, 1 - def.drought * Math.max(0, 0.9 - ratio));
+    const tonnes = Math.round(def.yieldT * soilFactor(l.soil) * rotationFactor(def.key, l.lastCrop) * dry * l.yieldFactor * l.areaHa * 10) / 10;
+    const price = Math.round(def.priceT * (0.9 + this.marketRng.next() * 0.2) * 100) / 100;
+    const revenue = Math.round(tonnes * price);
+    this.book(time, `Ernte ${def.name}: ${tonnes.toLocaleString('de-DE')} t à ${fmtEur(price)}`, revenue, 'Ernte');
+    l.history.push({ year: gameDate(time).year, crop: def.key, tonnes, revenue });
+    this.emit(time, 'info', `Ernte ${def.name} (${fmtHa(l.areaHa)}): ${tonnes.toLocaleString('de-DE')} t (${(tonnes / l.areaHa).toLocaleString('de-DE', { maximumFractionDigits: 1 })} t/ha${!l.irrigated && dry < 0.95 ? ', Trockenheit' : ''}) – verkauft für ${fmtEur(revenue)}.`);
+    l.lastCrop = def.key;
+    l.crop = undefined;
+    l.steps = [];
+    if (l.nextCrop) { const n = l.nextCrop; l.nextCrop = undefined; this.setCrop(l.id, n, time); }
+  }
+
+  /** Täglich: Pachtangebote, Gebotsentscheidung, Arbeitsgänge, Pacht und Beregnung (1.10.), Pachtende */
+  private farmingDaily(time: number) {
+    const fs = this.farms;
+    if (!fs || !this.fields) return;
+    const d = gameDate(time);
+    // neue Angebote: im Mittel zweimal im Monat (Betriebsaufgabe, Generationswechsel)
+    if (this.marketRng.next() < 0.07) {
+      const farm = fs.farms[this.marketRng.int(fs.farms.length)];
+      const reason = this.marketRng.next() < 0.5 ? 'Betriebsaufgabe' : 'Generationswechsel';
+      const o = this.makeLeaseOffer(farm.id, time, reason);
+      if (o) this.emit(time, 'info', `Pachtangebot (${reason}): ${farm.name} gibt ${fmtHa(o.areaHa)} ab, Ackerzahl ${o.soil}${o.irrigated ? ', beregnet' : ''}, ${o.years} Jahre. Gebote bis ${fmtDay(o.until)}.`, farm.id);
+    }
+    // Gebote entscheiden
+    for (let i = this.leaseOffers.length - 1; i >= 0; i--) {
+      const o = this.leaseOffers[i];
+      if (o.until > time) continue;
+      this.leaseOffers.splice(i, 1);
+      if (o.playerBid !== undefined && o.playerBid >= o.competitorBid) {
+        const l: Lease = {
+          id: this.nextId++, farmId: o.farmId, fields: o.fields, areaHa: o.areaHa, soil: o.soil, irrigated: o.irrigated,
+          rentHa: o.playerBid, startAt: time, endsAt: time + o.years * 365 * 1440, steps: [], yieldFactor: 1, history: [],
+        };
+        this.leases.push(l);
+        this.applyLeases();
+        this.emit(time, 'info', `Zuschlag: ${fmtHa(o.areaHa)} von ${this.farmName(o.farmId)} gepachtet (${fmtEur(o.playerBid)}/ha, ${o.years} Jahre). Kultur im Reiter Ackerbau wählen.`, o.farmId);
+      } else if (o.playerBid !== undefined) {
+        this.emit(time, 'warnung', `Pacht ${fmtHa(o.areaHa)} von ${this.farmName(o.farmId)}: Ein anderer hat mehr geboten (${fmtEur(o.competitorBid)}/ha).`, o.farmId);
+      }
+    }
+    // Arbeitsgänge
+    for (const l of this.leases) {
+      const def = CROPS.find((c) => c.key === l.crop);
+      if (!def) continue;
+      for (const st of l.steps) {
+        const sd = def.steps.find((x) => x.key === st.key)!;
+        if (st.status === 'geplant' && time >= st.from) {
+          if (sd.service) {
+            const o: Order = {
+              id: this.nextId++, requestId: 0, farmId: -1, service: sd.service, fields: l.fields.slice(), doneFields: [],
+              areaHa: l.areaHa, priceHa: 0, earliest: st.from, latest: st.to, status: 'offen', dieselL: 0, dieselCost: 0, tractorHours: 0,
+              ownLeaseId: l.id, chain: sd.service === 'haeckseln' ? 'komplett' : undefined, doneT: sd.service === 'haeckseln' ? 0 : undefined,
+            };
+            this.orders.push(o);
+            st.orderId = o.id;
+            st.status = 'auftrag';
+            this.emit(time, 'auftrag', `Eigene Fläche: ${sd.name} (${fmtHa(l.areaHa)}) steht an – fertig bis ${fmtDay(st.to)}. Im Reiter Aufträge starten.`);
+          } else {
+            const cost = Math.round(sd.costHa * l.areaHa);
+            this.book(time, `${sd.name}, ${fmtHa(l.areaHa)} ${def.name}`, -cost, 'Ackerbau');
+            st.status = 'erledigt';
+            if (sd.harvest) { this.harvest(l, time); break; }
+          }
+        } else if (st.status === 'auftrag' && time > st.to) {
+          const o = this.orders.find((x) => x.id === st.orderId);
+          if (o && o.status === 'fertig') continue;
+          if (sd.harvest) continue; // Ernte wartet, wird aber teurer (−2 %/Tag)
+          if (sd.required) { st.status = 'verpasst'; l.yieldFactor *= 0.9; this.emit(time, 'warnung', `Eigene Fläche: ${sd.name} verpasst – Ertrag −10 %.`); }
+          else st.status = 'entfällt';
+          if (o && o.status === 'offen') o.status = 'fertig';
+        } else if (st.status === 'geplant' && time > st.to) {
+          st.status = sd.required ? 'verpasst' : 'entfällt';
+        }
+      }
+    }
+    // Pacht und Beregnung am 1. Oktober (Pachtjahr)
+    if (d.month === 10 && d.day === 1) {
+      let rent = 0, irr = 0;
+      for (const l of this.leases) { rent += l.rentHa * l.areaHa; if (l.irrigated) irr += IRRIGATION_EUR_HA * l.areaHa; }
+      if (rent) this.book(time, `Pacht für ${this.leases.length} Pachtverträge`, -Math.round(rent), 'Pacht');
+      if (irr) this.book(time, 'Beregnung (Wasser, Strom, Technik)', -Math.round(irr), 'Ackerbau');
+    }
+    // Pachtende: Flächen zurück, sobald keine Kultur mehr steht
+    for (let i = this.leases.length - 1; i >= 0; i--) {
+      const l = this.leases[i];
+      if (time < l.endsAt || l.crop) continue;
+      this.leases.splice(i, 1);
+      const farm = fs.farms[l.farmId];
+      if (farm) farm.fields.push(...l.fields);
+      for (const f of l.fields) fs.fieldFarm[f] = l.farmId;
+      this.emit(time, 'info', `Pachtvertrag mit ${this.farmName(l.farmId)} beendet: ${fmtHa(l.areaHa)} gehen zurück.`, l.farmId);
     }
   }
 
@@ -694,6 +1011,7 @@ export class Business {
   }
 
   farmName(id: number): string {
+    if (id < 0) return 'Eigene Fläche';
     return this.farms?.farms[id]?.name ?? `Betrieb ${id}`;
   }
 
@@ -817,6 +1135,7 @@ export class Business {
     this.financeDaily(time);
     this.marketDaily(time);
     this.sitesDaily(time);
+    this.farmingDaily(time);
     // Auftrag steht wegen Panne: Kunde wartet und wird unzufriedener (MZ-07)
     for (const o of this.orders) {
       if (o.status !== 'läuft') continue;
@@ -1091,8 +1410,8 @@ export class Business {
     let revenue = 0, expenses = 0;
     for (const l of this.ledger) {
       if (l.time < from || l.time >= to) continue;
-      if (l.category === 'Rechnung') revenue += l.amount;
-      else if (l.category === 'Diesel' || l.category === 'Personal' || l.category === 'Werkstatt' || l.category === 'Zinsen' || l.category === 'Leasing' || l.category === 'Versicherung' || l.category === 'Gebäude' || l.category === 'Sonstiges') expenses -= l.amount;
+      if (l.category === 'Rechnung' || l.category === 'Ernte') revenue += l.amount;
+      else if (l.category === 'Diesel' || l.category === 'Personal' || l.category === 'Werkstatt' || l.category === 'Zinsen' || l.category === 'Leasing' || l.category === 'Versicherung' || l.category === 'Gebäude' || l.category === 'Pacht' || l.category === 'Ackerbau' || l.category === 'Sonstiges') expenses -= l.amount;
     }
     let afa = this.yearAfaSold + this.buildingAfa(from, to);
     for (const m of this.company.machines) afa += bookValue(m, Math.max(from, m.boughtAt ?? 0)) - bookValue(m, to);
@@ -1521,6 +1840,7 @@ export class Business {
       o.finishedAt = time;
       const onTime = time <= o.latest;
       this.emit(time, 'auftrag', `Auftrag ${this.farmName(o.farmId)} fertig${onTime ? ', pünktlich' : ', verspätet'} (${fmtHa(o.areaHa)}).`, o.farmId);
+      if (o.ownLeaseId !== undefined) { this.ownStepDone(o, time); return; }
       this.satisfy(o.farmId, onTime ? 5 : -10, time);
       this.changeReputation(onTime ? 1.5 : -3);
       const farm = this.farms?.farms[o.farmId];

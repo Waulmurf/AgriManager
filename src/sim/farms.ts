@@ -47,6 +47,8 @@ export interface Farm {
   rivalUntil: number;
   /** erledigte Aufträge (Stammkunde ab 3, MK-03) */
   orderCount?: number;
+  /** zuletzt nach Pachtland gefragt (Spielminute) */
+  landAskedAt?: number;
 }
 
 export interface FarmSet {

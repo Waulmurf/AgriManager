@@ -9,6 +9,7 @@ import { SERVICE_IMPLEMENT, SERVICE_NAMES, fmtDay, fmtTime, partsText, CHECK_COS
 import { CATALOG, DEALERS } from '../data/catalog';
 import { BUILDINGS, SITE_OFFERS } from '../data/sites';
 import { leaseRate } from '../sim/finance';
+import { CROPS, IRRIGATION_EUR_HA, rotationFactor, soilFactor, type OwnCrop } from '../sim/farming';
 import { formatGameTime } from '../game/clock';
 
 export const eur = (v: number) => v.toLocaleString('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
@@ -265,11 +266,13 @@ function OrderItem({ o, game, status }: { o: Order; game: GameController | null;
   return (
     <li className="card" data-testid="order">
       <div className="card-head">
-        <button className="link" onClick={() => game?.flyToFarm(o.farmId)}>{farm?.name ?? `Betrieb ${o.farmId}`}</button>
+        {o.ownLeaseId !== undefined
+          ? <button className="link" onClick={() => { const l = status.business?.farming.leases.find((x) => x.id === o.ownLeaseId); if (l) game?.flyTo(l.center); }}>Eigene Fläche</button>
+          : <button className="link" onClick={() => game?.flyToFarm(o.farmId)}>{farm?.name ?? `Betrieb ${o.farmId}`}</button>}
         <small className={`badge ${o.status === 'fertig' ? 'done' : o.status === 'läuft' ? 'run' : ''}`}>{o.status}</small>
       </div>
       <div>
-        {SERVICE_NAMES[o.service]}{o.chain ? ` (${o.chain === 'komplett' ? 'Komplettkette' : 'nur Häcksler'})` : ''} {ha(o.areaHa)} zu {o.gabe ? `${(o.priceHa / o.gabe).toLocaleString('de-DE', { maximumFractionDigits: 2 })} €/m³ (${Math.round(o.areaHa * o.gabe).toLocaleString('de-DE')} m³)` : `${o.priceHa.toLocaleString('de-DE')} €/ha`} = {eur(o.priceHa * o.areaHa)}
+        {SERVICE_NAMES[o.service]}{o.chain ? ` (${o.chain === 'komplett' ? 'Komplettkette' : 'nur Häcksler'})` : ''} {ha(o.areaHa)}{o.ownLeaseId !== undefined ? ' (Eigenauftrag, keine Rechnung)' : <> zu {o.gabe ? `${(o.priceHa / o.gabe).toLocaleString('de-DE', { maximumFractionDigits: 2 })} €/m³ (${Math.round(o.areaHa * o.gabe).toLocaleString('de-DE')} m³)` : `${o.priceHa.toLocaleString('de-DE')} €/ha`} = {eur(o.priceHa * o.areaHa)}</>}
         {o.gabe && o.status === 'läuft' ? <small className="hint"> · ausgebracht {Math.round(o.doneM3 ?? 0).toLocaleString('de-DE')} m³</small> : null}
         {o.chain && o.status !== 'offen' ? <small className="hint"> · am Silo {Math.round(o.doneT ?? 0).toLocaleString('de-DE')} t</small> : null}
       </div>
@@ -810,6 +813,104 @@ export function CompetitionTab({ status, game }: { status: GameStatus; game: Gam
         </tbody>
       </table>
       <p className="hint">Preise relativ zum Marktpreis. Große Anbieter häckseln auch, mittlere fahren Gülle, kleine nur Bodenbearbeitung. Im Preiskampf vergleichen Kunden im Umkreis von 25 km genauer; unzufriedene Kunden wechseln dann eher.</p>
+    </>
+  );
+}
+
+/** Deckungsbeitrag je ha einer Kultur (Erwartung bei mittlerem Wetter) */
+function cropMargin(crop: OwnCrop, soil: number, irrigated: boolean, last?: OwnCrop) {
+  const d = CROPS.find((c) => c.key === crop)!;
+  const t = d.yieldT * soilFactor(soil) * rotationFactor(crop, last);
+  const cost = d.steps.reduce((s, x) => s + x.costHa, 0) + (irrigated ? IRRIGATION_EUR_HA : 0);
+  return { t, revenue: t * d.priceT, cost, margin: t * d.priceT - cost };
+}
+
+const STEP_BADGE: Record<string, string> = { geplant: '', auftrag: 'run', erledigt: 'done', verpasst: 'warn', entfällt: '' };
+
+/** Pacht und eigener Ackerbau (PB-01 bis PB-06, PF-01) */
+export function FarmingTab({ status, game }: { status: GameStatus; game: GameController | null }) {
+  const b = status.business;
+  const fb = useFeedback();
+  const [bids, setBids] = useState<Record<number, number>>({});
+  const [crops, setCrops] = useState<Record<number, OwnCrop>>({});
+  if (!b) return <p className="hint">–</p>;
+  const send = async (cmd: Parameters<GameController['command']>[0]) => fb.show(await game!.command(cmd));
+  const { offers, leases } = b.farming;
+  const farmName = (id: number) => game?.farmById(id)?.name ?? `Betrieb ${id}`;
+  const totalHa = leases.reduce((s, l) => s + l.areaHa, 0);
+  const rent = leases.reduce((s, l) => s + l.areaHa * l.rentHa, 0);
+  return (
+    <>
+      <h2>Eigene Flächen</h2>
+      <dl>
+        <dt>Pachtfläche</dt><dd>{ha(totalHa)} in {leases.length} Verträgen</dd>
+        <dt>Pacht im Jahr</dt><dd>{eur(rent)} (fällig am 1. Oktober)</dd>
+      </dl>
+      {leases.length === 0 && <p className="hint">Noch keine Pachtflächen. Angebote kommen bei Betriebsaufgaben und Generationswechseln; bekannte Betriebe kann man im Kartenfenster nach Land fragen.</p>}
+      <ul className="cards" data-testid="leases">
+        {leases.map((l) => {
+          const def = CROPS.find((c) => c.key === l.crop);
+          const pick = crops[l.id] ?? l.nextCrop ?? 'weizen';
+          const m = cropMargin(pick, l.soil, l.irrigated, l.crop ?? l.lastCrop);
+          return (
+            <li key={l.id} className="card" data-testid="lease">
+              <div className="card-head">
+                <button className="link" onClick={() => game?.flyTo(l.center)}>{ha(l.areaHa)} von {farmName(l.farmId)}</button>
+                <small>{eur(l.rentHa)}/ha · bis {fmtDay(l.endsAt)}</small>
+              </div>
+              <small className="hint">Ackerzahl {l.soil}{l.irrigated ? ' · beregnet' : ' · ohne Beregnung'}{l.lastCrop ? ` · Vorfrucht ${CROPS.find((c) => c.key === l.lastCrop)!.name}` : ''}</small>
+              {def ? (
+                <>
+                  <div><strong>{def.name}</strong>{l.yieldFactor < 0.999 || l.yieldFactor > 1.001 ? <small className={l.yieldFactor < 1 ? 'warn' : 'hint'}> · Ertragsfaktor {Math.round(l.yieldFactor * 100)} %</small> : null}</div>
+                  <ul className="steps">
+                    {l.steps.map((st) => {
+                      const sd = def.steps.find((x) => x.key === st.key)!;
+                      return (
+                        <li key={st.key}>
+                          <small className={`badge ${STEP_BADGE[st.status]}`}>{st.status}</small> {sd.name}
+                          <small className="hint"> · {fmtDay(st.from)}–{fmtDay(st.to)}{sd.service ? ' · eigener Fuhrpark' : ` · ${eur(sd.costHa * l.areaHa)}`}</small>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  {l.nextCrop && <small className="hint">Danach: {CROPS.find((c) => c.key === l.nextCrop)!.name}</small>}
+                </>
+              ) : <small className="hint">Keine Kultur geplant.</small>}
+              <div className="card-actions">
+                <select value={pick} onChange={(e) => setCrops({ ...crops, [l.id]: e.target.value as OwnCrop })} aria-label="Kultur">
+                  {CROPS.map((c) => <option key={c.key} value={c.key}>{c.name}</option>)}
+                </select>
+                <button onClick={() => send({ kind: 'setCrop', leaseId: l.id, crop: pick })} data-testid="set-crop">{def ? 'Als Folgekultur' : 'Anbauen'}</button>
+              </div>
+              <small className="hint">Erwartung {pick === 'mais' || pick === 'rueben' || pick === 'kartoffeln' ? Math.round(m.t) : m.t.toLocaleString('de-DE', { maximumFractionDigits: 1 })} t/ha · Erlös {eur(m.revenue)}/ha · Kosten ohne Pacht/eigene Fahrten {eur(m.cost)}/ha · DB {eur(m.margin - l.rentHa)}/ha nach Pacht</small>
+              {l.history.length > 0 && <small className="hint">Ernten: {l.history.map((h) => `${h.year} ${CROPS.find((c) => c.key === h.crop)!.name} ${h.tonnes.toLocaleString('de-DE')} t (${eur(h.revenue)})`).join(' · ')}</small>}
+            </li>
+          );
+        })}
+      </ul>
+      <h2>Pachtangebote ({offers.length})</h2>
+      <ul className="cards" data-testid="lease-offers">
+        {offers.map((o) => {
+          const bid = bids[o.id] ?? o.playerBid ?? o.refRent;
+          return (
+            <li key={o.id} className="card" data-testid="lease-offer">
+              <div className="card-head">
+                <button className="link" onClick={() => game?.flyTo(o.center)}>{ha(o.areaHa)} von {farmName(o.farmId)}</button>
+                <small>Gebote bis {fmtDay(o.until)}</small>
+              </div>
+              <small className="hint">{o.reason} · {o.fields.length} {o.fields.length === 1 ? 'Feld' : 'Felder'} · Ackerzahl {o.soil}{o.irrigated ? ' · beregnet' : ''} · {o.years} Jahre · ortsüblich {eur(o.refRent)}/ha</small>
+              <div className="card-actions">
+                <input type="number" min={100} max={2500} step={5} value={bid} onChange={(e) => setBids({ ...bids, [o.id]: Number(e.target.value) })} aria-label="Gebot €/ha" style={{ width: '6em' }} />
+                <span>€/ha</span>
+                <button onClick={() => send({ kind: 'bidLease', offerId: o.id, rentHa: bid })} data-testid="bid-lease">{o.playerBid ? 'Gebot ändern' : 'Bieten'}</button>
+                {o.playerBid ? <small className="hint">abgegeben: {eur(o.playerBid)}/ha</small> : null}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="hint">Es bieten auch Nachbarn und andere Betriebe mit (verdeckt, meist um den ortsüblichen Preis). Eigene Arbeitsgänge (Stoppel, Grubbern, Häckseln) erscheinen als Eigenaufträge im Reiter Aufträge; Saat, Pflanzenschutz, Drusch und Roden werden eingekauft. Ertrag nach Boden, Fruchtfolge, Termintreue und Sommerregen (ohne Beregnung).</p>
+      {fb.msg && <p className="feedback">{fb.msg}</p>}
     </>
   );
 }

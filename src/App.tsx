@@ -4,7 +4,7 @@ import { formatGameTime } from './game/clock';
 import { runSelftest } from './game/selftest';
 import { forwardLogsToHost, platformName, selftestConfig } from './platform';
 import type { Speed } from './sim/protocol';
-import { BusinessTab, CompetitionTab, SitesTab, FinanceTab, FleetTab, MarketTab, NewsTab, OrdersTab, SavePanel, StaffTab, VehicleMenu } from './ui/Panels';
+import { BusinessTab, CompetitionTab, FarmingTab, SitesTab, FinanceTab, FleetTab, MarketTab, NewsTab, OrdersTab, SavePanel, StaffTab, VehicleMenu } from './ui/Panels';
 import { AUTOSAVE } from './game/savegame';
 import { PlanningBoard } from './ui/Board';
 
@@ -13,6 +13,7 @@ const TABS = [
   { id: 'auftraege', label: 'Aufträge' },
   { id: 'fuhrpark', label: 'Fuhrpark' },
   { id: 'standorte', label: 'Standorte' },
+  { id: 'ackerbau', label: 'Ackerbau' },
   { id: 'personal', label: 'Personal' },
   { id: 'finanzen', label: 'Finanzen' },
   { id: 'markt', label: 'Markt' },
@@ -172,6 +173,7 @@ export function App() {
               <section hidden={tab !== 'betrieb'}><BusinessTab status={status} game={game} /></section>
               <section hidden={tab !== 'auftraege'}><OrdersTab status={status} game={game} /></section>
               <section hidden={tab !== 'standorte'}><SitesTab status={status} game={game} /></section>
+              <section hidden={tab !== 'ackerbau'}><FarmingTab status={status} game={game} /></section>
               <section hidden={tab !== 'fuhrpark'}><FleetTab status={status} game={game} /></section>
               <section hidden={tab !== 'personal'}><StaffTab status={status} game={game} /></section>
               <section hidden={tab !== 'finanzen'}><FinanceTab status={status} game={game} /></section>

@@ -92,7 +92,9 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
   (`Farm.orderCount`, `isLoyal`), Preiskampf, Ruf (`Business.reputation`, `marketDaily`), Reiter Wettbewerb.
 - Standorte fertig: `src/data/sites.ts` (Gebäude, Angebote), `Company.sites`, `Machine.siteId`, Bau/Kauf/Verkauf in
   `business.ts` (`sitesDaily`), Überführung (`transfer`), `homeOf(v)` in `engine.ts`, Reiter Standorte.
-- Als Nächstes: Pacht und eigener Ackerbau, dann Biogas (docs/plan.md).
+- Pacht und eigener Ackerbau fertig: `src/sim/farming.ts` (Kulturen, Boden, Fruchtfolge), Pachtangebote/Gebote/
+  `askLand`/`setCrop`/`farmingDaily`/Ernte in `business.ts`, Eigenaufträge (`Order.ownLeaseId`, farmId −1), Reiter Ackerbau.
+- Als Nächstes: Biogasanlage (docs/plan.md).
 
 ## CI (GitHub Actions)
 

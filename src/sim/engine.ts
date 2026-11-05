@@ -337,6 +337,7 @@ export class Simulation {
     this.business = new Business(opts.seed, this.company, this.farms, this.fields);
     this.weather = new Weather(opts.seed);
     this.business.nodeLonLat = (node) => unproject(this.graph, this.graph.x[node], this.graph.y[node]);
+    this.business.rainOfDay = (day) => this.weather.day(day).rain;
     this.ensureSites();
     // Abgestellt am Hof: Route aus einem Punkt, damit jedes Fahrzeug eine Position hat
     for (const v of this.vehicles) {
@@ -1391,6 +1392,12 @@ export class Simulation {
         return b.buyParts(cmd.amount, t);
       case 'build':
         return b.build(cmd.siteId, cmd.building, t);
+      case 'bidLease':
+        return b.bidLease(cmd.offerId, cmd.rentHa);
+      case 'askLand':
+        return b.askLand(cmd.farmId, t);
+      case 'setCrop':
+        return b.setCrop(cmd.leaseId, cmd.crop, t);
       case 'buySite': {
         const o = SITE_OFFERS.find((x) => x.key === cmd.offerKey);
         if (!o) return 'Angebot unbekannt';

@@ -25,6 +25,13 @@ declare const self: DedicatedWorkerGlobalScope;
 
 let sim: Simulation | null = null;
 let graph: RoadGraph | null = null;
+
+/** Feldmitte als Länge/Breite (für die Karte) */
+function fieldCenter(i: number): [number, number] {
+  const f = sim?.fields;
+  if (!f || !graph || i === undefined) return [0, 0];
+  return unproject(graph, f.cx[i], f.cy[i]);
+}
 let speed: Speed = 0;
 let anchorTime = 0; // performance.now() beim letzten Geschwindigkeitswechsel
 let anchorSteps = 0; // Schrittzahl bei anchorTime
@@ -130,6 +137,10 @@ function sendBusiness(force = false) {
       reputation: b.reputation, won: b.won, lost: b.lost,
       competitors: structuredClone(b.competitors),
       loyalFarms: (sim.farms?.farms ?? []).filter((f) => b.isLoyal(f.id)).map((f) => f.id),
+    },
+    farming: {
+      offers: b.leaseOffers.map(({ competitorBid: _c, ...o }) => ({ ...structuredClone(o), center: fieldCenter(o.fields[0]) })),
+      leases: b.leases.map((l) => ({ ...structuredClone(l), center: fieldCenter(l.fields[0]) })),
     },
     weather: (() => {
       const day = Math.floor(sim!.time / 1440);

@@ -657,7 +657,7 @@ Schritte:
 
 ## Weitere Schichten: Standorte, Pacht, Ackerbau, Biogas (ab 5. Nov. 2026)
 
-Schritte: 1. Standorte und Gebäude (umgesetzt), 2. Pacht und eigener Ackerbau, 3. Biogasanlage.
+Schritte: 1. Standorte und Gebäude (umgesetzt), 2. Pacht und eigener Ackerbau (umgesetzt), 3. Biogasanlage.
 
 ### Schritt 1: Standorte und Gebäude (Annahmen)
 
@@ -689,3 +689,31 @@ Schritte: 1. Standorte und Gebäude (umgesetzt), 2. Pacht und eigener Ackerbau, 
 - **Später:** Stellplatzgrenzen, Disponent im Büro (ST-08), Übernahme ganzer Lohnunternehmen
   (ST-02), Lager für Dünger und Saatgut, Gülle- und Gärrestlager.
 
+### Schritt 2: Pacht und eigener Ackerbau (Annahmen)
+
+- **Pachtangebote (PB-01 bis PB-03):** im Mittel zwei im Monat (Betriebsaufgabe,
+  Generationswechsel), 1–3 Ackerfelder bis 45 ha, Laufzeit 9 oder 12 Jahre, 21 Tage Gebotsfrist.
+  Bekannte Betriebe mit mindestens 55 % Zufriedenheit kann man einmal im Jahr selbst fragen
+  (Kartenfenster „Land anfragen“).
+  - Ortsüblicher Preis: 620 €/ha bei Ackerzahl 35, je Punkt ±12 €, beregnet +140 €
+    (Niedersachsen: 643 € im Bestand, 755 € bei Neupacht).
+  - Nachbarn und andere Betriebe bieten verdeckt 95–120 % davon. Wer mehr bietet, bekommt den
+    Zuschlag; die Felder gehören dann zum eigenen Betrieb (Karte blau).
+  - Pacht und Beregnung (140 €/ha) sind am 1. Oktober fällig. Nach Pachtende gehen die Felder
+    nach der letzten Ernte zurück.
+- **Boden:** Ackerzahl je Feld 25–50 (Uelzener Sand), Beregnung bei 60 % der Felder (beides fest
+  aus dem Feld-Index).
+- **Kulturen (`src/sim/farming.ts`):** Winterweizen 7,5 t × 215 €, Winterraps 3,8 t × 450 €,
+  Silomais 42 t × 40 €, Zuckerrüben 80 t × 45 € (Nordzucker Uelzen), Kartoffeln 45 t × 140 €.
+  - Arbeitsgänge mit Zeitfenster: Stoppel, Grubbern und Häckseln fährt der eigene Fuhrpark als
+    Eigenauftrag (Reiter Aufträge, ohne Rechnung).
+  - Saat, Düngung/Pflanzenschutz, Drusch und Roden werden zum Fenster-Beginn als Fremdleistung
+    inkl. Betriebsmittel gebucht (KTBL-Größenordnung).
+- **Ertrag (PB-05, PF-01):** Basis × Bodenfaktor (±1,2 % je Ackerzahlpunkt) × Fruchtfolge
+  (Selbstfolge −15 %, Raps/Rüben/Kartoffeln −25 %) × Trockenheit × Termintreue.
+  - Trockenheit gilt nur ohne Beregnung: Sommerregen April–August gegen 300 mm.
+  - Termintreue: verpasster Pflicht-Arbeitsgang −10 %, späte Ernte −2 % je Tag,
+    Stoppelbearbeitung +3 %.
+  - Verkauf zum Marktpreis ±10 % (Buchung „Ernte“, zählt als Umsatz).
+- **Später:** Lagerung und Vermarktung (Vorkontrakte), eigener Mähdrescher und Roder,
+  Düngebedarf, Flächenkauf, Silomais in die eigene Biogasanlage.

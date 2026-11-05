@@ -310,6 +310,15 @@ export class GameController {
           })),
         });
       }
+      // eigene Pachtflächen auf der Karte (feature-state own)
+      const own = new Set(st.farming.leases.flatMap((l) => l.fields));
+      const ownKey = [...own].join(',');
+      if (ownKey !== this.ownKey && this.map?.getSource('fields')) {
+        this.ownKey = ownKey;
+        for (const fi of this.ownFields) if (!own.has(fi)) this.map.setFeatureState({ source: 'fields', sourceLayer: 'fields', id: fi + 1 }, { own: false });
+        for (const fi of own) this.map.setFeatureState({ source: 'fields', sourceLayer: 'fields', id: fi + 1 }, { own: true });
+        this.ownFields = own;
+      }
       // Konkurrenten auf der Karte aktualisieren (nur bei Änderung)
       const compKey = st.market.competitors.map((c) => `${c.id}:${c.warUntil > st.time ? 1 : 0}`).join(',');
       if (compKey !== this.competitorKey && this.map?.getSource('competitors')) {
@@ -403,7 +412,7 @@ export class GameController {
   fieldInfo(i: number): { id: string; ha: number; kind: string; source: string; crop: string; farm: string } | null {
     const f = this.fields;
     if (!f || i < 0 || i >= f.count) return null;
-    const farm = this.farms[this.fieldFarm[i]];
+    const farm = this.ownFields.has(i) ? { name: 'Eigene Pachtfläche' } : this.farms[this.fieldFarm[i]];
     return {
       id: fieldId(f, i),
       ha: Math.round(f.areaHa[i] * 100) / 100,
@@ -417,6 +426,8 @@ export class GameController {
   /** Spielstand speichern (Name; Standard: Autosave) */
   private competitorKey = '';
   private siteKey = '';
+  private ownKey = '';
+  private ownFields = new Set<number>();
 
   /** Spielzeit des zuletzt gespeicherten Stands (Selbsttest) */
   lastSavedTime = -1;
@@ -514,6 +525,11 @@ export class GameController {
     this.emit({ testVehiclesVisible: show });
   }
 
+  /** Karte auf einen Punkt ausrichten */
+  flyTo(lonLat: [number, number]) {
+    if (this.map) this.map.flyTo({ center: lonLat, zoom: Math.max(this.map.getZoom(), 14), duration: 800 });
+  }
+
   /** Karte auf einen Betrieb ausrichten */
   flyToFarm(id: number) {
     const f = this.farms[id];
@@ -553,7 +569,7 @@ export class GameController {
       `<small>${crops}</small><br>` +
       `<small>${f.known ? `Im Adressbuch · Zufriedenheit ${f.satisfaction} % · bevorzugt ${f.contact === 'anruf' ? 'Anrufe' : 'Nachrichten'}` : 'Noch nicht besucht – erst nach einem Besuch im Adressbuch'}</small>` +
       (this.status.business?.rivalFarms.includes(f.id) ? `<small class="warn">Arbeitet zurzeit mit einem anderen Lohnunternehmen</small>` : this.status.business?.trialFarms.includes(f.id) ? `<small>Probephase: nur kleine Aufträge, bis das Vertrauen wieder da ist</small>` : '') +
-      `<div class="popup-actions"><button data-visit="${f.id}">${f.known ? 'Erneut besuchen' : 'Besuchen'}</button><span class="popup-msg"></span></div>`
+      `<div class="popup-actions"><button data-visit="${f.id}">${f.known ? 'Erneut besuchen' : 'Besuchen'}</button>${f.known ? `<button data-askland="${f.id}">Land anfragen</button>` : ''}<span class="popup-msg"></span></div>`
     );
   }
 
@@ -576,6 +592,7 @@ export class GameController {
         'fill-color': [
           'case',
           ['boolean', ['feature-state', 'active'], false], '#e8a33d',
+          ['boolean', ['feature-state', 'own'], false], '#9cc7e8',
           ['==', ['get', 'k'], 2], '#cfe3b0',
           '#efe2c4',
         ],
@@ -589,7 +606,7 @@ export class GameController {
       'source-layer': 'fields',
       minzoom: 12,
       paint: {
-        'line-color': ['case', ['boolean', ['feature-state', 'active'], false], '#b86e12', '#b7a47a'],
+        'line-color': ['case', ['boolean', ['feature-state', 'active'], false], '#b86e12', ['boolean', ['feature-state', 'own'], false], '#2f6f9f', '#b7a47a'],
         'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.5, 16, 1.5],
       },
     }, before);
@@ -730,6 +747,13 @@ export class GameController {
         const btn = ev.currentTarget as HTMLButtonElement;
         btn.disabled = true;
         const msg = await this.command({ kind: 'visit', farmId: farm.id });
+        const out = el.querySelector('.popup-msg');
+        if (out) out.textContent = msg;
+      });
+      el.querySelector<HTMLButtonElement>('[data-askland]')?.addEventListener('click', async (ev) => {
+        const btn = ev.currentTarget as HTMLButtonElement;
+        btn.disabled = true;
+        const msg = await this.command({ kind: 'askLand', farmId: farm.id });
         const out = el.querySelector('.popup-msg');
         if (out) out.textContent = msg;
       });

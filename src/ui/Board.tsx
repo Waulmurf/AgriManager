@@ -175,7 +175,7 @@ export function PlanningBoard({ status, game, onClose }: { status: GameStatus; g
                 const e = b.estimates[o.id];
                 return (
                   <li key={o.id} draggable onDragStart={drag({ kind: 'order', orderId: o.id })} className={e && e.finishAt > o.latest ? 'warn' : ''} data-testid="board-order">
-                    <strong>{game?.farmById(o.farmId)?.name ?? `Betrieb ${o.farmId}`}</strong>
+                    <strong>{o.farmId < 0 ? 'Eigene Fläche' : game?.farmById(o.farmId)?.name ?? `Betrieb ${o.farmId}`}</strong>
                     <small>{SERVICE_NAMES[o.service]} {o.areaHa.toLocaleString('de-DE', { maximumFractionDigits: 1 })} ha{o.gabe ? ` (${Math.round(o.areaHa * o.gabe)} m³)` : ''} · bis {fmtDay(o.latest)}{e ? ` · ca. ${(e.minutes / 60).toLocaleString('de-DE', { maximumFractionDigits: 1 })} h` : ''}</small>
                   </li>
                 );

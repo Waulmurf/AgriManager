@@ -242,3 +242,12 @@ test('Planungsboard: Auftrag auf Fahrer und Tag ziehen', async ({ page }) => {
   await page.getByTestId('board-bar').first().click();
   await expect(page.getByTestId('board-detail')).toContainText('geplant');
 });
+
+test('Ackerbau: Reiter zeigt eigene Flächen und Pachtangebote', async ({ page }) => {
+  await page.goto('./?neu');
+  await waitForGame(page);
+  await page.getByTestId('speed-0').click();
+  await page.getByTestId('tab-ackerbau').click();
+  await expect(page.getByRole('heading', { name: 'Eigene Flächen' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /Pachtangebote/ })).toBeVisible();
+});

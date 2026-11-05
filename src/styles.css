@@ -78,6 +78,9 @@ html, body, #root { margin: 0; height: 100%; }
 .badge { padding: 1px 6px; border-radius: 8px; background: #eee; }
 .badge.run { background: #ffe9a8; }
 .badge.done { background: #cfe8c7; }
+.badge.warn { background: #f6c9c0; }
+.steps { list-style: none; padding: 0; margin: 4px 0; }
+.steps li { margin: 2px 0; }
 .warn { color: var(--warn); font-size: 12px; }
 .feedback { color: #1f5a1a; font-size: 12px; }
 .unit-status { color: #7a5c00; }
