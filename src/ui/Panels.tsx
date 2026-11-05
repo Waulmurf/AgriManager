@@ -342,9 +342,10 @@ function OrderItem({ o, game, status }: { o: Order; game: GameController | null;
         {o.dieselL > 0 ? ` · Diesel ${o.dieselL.toLocaleString('de-DE')} l (${eur(o.dieselCost)})` : ''}
       </small>
       {o.status !== 'fertig' && <EstimateLine e={status.business?.estimates[o.id]} latest={o.latest} />}
-      {o.status === 'offen' && isHarvest(o.service) && <ChopStart o={o} game={game} status={status} show={fb.show} />}
+      {o.status === 'läuft' && isHarvest(o.service) && <small className="hint">Weitere Maschine einsetzen (teilt die Felder bzw. das aktuelle Feld):</small>}
+      {(o.status === 'offen' || o.status === 'läuft') && isHarvest(o.service) && <ChopStart o={o} game={game} status={status} show={fb.show} />}
       {o.status === 'offen' && o.service === 'transport' && <TruckStart o={o} game={game} status={status} show={fb.show} />}
-      {o.status === 'offen' && !isHarvest(o.service) && o.service !== 'transport' && (
+      {(o.status === 'offen' || (o.status === 'läuft' && !o.gabe)) && !isHarvest(o.service) && o.service !== 'transport' && (
         <div className="card-actions">
           <select value={tractor} onChange={(e) => setTractor(Number(e.target.value))} aria-label="Schlepper">
             {tractors.map((m) => <option key={m.id} value={m.id}>{machineName(m)}</option>)}

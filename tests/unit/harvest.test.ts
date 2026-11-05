@@ -96,6 +96,55 @@ describe('Mähdrusch', () => {
   });
 });
 
+describe('Mehrere Maschinen auf einem Feld', () => {
+  it('zweiter Drescher steigt mitten im Feld ein: Feld wird geteilt, schneller fertig, Menge stimmt', () => {
+    const one = harvestOrder('drusch', Crop.Getreide, 8, 1, 'haecksler');
+    const two = harvestOrder('drusch', Crop.Getreide, 8, 1, 'haecksler');
+    const spec = { type: 'maehdrescher' as const, model: 'Lexion 6800', power: 435, width: 9.3, haPerHour: 3, workKmh: 6, dieselLHa: 18, payloadT: 9 };
+    const run = (x: ReturnType<typeof harvestOrder>, second: boolean) => {
+      const { s, o, chef } = x;
+      const m1 = addMachine(s, spec);
+      const m2 = addMachine(s, { ...spec, model: 'Lexion 2' });
+      const helper = { ...structuredClone(chef), id: 7, name: 'Zweiter Fahrer', isPlayer: false, kind: 'fest' as const, absences: [] };
+      s.company.drivers.push(helper);
+      runUntil(s, () => !s.weather.threshBlocked(s.time) && s.time % 1440 > 200 && s.time % 1440 < 300, 10 * 1440);
+      expect(s.command({ kind: 'startJob', orderId: o.id, tractorId: m1.id, implementId: m1.id })).toMatch(/gestartet/);
+      if (second) {
+        runUntil(s, () => s.playerUnits().some((u) => u.status.includes('drischt')), 600);
+        s.run(5);
+        expect(s.command({ kind: 'startJob', orderId: o.id, tractorId: m2.id, implementId: m2.id, driverId: 7 })).toMatch(/gestartet/);
+      }
+      const t0 = s.time;
+      runUntil(s, () => o.status === 'fertig', 6 * 1440);
+      expect(o.status).toBe('fertig');
+      expect(o.doneT!).toBeGreaterThan(o.areaHa * 7.5 * 0.8);
+      expect(o.doneT!).toBeLessThan(o.areaHa * 7.5 * 1.2);
+      return s.time - t0;
+    };
+    const solo = run(one, false);
+    const duo = run(two, true);
+    expect(duo).toBeLessThan(solo);
+  });
+
+  it('zwei Rübenroder vor Arbeitsbeginn: jeder rodet die Hälfte', () => {
+    const { s, o, chef } = harvestOrder('roden', Crop.Zuckerrueben, 10, 5);
+    const spec = { type: 'ruebenroder' as const, brand: 'Grimme', model: 'Rexor', power: 627, width: 2.7, haPerHour: 1.6, workKmh: 6, dieselLHa: 32, payloadT: 30 };
+    const r1 = addMachine(s, spec);
+    const r2 = addMachine(s, { ...spec, model: 'Rexor 2' });
+    s.company.drivers.push({ ...structuredClone(chef), id: 8, name: 'Roder Zwei', isPlayer: false, kind: 'fest' as const, absences: [] });
+    runUntil(s, () => !s.weather.fieldBlocked(s.time) && s.time % 1440 > 10 && s.time % 1440 < 200, 15 * 1440);
+    expect(s.command({ kind: 'startJob', orderId: o.id, tractorId: r1.id, implementId: r1.id })).toMatch(/gestartet/);
+    expect(s.command({ kind: 'startJob', orderId: o.id, tractorId: r2.id, implementId: r2.id, driverId: 8 })).toMatch(/gestartet/);
+    runUntil(s, () => o.status === 'fertig', 10 * 1440);
+    expect(o.status).toBe('fertig');
+    expect(o.doneT!).toBeGreaterThan(o.areaHa * 80 * 0.85);
+    expect(o.doneT!).toBeLessThan(o.areaHa * 80 * 1.15);
+    // dritter Roder findet nichts mehr
+    const r3 = addMachine(s, { ...spec, model: 'Rexor 3' });
+    expect(s.command({ kind: 'startJob', orderId: o.id, tractorId: r3.id, implementId: r3.id })).toMatch(/nicht startbar|nichts mehr frei/);
+  });
+});
+
 describe('Rübenroden', () => {
   it('Roder bunkert und legt eine Feldrandmiete an, ohne Abfahrer', () => {
     const { s, o } = harvestOrder('roden', Crop.Zuckerrueben, 10, 5);

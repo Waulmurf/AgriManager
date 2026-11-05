@@ -233,6 +233,8 @@ export interface Order {
   biogasPriceT?: number;
   /** Gülle beim Vertragspartner selbst abholen (Eigenauftrag, Menge in tPerHa × areaHa m³) */
   slurrySupply?: boolean;
+  /** mehrere Maschinen auf einem Feld: erledigter Anteil je Feld (0…1) */
+  shareDone?: Record<number, number>;
   earliest: number;
   latest: number;
   status: OrderStatus;
@@ -2304,14 +2306,27 @@ export class Business {
   }
 
   orderStarted(o: Order, tractorId: number, implementId: number, time: number, driver = 'Chef') {
+    const joined = o.status === 'läuft';
     o.status = 'läuft';
-    o.tractorId = tractorId;
-    o.implementId = implementId;
-    o.startedAt = time;
+    o.tractorId ??= tractorId;
+    o.implementId ??= implementId;
+    if (!joined || o.startedAt === undefined) o.startedAt = time;
+    if (joined) { this.emit(time, 'auftrag', `Weitere Maschine im Auftrag ${this.farmName(o.farmId)} (Fahrer: ${driver}).`, o.farmId); return; }
     this.emit(time, 'auftrag', `Auftrag ${this.farmName(o.farmId)} gestartet (Fahrer: ${driver}).`, o.farmId);
   }
 
+  /** Anteil eines Feldes erledigt (mehrere Maschinen auf einem Feld); ganzes Feld = fieldDone */
+  fieldPartDone(o: Order, field: number, part: number, time: number) {
+    if (o.doneFields.includes(field)) return;
+    if (part >= 0.999) { this.fieldDone(o, field, time); return; }
+    const sd = (o.shareDone ??= {});
+    sd[field] = (sd[field] ?? 0) + part;
+    if (sd[field] >= 0.995) { delete sd[field]; this.fieldDone(o, field, time); }
+    else this.version++;
+  }
+
   fieldDone(o: Order, field: number, time: number) {
+    if (o.doneFields.includes(field)) return;
     o.doneFields.push(field);
     this.version++;
     if (o.doneFields.length === o.fields.length) {

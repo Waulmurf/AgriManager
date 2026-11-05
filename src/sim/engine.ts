@@ -198,6 +198,11 @@ type PlayerTask =
       queue: number[];
       current: number;
       phase: 'prep' | 'to' | 'setup' | 'work' | 'back' | 'unhitch' | 'toFill' | 'fill' | 'waitFeed' | 'feed';
+      /** mehrere Maschinen auf einem Feld: Anteil der Arbeitsstrecke [von, bis] des aktuellen Feldes */
+      share?: [number, number];
+      /** Erntemaschine hört an dieser Routenposition auf (zweite Maschine übernimmt den Rest) */
+      stopAt?: number;
+      stopped?: boolean;
       width: number;
       haPerHour: number;
       workKmh: number;
@@ -368,6 +373,66 @@ export class Simulation {
   private weatherHold(v: Vehicle): boolean {
     const t = v.task;
     return t?.kind === 'job' && (t.phase === 'setup' || t.phase === 'work') && this.weatherFor(t.orderId) !== null;
+  }
+
+  /** Aktive Feldmaschinen eines Auftrags */
+  private orderUnits(orderId: number): Vehicle[] {
+    return this.vehicles.filter((v) => v.owner === 'player' && v.task?.kind === 'job' && v.task.orderId === orderId && v.task.phase !== 'back' && v.task.phase !== 'unhitch');
+  }
+
+  /**
+   * Weitere Maschine in einem laufenden Auftrag: übernimmt die Hälfte der noch nicht begonnenen
+   * Felder der anderen, sonst die Hälfte des Feldes, an dem gerade gearbeitet wird (Erntemaschinen
+   * auch mitten im Feld, andere nur vor Arbeitsbeginn). check = nur prüfen, nichts ändern.
+   */
+  private joinPlan(o: Order, check: boolean): { queue: number[]; share?: [number, number] } | null {
+    const units = this.orderUnits(o.id);
+    if (!units.length) return { queue: o.fields.filter((f) => !o.doneFields.includes(f)) };
+    // 1. noch nicht begonnene Felder (hinter dem aktuellen Feld) aufteilen
+    const pending: { v: Vehicle; idx: number }[] = [];
+    for (const v of units) {
+      const t = v.task as Extract<PlayerTask, { kind: 'job' }>;
+      for (let i = t.current + 1; i < t.queue.length; i++) if (!o.doneFields.includes(t.queue[i])) pending.push({ v, idx: i });
+    }
+    if (pending.length) {
+      const take = pending.slice(Math.floor(pending.length / 2));
+      if (check) return { queue: take.map((p) => (p.v.task as Extract<PlayerTask, { kind: 'job' }>).queue[p.idx]) };
+      const fields = take.map((p) => (p.v.task as Extract<PlayerTask, { kind: 'job' }>).queue[p.idx]);
+      for (const v of units) {
+        const t = v.task as Extract<PlayerTask, { kind: 'job' }>;
+        t.queue = t.queue.filter((f, i) => i <= t.current || !fields.includes(f));
+      }
+      return { queue: fields.reverse() };
+    }
+    // 2. aktuelles Feld einer anderen Maschine teilen
+    for (const v of units) {
+      const t = v.task as Extract<PlayerTask, { kind: 'job' }>;
+      if (t.current >= t.queue.length || t.stopAt !== undefined) continue;
+      const fi = t.queue[t.current];
+      const [a, b0] = t.share ?? [0, 1];
+      if (t.phase === 'prep' || t.phase === 'to' || t.phase === 'setup') {
+        if (b0 - a < 0.2) continue;
+        const mid = a + (b0 - a) / 2;
+        if (!check) t.share = [a, mid];
+        return { queue: [fi], share: [mid, b0] };
+      }
+      if (t.phase === 'work' && t.chop && v.route?.kind === 'field') {
+        const r = v.route;
+        const n = r.xs.length;
+        const w0 = r.cum[1], w1 = r.cum[n - 2];
+        if (w1 - v.dist < 150) continue; // fast fertig
+        const stop = v.dist + (w1 - Math.max(v.dist, w0)) / 2;
+        const frac = a + (b0 - a) * ((stop - w0) / Math.max(1, w1 - w0));
+        if (!check) { t.stopAt = stop; t.share = [a, frac]; }
+        return { queue: [fi], share: [frac, b0] };
+      }
+    }
+    return null;
+  }
+
+  /** nächstes Feld der Warteschlange, das noch nicht erledigt ist */
+  private skipDone(t: Extract<PlayerTask, { kind: 'job' }>, o: Order | undefined) {
+    while (o && t.current < t.queue.length && o.doneFields.includes(t.queue[t.current])) t.current++;
   }
 
   /** Wettersperre für einen Auftrag: Mähdrusch braucht trockenes Korn, sonst zählt der Boden */
@@ -1156,7 +1221,12 @@ export class Simulation {
     const need = MACHINE_SKILL.schlepper!;
     if ((driver.skills[need.skill] ?? 0) < need.min) return `${this.driverName(driver.id)} ist nicht als Traktorfahrer qualifiziert`;
     const o = b.orders.find((x) => x.id === cmd.orderId);
-    if (!o || o.status !== 'offen') return 'Auftrag nicht startbar';
+    if (!o || (o.status !== 'offen' && o.status !== 'läuft')) return 'Auftrag nicht startbar';
+    if (o.status === 'läuft') {
+      // weitere Maschine im laufenden Auftrag (z. B. zweiter Drescher oder Roder)
+      if (o.gabe) return 'Gülle: zweites Fass bitte als Zubringer einsetzen';
+      if (!this.joinPlan(o, true)) return 'Im Auftrag ist nichts mehr frei für eine weitere Maschine';
+    }
     const sk = SERVICE_SKILL[o.service];
     if ((driver.skills[sk] ?? 0) < 1) return `${this.driverName(driver.id)} ist für ${SERVICE_NAMES[o.service]} nicht qualifiziert`;
     const chopping = isHarvest(o.service);
@@ -1280,13 +1350,16 @@ export class Simulation {
       return `Transport gestartet (${this.driverName(driverId)})`;
     }
     const skill = this.company.drivers.find((d) => d.id === driverId)?.skills[SERVICE_SKILL[o.service]] ?? 1;
-    const queue = o.fields.filter((f) => !o.doneFields.includes(f));
+    const plan = o.status === 'läuft' ? this.joinPlan(o, false) : null;
+    if (o.status === 'läuft' && !plan) return 'Im Auftrag ist nichts mehr frei für eine weitere Maschine';
+    const queue = plan ? plan.queue : o.fields.filter((f) => !o.doneFields.includes(f));
     unit.task = {
       kind: 'job', driverId, implementId: impl.id, skill, orderId: o.id, queue, current: 0, phase: 'prep',
       width: impl.width ?? 3,
       haPerHour: (impl.haPerHour ?? 1.5) * skillSpeed(skill),
       workKmh: (impl.workKmh ?? 10) * skillSpeed(skill),
       dieselLHa: (impl.dieselLHa ?? 9) * skillDiesel(skill),
+      share: plan?.share,
     };
     if (isHarvest(o.service)) {
       const farm = this.farms?.farms[o.farmId];
@@ -1575,7 +1648,7 @@ export class Simulation {
         v.restUntil = 0;
         if (task.kind === 'job') {
           const o = b.orders.find((x) => x.id === task.orderId);
-          if (o && o.status === 'läuft') b.orderInterrupted(o, t);
+          if (o && o.status === 'läuft' && this.orderUnits(o.id).filter((x) => x !== v).length === 0) b.orderInterrupted(o, t);
           if (task.phase === 'prep') { v.task = undefined; v.state = VehicleState.Waiting; b.version++; return 'Abgebrochen, Schlepper bleibt am Hof'; }
           if (task.phase === 'back' || task.phase === 'unhitch') return 'Fahrzeug ist schon auf dem Rückweg';
           task.phase = 'back';
@@ -2077,14 +2150,17 @@ export class Simulation {
       this.chopFieldDone(v, t, o);
     } else if (t.phase === 'work') {
       const fi = t.queue[t.current];
+      const part = t.share ? t.share[1] - t.share[0] : 1;
       if (o) {
-        b.fieldDone(o, fi, this.time);
-        b.chargeDiesel(this.fields!.areaHa[fi] * t.dieselLHa, o, this.time);
+        b.fieldPartDone(o, fi, part, this.time);
+        b.chargeDiesel(this.fields!.areaHa[fi] * part * t.dieselLHa, o, this.time);
       }
-      this.addMachineHours(v, t);
-      b.useWearParts(this.fields!.areaHa[fi] * WEAR_GRUBBER_EUR_HA);
-      b.addExperience(t.driverId, 'boden', Math.round((this.fields!.areaHa[fi] / t.haPerHour) * 60), this.time);
+      this.addMachineHours(v, t, part);
+      b.useWearParts(this.fields!.areaHa[fi] * part * WEAR_GRUBBER_EUR_HA);
+      b.addExperience(t.driverId, o ? SERVICE_SKILL[o.service] : 'boden', Math.round((this.fields!.areaHa[fi] * part / t.haPerHour) * 60), this.time);
+      t.share = undefined;
       t.current++;
+      this.skipDone(t, o);
       if (t.current < t.queue.length) {
         t.phase = 'to';
         this.driveTo(v, this.fields!.access[t.queue[t.current]]);
@@ -2170,7 +2246,8 @@ export class Simulation {
         v.fieldNode = fi;
         // feuchter Boden: etwas langsamer (AK-07)
         const wf = this.weather.speedFactor(this.time);
-        this.startRoute(v, this.buildRealFieldRoute(v.node, fi, t.width, t.haPerHour * wf, t.workKmh * wf));
+        const full = this.buildRealFieldRoute(v.node, fi, t.width, t.haPerHour * wf, t.workKmh * wf);
+        this.startRoute(v, t.share ? this.sliceFieldRoute(full, t.share[0], t.share[1]) : full);
         t.phase = 'work';
       } else if (t.phase === 'unhitch') {
         v.task = undefined;
@@ -2210,9 +2287,9 @@ export class Simulation {
   }
 
   /** Betriebsstunden für Schlepper und Gerät nach erledigtem Feld */
-  private addMachineHours(v: Vehicle, t: Extract<PlayerTask, { kind: 'job' }>) {
+  private addMachineHours(v: Vehicle, t: Extract<PlayerTask, { kind: 'job' }>, part = 1) {
     const fi = t.queue[t.current];
-    const hours = this.fields!.areaHa[fi] / t.haPerHour;
+    const hours = (this.fields!.areaHa[fi] * part) / t.haPerHour;
     const o = this.business.orders.find((x) => x.id === t.orderId);
     if (o) o.tractorHours = Math.round((o.tractorHours + hours) * 100) / 100;
     for (const id of [v.machineId, t.implementId]) {
@@ -2290,8 +2367,9 @@ export class Simulation {
     const before = v.dist;
     const budget = this.advance(v, STEP_SECONDS);
     const fi = t.queue[t.current];
-    const area = this.fields!.areaHa[fi];
+    const area = this.fields!.areaHa[fi] * (t.share ? t.share[1] - t.share[0] : 1);
     const r = v.route!;
+    if (t.stopAt !== undefined && v.dist >= t.stopAt) { t.stopped = true; this.playerArrive(v); return; }
     const moved = Math.max(0, v.dist - before);
     const ha = r.total > 0 ? (moved / r.total) * area : 0;
     c.fieldHa += ha;
@@ -2382,7 +2460,8 @@ export class Simulation {
     const b = this.business;
     const c = t.chop!;
     const fi = t.queue[t.current];
-    const area = this.fields!.areaHa[fi];
+    const part = t.share ? t.share[1] - t.share[0] : 1;
+    const area = this.fields!.areaHa[fi] * part;
     // Rest (Rundung der Strecke) dem Wagen bzw. dem Bunker zuschlagen
     const rest = Math.max(0, area - c.fieldHa) * c.yieldT;
     if (c.attached) c.attached.load += rest;
@@ -2391,9 +2470,11 @@ export class Simulation {
     // letztes Feld: Bunker am Feldrand leeren (Miete bzw. Anhänger)
     if (t.current + 1 >= t.queue.length || c.miete) this.dumpBunker(v, c);
     if (o) {
-      b.fieldDone(o, fi, this.time);
+      b.fieldPartDone(o, fi, part, this.time);
       b.chargeDiesel(area * t.dieselLHa, o, this.time);
     }
+    const stopped = !!t.stopped;
+    t.share = undefined; t.stopAt = undefined; t.stopped = undefined;
     // Betriebsstunden (Häcksler ist Fahrzeug und Gerät zugleich: nur einmal zählen)
     const hours = area / t.haPerHour;
     const hm = this.company.machines.find((x) => x.id === v.machineId);
@@ -2403,14 +2484,16 @@ export class Simulation {
     // angehängten Wagen abgeben (zum Silo, wenn etwas drin ist)
     this.detachWagon(v, c);
     t.current++;
+    this.skipDone(t, o);
     if (t.current < t.queue.length) {
       t.phase = 'to';
-      this.driveTo(v, this.fields!.access[t.queue[t.current]]);
+      if (stopped) this.driveFromHere(v, this.fields!.access[t.queue[t.current]]);
+      else this.driveTo(v, this.fields!.access[t.queue[t.current]]);
       // wartende Wagen folgen zum nächsten Feld
       for (const w of this.vehicles) if (w.task?.kind === 'haul' && w.task.harvester === v.id && w.task.phase === 'wait') { w.task.phase = 'toField'; this.driveTo(w, this.fields!.access[t.queue[t.current]]); }
     } else {
       t.phase = 'back';
-      this.driveTo(v, this.homeOf(v));
+      if (stopped) this.driveFromHere(v, this.homeOf(v)); else this.driveTo(v, this.homeOf(v));
       if (c.hiredRoller && o) {
         const cost = Math.round((c.rollerMinutes / 60) * HIRED_ROLLER_EUR_H);
         b.bookExternal(this.time, `Fremdwalze am Silo (${Math.round(c.rollerMinutes / 60)} h)`, cost, o);

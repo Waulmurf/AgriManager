@@ -919,3 +919,21 @@ Nils wählt aus, was umgesetzt wird. Empfehlung für den nächsten Block: 4, 1, 
   - Spart die Anfuhrkosten und lastet Schlepper und Fass im Winter aus.
 - **Später:** Gärrest mit dem Lkw-Tankauflieger, Gärrestabgabe an Nachbarn im Tausch gegen
   Substrat, Nährstoffbilanz je Feld (Vorschlag 8).
+
+## Mehrere Maschinen auf einem Feld (5. Nov. 2026)
+
+- Ein laufender Auftrag kann weitere Maschinen bekommen, zum Beispiel einen zweiten Drescher oder
+  Roder. Bei Gülle geht das nicht (dafür gibt es den Zubringer).
+- **Verteilung (`Simulation.joinPlan`):**
+  - Zuerst übernimmt die neue Maschine die Hälfte der noch nicht begonnenen Felder, von hinten.
+  - Sonst teilt sie das aktuelle Feld. Vor Arbeitsbeginn gehen beide Maschinen je die Hälfte der
+    Bahnen.
+  - Erntemaschinen steigen auch mitten im Feld ein: Die erste hört auf halber Reststrecke auf
+    (`stopAt`), die zweite übernimmt den Rest.
+- **Abschluss:** Ein Feld gilt als fertig, wenn alle Anteile erledigt sind (`Order.shareDone`,
+  `Business.fieldPartDone`).
+- **Später:** abgestimmte Bahnen (nebeneinander statt hintereinander), gemeinsamer Abfahrer-Pool
+  für mehrere Drescher, Planung mehrerer Maschinen im Board.
+- **Weitere Ideen 20–45** (Mietpool, Präzisionstechnik, Überbreite, Bodenschonung,
+  Kundencharaktere, Ökobetriebe, PV, Firmenwert u. a.) stehen in der Unterhaltung vom 5. Nov. und
+  warten auf Auswahl.
