@@ -18,7 +18,12 @@ describe('Graph-Bau aus OSM (scripts/data/build-roadgraph.mjs)', () => {
     expect(g.edgeFlags[resi] & 1).toBe(1);
     // Einbahn oneway=-1 wurde umgedreht: Richtung n4 → n2
     expect(g.y[g.edgeU[resi]]).toBeGreaterThan(g.y[g.edgeV[resi]]);
+    // Tempolimit und innerorts (Version 2)
+    const prim = g.edgeClass.indexOf(2);
+    expect(g.edgeMaxSpeed[prim]).toBe(50);
+    expect(g.edgeFlags[prim] & 8).toBe(8);
     const track = g.edgeClass.indexOf(8);
+    expect(g.edgeMaxSpeed[track]).toBe(0);
     expect(g.edgeLen[track]).toBeGreaterThan(1500);
   });
 });

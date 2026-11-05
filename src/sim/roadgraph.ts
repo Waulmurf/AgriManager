@@ -8,7 +8,9 @@
  *   u32 U[E], u32 V[E], f32 Länge[E], u32 GeomStart[E], u32 GeomAnzahl[E],
  *   u8 Klasse[E], u8 Flags[E], u8 MaxGewicht_t[E], u8 MaxBreite_dm[E],
  *   f32 GX[G], f32 GY[G] (Zwischenpunkte der Kanten, ohne Endpunkte).
- * Flags: Bit 0 Einbahn (nur U→V), Bit 1 Brücke, Bit 2 Tunnel.
+ *   ab Version 2: u8 Tempolimit[E] (km/h, 0 = unbekannt), Füllbytes bis 4-Byte-Grenze,
+ *   danach f32 GX[G], f32 GY[G].
+ * Flags: Bit 0 Einbahn (nur U→V), Bit 1 Brücke, Bit 2 Tunnel, Bit 3 innerorts.
  */
 
 export const RoadClass = {
@@ -22,6 +24,8 @@ export const RoadClass = {
   Track: 8,
   Ferry: 9,
 } as const;
+
+export const EdgeFlag = { Oneway: 1, Bridge: 2, Tunnel: 4, Urban: 8 } as const;
 
 export interface RoadGraph {
   nodeCount: number;
@@ -40,6 +44,8 @@ export interface RoadGraph {
   edgeFlags: Uint8Array;
   edgeMaxWeight: Uint8Array;
   edgeMaxWidth: Uint8Array;
+  /** Tempolimit km/h (0 = unbekannt; bei Version 1 immer 0) */
+  edgeMaxSpeed: Uint8Array;
   geomX: Float32Array;
   geomY: Float32Array;
   /** CSR-Nachbarschaft: für Knoten n die Einträge adjStart[n] .. adjStart[n+1]-1 */
@@ -56,7 +62,7 @@ export function parseRoadGraph(buffer: ArrayBuffer): RoadGraph {
   const magic = String.fromCharCode(dv.getUint8(0), dv.getUint8(1), dv.getUint8(2), dv.getUint8(3));
   if (magic !== 'RGR1') throw new Error(`Kein Straßengraph (Kennung ${magic})`);
   const version = dv.getUint32(4, true);
-  if (version !== 1) throw new Error(`Unbekannte Graph-Version ${version}`);
+  if (version !== 1 && version !== 2) throw new Error(`Unbekannte Graph-Version ${version}`);
   const N = dv.getUint32(8, true);
   const E = dv.getUint32(12, true);
   const G = dv.getUint32(16, true);
@@ -67,6 +73,11 @@ export function parseRoadGraph(buffer: ArrayBuffer): RoadGraph {
   const x = f32(N), y = f32(N);
   const edgeU = u32(E), edgeV = u32(E), edgeLen = f32(E), edgeGeomStart = u32(E), edgeGeomCount = u32(E);
   const edgeClass = u8(E), edgeFlags = u8(E), edgeMaxWeight = u8(E), edgeMaxWidth = u8(E);
+  let edgeMaxSpeed = new Uint8Array(E);
+  if (version >= 2) {
+    edgeMaxSpeed = u8(E);
+    off += (4 - (E % 4)) % 4;
+  }
   const geomX = f32(G), geomY = f32(G);
   if (off !== buffer.byteLength) throw new Error('Straßengraph hat unerwartete Länge');
 
@@ -98,7 +109,7 @@ export function parseRoadGraph(buffer: ArrayBuffer): RoadGraph {
     nodeCount: N, edgeCount: E,
     lat0: dv.getFloat64(24, true), lon0: dv.getFloat64(32, true), radiusM: dv.getFloat64(40, true),
     x, y, edgeU, edgeV, edgeLen, edgeGeomStart, edgeGeomCount, edgeClass, edgeFlags,
-    edgeMaxWeight, edgeMaxWidth, geomX, geomY, adjStart, adjDirEdge, adjTo,
+    edgeMaxWeight, edgeMaxWidth, edgeMaxSpeed, geomX, geomY, adjStart, adjDirEdge, adjTo,
   };
 }
 

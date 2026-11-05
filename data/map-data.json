@@ -1,6 +1,6 @@
 {
   "$comment": "Version der Kartendaten. Zum Neubauen Tag erhöhen; der Workflow map-data erzeugt dann ein neues Release mit diesem Tag.",
-  "tag": "map-data-v3",
+  "tag": "map-data-v4",
   "center": {
     "name": "Groß Thondorf (29584 Himbergen)",
     "query": "Groß Thondorf, Himbergen, Niedersachsen"

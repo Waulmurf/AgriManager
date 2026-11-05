@@ -87,6 +87,25 @@ function allowed(t) {
   return cls;
 }
 
+/**
+ * Tempolimit (km/h, 0 = unbekannt) und innerorts aus maxspeed/zone:maxspeed/source:maxspeed.
+ * DE:urban = 50 innerorts, DE:rural = 100, DE:living_street/walk = 7.
+ */
+function parseMaxSpeed(t) {
+  const zone = String(t['zone:maxspeed'] || t['source:maxspeed'] || t['maxspeed:type'] || '');
+  const raw = String(t.maxspeed || '');
+  let speed = 0;
+  let urban = /urban/i.test(zone) || /urban/i.test(raw);
+  if (/^\d+/.test(raw)) speed = Number(raw.match(/^\d+/)[0]);
+  else if (/urban/i.test(raw)) speed = 50;
+  else if (/rural/i.test(raw)) speed = 100;
+  else if (/living_street|walk/i.test(raw)) speed = 7;
+  if (!speed && urban) speed = 50;
+  if (speed && speed <= 50 && !/rural/i.test(zone)) urban = true;
+  if (t.highway === 'living_street') { urban = true; speed = speed || 7; }
+  return { speed: Math.min(255, speed), urban };
+}
+
 function parseNumber(v, unit) {
   if (!v) return 0;
   const m = String(v).replace(',', '.').match(/[\d.]+/);
@@ -169,7 +188,9 @@ for (const { t, refs } of rawWays) {
   if (t.tunnel && t.tunnel !== 'no') flags |= 4;
   const maxW = Math.min(255, Math.round(parseNumber(t.maxweight || t['maxweight:hgv'])));
   const maxWidth = Math.min(255, Math.round(parseNumber(t.maxwidth || t['maxwidth:physical'], 'width') * 10));
-  ways.push({ cls, flags, maxW, maxWidth, ids, xs, ys });
+  const { speed: maxSpeed, urban } = parseMaxSpeed(t);
+  if (urban) flags |= 8;
+  ways.push({ cls, flags, maxW, maxWidth, maxSpeed, ids, xs, ys });
   for (let i = 0; i < ids.length; i++) {
     const c = nodeUse.get(ids[i]) || 0;
     // Endpunkte zählen doppelt, damit sie immer Knoten werden
@@ -207,7 +228,7 @@ for (const w of ways) {
     for (let j = start + 1; j <= i; j++) len += Math.hypot(w.xs[j] - w.xs[j - 1], w.ys[j] - w.ys[j - 1]);
     if (u !== v || len > 0) {
       edges.push({
-        u, v, len, cls: w.cls, flags: w.flags, maxW: w.maxW, maxWidth: w.maxWidth,
+        u, v, len, cls: w.cls, flags: w.flags, maxW: w.maxW, maxWidth: w.maxWidth, maxSpeed: w.maxSpeed,
         gx: w.xs.slice(start + 1, i), gy: w.ys.slice(start + 1, i),
       });
     }
@@ -283,11 +304,12 @@ for (const e of kept) {
 
 const N = nx.length, E = kept.length, G = geomCount;
 const HEADER = 64;
-const size = HEADER + N * 8 + E * (4 * 5 + 4) + G * 8;
+const PAD = (4 - (E % 4)) % 4;
+const size = HEADER + N * 8 + E * (4 * 5 + 4) + E + PAD + G * 8;
 const buf = new ArrayBuffer(size);
 const dv = new DataView(buf);
 'RGR1'.split('').forEach((c, i) => dv.setUint8(i, c.charCodeAt(0)));
-dv.setUint32(4, 1, true);
+dv.setUint32(4, 2, true); // Version 2: + Tempolimit je Kante
 dv.setUint32(8, N, true);
 dv.setUint32(12, E, true);
 dv.setUint32(16, G, true);
@@ -304,7 +326,8 @@ const X = f32(N), Y = f32(N);
 X.set(nx); Y.set(ny);
 const EU = u32(E), EV = u32(E), EL = f32(E), EGS = u32(E), EGC = u32(E);
 const EC = u8(E), EF = u8(E), EMW = u8(E), EMWI = u8(E);
-// Geometrie-Abschnitt beginnt an 4-Byte-Grenze (E*4 Bytes u8 ist immer aligned)
+const EMS = u8(E);
+off += PAD;
 const GX = f32(G), GY = f32(G);
 let g = 0;
 kept.forEach((e, i) => {
@@ -317,6 +340,7 @@ kept.forEach((e, i) => {
   EF[i] = e.flags;
   EMW[i] = e.maxW;
   EMWI[i] = e.maxWidth;
+  EMS[i] = e.maxSpeed;
   for (let j = 0; j < e.gx.length; j++) { GX[g] = e.gx[j]; GY[g] = e.gy[j]; g++; }
 });
 if (off !== size) throw new Error(`Größenfehler ${off} != ${size}`);
@@ -325,4 +349,7 @@ writeFileSync(args.out, new Uint8Array(buf));
 const byClass = {};
 for (const e of kept) byClass[e.cls] = (byClass[e.cls] || 0) + e.len / 1000;
 console.log(`geschrieben: ${args.out} (${(size / 1e6).toFixed(1)} MB) Knoten=${N} Kanten=${E} Geometriepunkte=${G}`);
+let urbanKm = 0, speedKm = 0;
+for (const e of kept) { if (e.flags & 8) urbanKm += e.len / 1000; if (e.maxSpeed) speedKm += e.len / 1000; }
+console.log(`innerorts: ${Math.round(urbanKm)} km, mit Tempolimit: ${Math.round(speedKm)} km`);
 console.log('km je Klasse:', Object.fromEntries(Object.entries(byClass).map(([k, v]) => [k, Math.round(v)])));
