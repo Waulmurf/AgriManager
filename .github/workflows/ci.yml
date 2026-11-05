@@ -1,9 +1,9 @@
 name: ci
 
-# Bei jedem Stand: Unit-Tests (Vitest, Rust), Oberflächentests (Playwright,
-# Chromium ≙ WebView2, WebKit ≙ WKWebView) und Builds für Windows und macOS.
-# Die fertigen Apps starten im Selbsttest-Modus und melden Leistung und
-# Darstellung aus dem echten WebView2 bzw. WKWebView.
+# Bei jedem Stand: Unit-Tests (Vitest, Rust) und Oberflächentests (Playwright,
+# Chromium ≙ WebView2) unter Windows sowie Builds für Windows und macOS.
+# Die fertige Windows-App startet im Selbsttest-Modus und meldet Leistung und
+# Darstellung aus dem echten WebView2.
 on:
   push:
     branches: ['**']
@@ -27,8 +27,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macOS vorerst ohne Tests (nur Build), siehe Job „build“
-        os: [ubuntu-latest, windows-latest]
+        # Zielplattformen sind Windows und macOS; macOS vorerst ohne Tests (nur Build)
+        os: [windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

@@ -52,8 +52,8 @@ Ergänzt den Abschnitt „Technik und Entwicklungsumgebung“ in [anforderungen.
 
 ## Teststrategie (Stand 5. Nov. 2026)
 
-Getestet wird vorerst nur unter Windows und Linux: Unit-Tests, Playwright (Chromium ≙ WebView2)
-und der Selbsttest der Windows-App. macOS bleibt Zielplattform. CI baut bei jedem Stand weiter
+Zielplattformen sind nur Windows und macOS (kein Linux). Getestet wird vorerst nur unter
+Windows: Unit-Tests, Playwright (Chromium ≙ WebView2) und der Selbsttest der Windows-App. macOS bleibt Zielplattform. CI baut bei jedem Stand weiter
 die Universal-DMG, damit Mac-Inkompatibilitäten sofort auffallen. Die macOS-Tests (WebKit,
 WKWebView-Selbsttest) sind in der Git-Historie vorhanden (Commit 55865c8) und lassen sich
 wieder einschalten.
