@@ -271,6 +271,8 @@ export interface Order {
   liquid?: boolean;
   /** Tour (Kommunal, Winterdienst): Ortsmitte; areaHa = km */
   tourNode?: number;
+  /** vom Kunden storniert (nie begonnen, Frist weit überschritten) */
+  cancelled?: boolean;
   earliest: number;
   latest: number;
   status: OrderStatus;
@@ -2381,6 +2383,36 @@ export class Business {
     if (!onTime) this.emit(time, 'warnung', `Nordzucker: Abfuhrfenster verpasst – Zuverlässigkeit sinkt auf ${Math.round(this.nzScore)}/100 (weniger Touren in der nächsten Kampagne).`);
   }
 
+  /** Umfang und Preis einer Anfrage für Meldungen (Fläche, m³ oder t) */
+  requestSize(r: Request): string {
+    if (r.tPerHa) return `${Math.round(r.areaHa * r.tPerHa).toLocaleString('de-DE')} ${r.liquid ? 'm³' : 't'}`;
+    return `auf ${r.fields.length} ${r.fields.length === 1 ? 'Feld' : 'Feldern'}, ${fmtHa(r.areaHa)}`;
+  }
+  requestPrice(r: Request): string {
+    if (r.tPerHa) return `${fmtEur(r.priceHa / r.tPerHa)}/${r.liquid ? 'm³' : 't'}`;
+    if (r.gabe) return `${fmtEur(r.priceHa / r.gabe)}/m³`;
+    return `${fmtEur(r.priceHa)}/ha`;
+  }
+
+  /**
+   * Nie begonnene Aufträge: eine Woche nach der Frist sagt der Kunde ab (macht es selbst oder holt
+   * einen anderen). Zufriedenheit −15, Ruf −2. Eigenaufträge und Touren sind ausgenommen.
+   */
+  private cancelStaleOrders(time: number) {
+    for (const o of this.orders) {
+      if (o.status !== 'offen' || o.farmId < 0 || o.ownLeaseId !== undefined || o.doneFields.length) continue;
+      if (time <= o.latest + 7 * 1440) continue;
+      o.status = 'fertig';
+      o.cancelled = true;
+      o.priceHa = 0;
+      o.finishedAt = time;
+      this.satisfy(o.farmId, -15, time);
+      this.changeReputation(-2);
+      this.emit(time, 'warnung', `${this.farmName(o.farmId)} sagt ${SERVICE_NAMES[o.service]} ab – eine Woche über der Frist und nicht begonnen.`, o.farmId);
+      this.version++;
+    }
+  }
+
   /** laufender Rahmenvertrag eines Betriebs */
   frameOf(farmId: number): FrameContract | undefined {
     return this.frames.find((f) => f.farmId === farmId);
@@ -2415,7 +2447,7 @@ export class Business {
     const farm = loyal[this.marketRng.int(loyal.length)];
     // Dienste aus den bisherigen Aufträgen (bis zu drei häufigste)
     const count = new Map<Service, number>();
-    for (const o of this.orders) if (o.farmId === farm.id && o.status === 'fertig') count.set(o.service, (count.get(o.service) ?? 0) + 1);
+    for (const o of this.orders) if (o.farmId === farm.id && o.status === 'fertig' && !o.cancelled) count.set(o.service, (count.get(o.service) ?? 0) + 1);
     const services = [...count.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map((x) => x[0]);
     if (!services.length) return;
     const offer: FrameContract = {
@@ -2493,7 +2525,7 @@ export class Business {
     for (const inv of this.invoices) if (inv.farmId === farmId && inv.status === 'überfällig' && inv.remindedAt === undefined) this.remindInvoice(inv, time, 'besuch');
     const req = this.maybeRequest(farmId, time, 0.2 + 0.7 * (1 - farm.mechanization), 'besuch');
     if (req) {
-      this.emit(time, 'anfrage', `${farm.name}: ${SERVICE_NAMES[req.service]} auf ${req.fields.length} ${req.fields.length === 1 ? 'Feld' : 'Feldern'}, ${fmtHa(req.areaHa)} für ${fmtEur(req.priceHa)}/ha`, farmId);
+      this.emit(time, 'anfrage', `${farm.name}: ${SERVICE_NAMES[req.service]} ${this.requestSize(req)} für ${this.requestPrice(req)}`, farmId);
     } else {
       const rival = this.isRival(farmId, time);
       this.emit(time, 'besuch', `${farm.name}: ${first ? 'Kennengelernt, jetzt im Adressbuch.' : 'Besuch beendet.'} ${rival ? 'Arbeitet zurzeit mit einem anderen Lohnunternehmen.' : 'Zurzeit steht nichts an.'}`, farmId);
@@ -2541,6 +2573,7 @@ export class Business {
       if (down) { this.satisfy(o.farmId, -1, time); this.changeReputation(-0.5); }
     }
     this.checkInvoices(time);
+    this.cancelStaleOrders(time);
     for (const r of this.requests) {
       if (r.status === 'offen' && time >= r.replyBy) {
         r.status = 'abgelaufen';
@@ -2559,7 +2592,7 @@ export class Business {
       }
       const req = this.maybeRequest(farm.id, time, 0.06 + 0.1 * (1 - farm.mechanization), farm.contact);
       if (req) {
-        this.emit(time, 'anfrage', `${farm.contact === 'anruf' ? 'Anruf' : 'Nachricht'} von ${farm.name}: ${SERVICE_NAMES[req.service]} ${fmtHa(req.areaHa)}, bis ${fmtDay(req.latest)}, ${fmtEur(req.priceHa)}/ha`, farm.id);
+        this.emit(time, 'anfrage', `${farm.contact === 'anruf' ? 'Anruf' : 'Nachricht'} von ${farm.name}: ${SERVICE_NAMES[req.service]} ${req.tPerHa ? this.requestSize(req) : fmtHa(req.areaHa)}, bis ${fmtDay(req.latest)}, ${this.requestPrice(req)}`, farm.id);
       }
     }
   }
@@ -3501,7 +3534,7 @@ export class Business {
     // Kunden: alle fertigen Aufträge (Deckungsbeitrag nach Diesel und Maschinenkosten), offene Rechnungen
     const cust = new Map<number, Analytics['customers'][number]>();
     for (const o of this.orders) {
-      if (o.status !== 'fertig' || o.farmId < 0 || o.ownLeaseId !== undefined || o.biogasPriceT !== undefined) continue;
+      if (o.status !== 'fertig' || o.cancelled || o.farmId < 0 || o.ownLeaseId !== undefined || o.biogasPriceT !== undefined) continue;
       const r = this.orderResult(o);
       const e = cust.get(o.farmId) ?? { farmId: o.farmId, orders: 0, revenue: 0, margin: 0, open: 0 };
       e.orders++; e.revenue += r.revenue; e.margin += r.margin;

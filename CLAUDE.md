@@ -24,7 +24,7 @@ npm run map-data          # Kartendaten (Release laut data/map-data.json) nach s
 npm run map-data:build    # Kartendaten lokal bauen (Docker Desktop nötig, 15–30 min)
 npm run dev               # Browser: http://localhost:5173
 npm run tauri dev         # Desktop-App
-npm test                  # Vitest (Rechenmodell, Routing, Felder, Determinismus)
+npm test                  # Vitest (Rechenmodell, Routing, Felder, Determinismus, Wirtschaftlichkeit mit Bot)
 npm run build && npx playwright test   # Oberfläche (Chromium ≙ WebView2)
 cd src-tauri && cargo test -p range_proto
 ```
@@ -124,6 +124,8 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
 - Ideen 26–30 fertig: Kundencharaktere `farmCharacter`, Empfehlungen `maybeRecommend`/`referrals` (Kartenlinien), Strukturwandel
   `structuralChange` (`Farm.closed/organic/handoverAt`, im Spielstand `farmChanges`), Ökobetriebe `isOrganic` (Striegeln/Hacken),
   Nordzucker-Abfuhrfenster `campaignDaily`/`nzScore` (Kunde `NZ_ID`). Ideen 20–25 und 31–45 warten auf Auswahl.
+- Wirtschaftlichkeits-Test: `tests/unit/economy-sim.test.ts` + Bot `tests/sim/economyBot.ts` (2 Jahre, echte Karte), Bericht
+  `docs/wirtschaft-simulation.md`; Kunden sagen nie begonnene Aufträge ab (`cancelStaleOrders`).
 - macOS: Mindestversion 12 (WebGL 2, Module-Worker), `src/polyfills.ts` + Startprüfung, Kürzel ohne Cmd/Strg, Selbsttest im
   macOS-CI-Job (läuft bei `[mac]` in der Commit-Nachricht).
 

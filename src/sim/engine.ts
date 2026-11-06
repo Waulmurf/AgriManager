@@ -2851,11 +2851,21 @@ export class Simulation {
       b.wear(m, hours);
     }
     b.addExperience(t.driverId, 'guelle', Math.round(hours * 60), this.time);
-    if (sl.progress >= 0.999) {
+    // Rest unter 0,5 m³ zählt als fertig (Rundung von Fläche und Menge)
+    const restM3 = (1 - sl.progress) * area * sl.gabe;
+    if (sl.progress >= 0.999 || restM3 < 0.5) {
       if (o) b.fieldDone(o, fi, this.time);
       t.current++;
       sl.progress = 0;
       if (t.current >= t.queue.length) { t.phase = 'back'; this.driveTo(v, this.homeOf(v)); return; }
+    }
+    // Gesamtmenge erreicht (Auftragsfläche ist gerundet): übrige Felder abschließen statt leer zu pendeln
+    if (o && o.areaHa * (o.gabe ?? 0) - (o.doneM3 ?? 0) < 0.5 && sl.load < 0.5) {
+      for (let i = t.current; i < t.queue.length; i++) b.fieldDone(o, t.queue[i], this.time);
+      t.current = t.queue.length;
+      t.phase = 'back';
+      this.driveTo(v, this.homeOf(v));
+      return;
     }
     const feeder = sl.feeder !== undefined;
     if (sl.load >= 0.5) {

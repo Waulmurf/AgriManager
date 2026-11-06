@@ -1114,3 +1114,20 @@ Lohnsatz fürs Hacken und Striegeln gibt es nicht; für Striegeln mit eigener Ma
   [Landtreff (Striegelkosten)](https://www.landtreff.de/okologische-landwirtschaft-t92385-2550.html),
   [Khronos WebGL/WebKit](https://wikis.khronos.org/webgl/Implementations/WebKit),
   [Tauri: Custom-Protokolle](https://github.com/tauri-apps/tauri/commit/ba025588f3559858f43547e8c04424c47a3c445b).
+
+## Wirtschaftlichkeits-Simulation (6. Nov. 2026)
+
+- **Test:** `tests/unit/economy-sim.test.ts` mit Bot `tests/sim/economyBot.ts`, auf den echten
+  Kartendaten.
+  - Simuliert standardmäßig 2 Spieljahre in wenigen Sekunden; `ECONOMY_YEARS`, `ECONOMY_SEED` und
+    `ECONOMY_REPORT` steuern den Lauf.
+  - Prüft Plausibilitätsgrenzen: Aufträge, Verspätungen, Absagen, Wachstum, Umsatz je Schlepper
+    30–300 T€, Eigenkapital positiv, Schulden unter 500 T€, kein Goldesel.
+- **Ergebnisse und Befunde:** `docs/wirtschaft-simulation.md`.
+- **Neue Spielregel:** Nie begonnene Aufträge sagt der Kunde eine Woche nach der Frist ab
+  (Zufriedenheit −15, Ruf −2, `Order.cancelled`).
+- **Behoben:** Endlosschleife des Güllefasses bei gerundeter Auftragsfläche.
+- **Balance-Kandidaten (noch nicht geändert):**
+  - Bilanz zum Buchwert statt Marktwert.
+  - Pflanzenschutz-Satz (14 €/ha DB) und Stoppel prüfen.
+  - Bot um Erntedienste und Winterarbeit erweitern, um Wachstumsstrategien zu vergleichen.
