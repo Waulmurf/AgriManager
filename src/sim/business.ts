@@ -117,19 +117,19 @@ export const SILAGE_YIELD_T_HA = 42;
  * vom Lohnunternehmen). Preise je ha (Annahme; Kostenanker Häcksler 241 €/h, Transport 87 €/h,
  * Walzschlepper 110 €/h laut Bayerischem Wochenblatt, siehe docs/ablaeufe.md).
  */
-export const CHOP_PRICE_HA: Record<'haecksler' | 'komplett', number> = { haecksler: 230, komplett: 430 };
+export const CHOP_PRICE_HA: Record<'haecksler' | 'komplett', number> = { haecksler: 250, komplett: 470 };
 /** Mähdrusch je ha (Annahme LWK-Größenordnung): nur Drusch bzw. mit Abfuhr zum Hof des Kunden */
-export const THRESH_PRICE_HA: Record<'haecksler' | 'komplett', number> = { haecksler: 150, komplett: 195 };
+export const THRESH_PRICE_HA: Record<'haecksler' | 'komplett', number> = { haecksler: 165, komplett: 215 };
 /** Kartoffelroden je ha (Annahme): nur Roden bzw. mit Abfuhr zum Lager des Kunden */
-export const POTATO_PRICE_HA: Record<'haecksler' | 'komplett', number> = { haecksler: 330, komplett: 420 };
+export const POTATO_PRICE_HA: Record<'haecksler' | 'komplett', number> = { haecksler: 360, komplett: 460 };
 /** Fremdwalze, wenn bei der Komplettkette kein eigener Radlader am Silo ist (€/h) */
 export const HIRED_ROLLER_EUR_H = 110;
 /**
  * Startpreis je ha inkl. Schlepper, Fahrer, Diesel (Annahme): Stoppelbearbeitung flach, günstiger als
- * Grubbern. Gülle wird je m³ abgerechnet: 4 €/m³ (Spanne für Lohnausbringung 2,50–8 €/m³ je nach
+ * Grubbern. Gülle wird je m³ abgerechnet: 4,60 €/m³ (Spanne für Lohnausbringung 2,50–8 €/m³ je nach
  * Entfernung und System laut LK Niederösterreich); priceHa = €/m³ × Gabe.
  */
-export const SERVICE_BASE_PRICE: Record<Service, number> = { grubbern: 55, stoppel: 38, guelle: 4, haeckseln: 230, drusch: 150, roden: 280, transport: 0, saat: 65, einzelkorn: 55, pflanzenschutz: 22, pressen: 60, kartoffelroden: 330, winterdienst: 0, maehen: 60, hecke: 150, wegebau: 400, striegeln: 35, hacken: 60 };
+export const SERVICE_BASE_PRICE: Record<Service, number> = { grubbern: 63, stoppel: 44, guelle: 4.6, haeckseln: 250, drusch: 165, roden: 310, transport: 0, saat: 78, einzelkorn: 64, pflanzenschutz: 25, pressen: 68, kartoffelroden: 360, winterdienst: 0, maehen: 60, hecke: 150, wegebau: 400, striegeln: 39, hacken: 68 };
 /**
  * Lkw-Transport (Annahme): Fracht 1,80 €/t Grundpreis + 0,12 €/t je Straßen-km (Straße ≈ Luftlinie × 1,3);
  * Diesel 32 l/100 km; Maut 0,35 €/km auf Bundesstraßen und Autobahn (Strecken ab 65 km/h); Laden an der
@@ -165,12 +165,12 @@ export function seasonServices(time: number): { service: Service; crops: Crop[];
   if (md >= 301 && md <= 515) out.push({ service: 'guelle', crops: [Crop.Mais, Crop.Zuckerrueben], weight: 1 });
   if (md >= 801 && md <= 920) out.push({ service: 'guelle', crops: [Crop.Raps, Crop.Getreide], weight: 0.4 });
   // Silomais häckseln: Mitte September bis Mitte Oktober (Reife ~32 % TS), eilig
-  if (md >= 910 && md <= 1020) out.push({ service: 'haeckseln', crops: [Crop.Mais], weight: md >= 920 && md <= 1010 ? 1.4 : 0.8 });
+  if (md >= 910 && md <= 1020) out.push({ service: 'haeckseln', crops: [Crop.Mais], weight: md >= 920 && md <= 1010 ? 2 : 1.2 });
   // Mähdrusch: Raps ab Mitte Juli, Getreide Ende Juli bis Ende August (nur Betriebe ohne eigenen Drescher)
-  if (md >= 710 && md <= 805) out.push({ service: 'drusch', crops: [Crop.Raps], weight: 1.2 });
-  if (md >= 720 && md <= 830) out.push({ service: 'drusch', crops: [Crop.Getreide], weight: md >= 801 && md <= 820 ? 1.5 : 1 });
+  if (md >= 710 && md <= 805) out.push({ service: 'drusch', crops: [Crop.Raps], weight: 1.8 });
+  if (md >= 720 && md <= 830) out.push({ service: 'drusch', crops: [Crop.Getreide], weight: md >= 801 && md <= 820 ? 2.2 : 1.5 });
   // Rübenroden: Kampagne Nordzucker Uelzen ab Mitte September, Roden bis Ende November
-  if (md >= 915 && md <= 1130) out.push({ service: 'roden', crops: [Crop.Zuckerrueben], weight: md >= 1001 && md <= 1115 ? 1.3 : 0.8 });
+  if (md >= 915 && md <= 1130) out.push({ service: 'roden', crops: [Crop.Zuckerrueben], weight: md >= 1001 && md <= 1115 ? 1.8 : 1.2 });
   // Saat: Raps Mitte August bis Anfang September, Getreide Ende September bis Oktober; Mais/Rüben Einzelkorn im Frühjahr
   if (md >= 815 && md <= 910) out.push({ service: 'saat', crops: [Crop.Raps], weight: 1 });
   if (md >= 920 && md <= 1031) out.push({ service: 'saat', crops: [Crop.Getreide], weight: 1.1 });
@@ -1190,7 +1190,21 @@ export class Business {
         } else if (st.status === 'auftrag' && time > st.to) {
           const o = this.orders.find((x) => x.id === st.orderId);
           if (o && o.status === 'fertig') continue;
-          if (sd.harvest) continue; // Ernte wartet, wird aber teurer (−2 %/Tag)
+          if (sd.harvest) {
+            // Ernte wartet (−2 %/Tag). Drei Wochen nach dem Fenster und nicht begonnen: ein fremder Lohnunternehmer
+            // erntet (Kosten wie Fremdleistung), sonst bliebe die Fläche dauerhaft belegt
+            if ((!o || (o.status === 'offen' && !o.doneFields.length)) && time > st.to + 21 * 1440) {
+              if (o) { o.status = 'fertig'; o.cancelled = true; o.finishedAt = time; }
+              const cost = Math.round((sd.costHa || CHOP_PRICE_HA.komplett) * l.areaHa);
+              this.book(time, `${sd.name.split(' (')[0]} durch fremden Lohnunternehmer, ${fmtHa(l.areaHa)} ${def.name}`, -cost, 'Ackerbau');
+              l.yieldFactor *= Math.max(0.5, 1 - 0.02 * Math.ceil((time - st.to) / 1440));
+              st.status = 'erledigt';
+              this.emit(time, 'warnung', `Eigene Fläche: ${def.name} lag drei Wochen über der Erntezeit – ein fremder Lohnunternehmer hat geerntet (${fmtEur(cost)}, Ertrag gemindert).`);
+              this.harvest(l, time);
+              break;
+            }
+            continue;
+          }
           if (sd.required) { st.status = 'verpasst'; l.yieldFactor *= 0.9; this.emit(time, 'warnung', `Eigene Fläche: ${sd.name} verpasst – Ertrag −10 %.`); }
           else st.status = 'entfällt';
           if (o && o.status === 'offen') o.status = 'fertig';
@@ -3171,11 +3185,11 @@ export class Business {
   }
 
   /**
-   * Pannenrisiko je Betriebsminute (MZ-04): Grundrate 0,2 % je Stunde, steigt mit sinkendem
+   * Pannenrisiko je Betriebsminute (MZ-04): Grundrate 0,14 % je Stunde, steigt mit sinkendem
    * Zustand, dreifach bei überfälliger Wartung und bei verstecktem Mangel.
    */
   rollBreakdown(m: Machine): boolean {
-    let perHour = 0.002 * (1 + (100 - m.condition) / 25);
+    let perHour = 0.0014 * (1 + (100 - m.condition) / 35);
     // Wintercheck im letzten Winter: 30 % weniger Pannen in der Saison
     if (m.winterCheckAt !== undefined && this.lastTime - m.winterCheckAt < 300 * 1440) perHour *= 0.7;
     if (m.serviceAtH !== undefined && m.hours > m.serviceAtH) perHour *= 3;

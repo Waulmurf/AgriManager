@@ -2099,7 +2099,8 @@ export class Simulation {
       return;
     }
     if (t?.kind === 'feeder' && t.phase === 'wait') { this.feederWait(v); return; }
-    if (t?.kind === 'haul' && (t.phase === 'wait' || t.phase === 'load')) return; // Häcksler steuert
+    if (t?.kind === 'haul' && t.phase === 'wait') { this.haulWait(v); return; }
+    if (t?.kind === 'haul' && t.phase === 'load') return; // Häcksler steuert
     if (t?.kind === 'haul' && t.phase === 'waitSilo') { this.haulAtSilo(v); return; }
     if (t?.kind === 'silo' && t.phase === 'work') { this.siloWork(v); return; }
     if (t?.kind === 'job' && t.chop && t.phase === 'work') { this.chopTick(v); return; }
@@ -2452,6 +2453,24 @@ export class Simulation {
    * Vorgewende eingefügt. Ist das Muster länger als die Zeit erlaubt, wird gleichmäßig schneller gefahren.
    */
   // ---------- Häckselkette ----------
+
+  /**
+   * Abfahrer wartet am Feldrand: ist die Erntemaschine inzwischen auf einem anderen Feld (Feldwechsel,
+   * während der Wagen unterwegs war), fährt er nach; ist ihr Auftrag vorbei, fährt er zum Silo bzw. heim.
+   */
+  private haulWait(v: Vehicle) {
+    const t = v.task;
+    if (t?.kind !== 'haul') return;
+    const h = this.vehicles[t.harvester]?.task;
+    if (h?.kind !== 'job' || h.orderId !== t.orderId || h.phase === 'back' || h.phase === 'unhitch') {
+      if (t.load > 0.5) { t.phase = 'toSilo'; this.driveTo(v, t.silo); }
+      else { t.phase = 'back'; this.driveTo(v, this.homeOf(v)); }
+      this.business.version++;
+      return;
+    }
+    const node = this.harvesterNode(t);
+    if (node !== v.node) { t.phase = 'toField'; this.driveTo(v, node); }
+  }
 
   private harvesterNode(t: { harvester: number; silo: number }): number {
     const h = this.vehicles[t.harvester]?.task;

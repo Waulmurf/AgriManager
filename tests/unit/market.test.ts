@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { parseRoadGraph, RoadClass } from '../../src/sim/roadgraph';
 import { parseFields } from '../../src/sim/fields';
 import { Simulation } from '../../src/sim/engine';
+import { SERVICE_BASE_PRICE } from '../../src/sim/business';
 import { buildRoadGraphBuffer } from './helpers/grid';
 import { buildFieldsBuffer } from './helpers/fields';
 
@@ -133,7 +134,7 @@ describe('Rahmenverträge (Vorschlag 7)', () => {
     expect(b.orders.length).toBe(before + 1);
     expect(o.farmId).toBe(farm.id);
     expect(o.service).toBe('grubbern');
-    expect(o.priceHa).toBeLessThan(55 * 1.0);
+    expect(o.priceHa).toBeLessThan(SERVICE_BASE_PRICE.grubbern);
     // Kunde wechselt mit Vertrag nicht zur Konkurrenz
     farm.satisfaction = 5;
     (b as unknown as { satisfy(f: number, d: number, t: number): void }).satisfy(farm.id, -5, s.time);

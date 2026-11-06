@@ -1134,7 +1134,8 @@ Lohnsatz fürs Hacken und Striegeln gibt es nicht; für Striegeln mit eigener Ma
 
 ## Wirtschaftlichkeit (Stand 6. Nov. 2026)
 
-- 20-Jahres-Lauf mit Ausbau auf alle Dienste: `docs/wirtschaft-20-jahre.md`. Ergebnis: Umsatz bis ~800 T€, meist Verlust,
-  insolvent ab 2035; Ernteketten kommen spät, Kommunal/Winterdienst nie.
-- Offen (Balance, Entscheidung Nils): Feldpreise +15–20 %, Werkstatt/Verschleiß senken, mehr Erntenachfrage je Maschine,
-  Pacht/Ertrag, Winterarbeit früher, Bilanz zum Buchwert, Insolvenz als Spielende oder Sanierung.
+- 20-Jahres-Lauf mit Ausbau auf alle Dienste: `docs/wirtschaft-20-jahre.md`. Erster Lauf: meist Verlust, insolvent ab 2035.
+- Umgesetzt (Nils: „Ja“): Feldpreise +15 %, Erntepreise +10 %, Pannen seltener, mehr Erntenachfrage, Pacht −80 €/ha; Fehler
+  Abfahrer am alten Feld und blockierte eigene Ernte behoben. Neuer Lauf: alle 18 Dienste ab 2036, 16 von 20 Jahren Gewinn, keine
+  Insolvenz.
+- Offen: Bilanz zum Buchwert statt Marktwert, Insolvenz als Spielende oder Sanierungsphase.

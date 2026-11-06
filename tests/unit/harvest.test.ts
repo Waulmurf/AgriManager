@@ -97,6 +97,27 @@ describe('Mähdrusch', () => {
   });
 });
 
+describe('Abfahrer bei Feldwechsel', () => {
+  it('Kipper wartet am falschen Feldrand (Drescher hat inzwischen das Feld gewechselt): fährt nach, Auftrag wird fertig', () => {
+    const { s, o, chef } = harvestOrder('drusch', Crop.Getreide, 8, 1, 'komplett');
+    const m = addMachine(s, { type: 'maehdrescher', model: 'Lexion 6800', power: 435, width: 9.3, haPerHour: 3, workKmh: 6, dieselLHa: 18, payloadT: 9 });
+    const tr = addMachine(s, { type: 'schlepper', model: 'Axion 870', power: 200 });
+    const k = addMachine(s, { type: 'kipper', model: 'Kipper 22 t', payloadT: 22 });
+    const helper = { ...structuredClone(chef), id: 7, name: 'Abfahrer', isPlayer: false, kind: 'fest' as const, absences: [] };
+    s.company.drivers.push(helper);
+    runUntil(s, () => !s.weather.threshBlocked(s.time) && s.time % 1440 > 200 && s.time % 1440 < 300, 10 * 1440);
+    expect(s.command({ kind: 'startJob', orderId: o.id, tractorId: m.id, implementId: m.id, haulers: [{ tractorId: tr.id, implementId: k.id, driverId: 7 }] })).toMatch(/gestartet/);
+    const vs = (s as unknown as { vehicles: { machineId?: number; node: number; task?: { kind: string; phase: string } }[] }).vehicles;
+    const wagon = vs.find((v) => v.machineId === tr.id)!;
+    runUntil(s, () => wagon.task?.phase === 'wait', 600);
+    expect(wagon.task?.phase).toBe('wait');
+    // Fehlerfall nachstellen: Wagen steht an einem anderen Knoten als die Erntemaschine
+    wagon.node = s.homeNode;
+    runUntil(s, () => o.status === 'fertig', 4 * 1440);
+    expect(o.status).toBe('fertig');
+  });
+});
+
 describe('Mehrere Maschinen auf einem Feld', () => {
   it('zweiter Drescher steigt mitten im Feld ein: Feld wird geteilt, schneller fertig, Menge stimmt', () => {
     const one = harvestOrder('drusch', Crop.Getreide, 8, 1, 'haecksler');

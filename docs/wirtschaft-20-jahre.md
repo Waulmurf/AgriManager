@@ -2,155 +2,200 @@
 
 Bot `tests/sim/economyBotFull.ts`, Test `tests/unit/economy-full.test.ts`, echte Karte, Seed 2027, 2027–2046.
 Neu erzeugen: `ECONOMY_FULL_YEARS=20 ECONOMY_FULL_REPORT=<datei> npx vitest run tests/unit/economy-full.test.ts`
-(ca. 4 min). Ohne Variablen läuft der Test in CI mit 3 Jahren.
+(etwa 10 min). Ohne Variablen läuft der Test in CI mit 3 Jahren.
 
-## Ergebnis in Kürze
+## Ergebnis nach Balance und Fehlerbehebung (6. Nov. 2026)
 
-- **Das Ziel „alle Dienste“ wird nicht erreicht.** Der Bot investiert nur bei gesunder Kasse und Gewinn. Das ist
-  selten der Fall. Darum kommen Lkw (11/2032) und Mähdrescher (2/2034) spät, Häcksler, Roder, Winterdienst und
-  Kommunal nie. Mit Leasing ohne Bremse (früherer Lauf) gab es zwar alle Ernteketten, aber 424–455 T€ Leasing im Jahr
-  bei schlechter Auslastung.
-- **Umsatz wächst** von 286 T€ (2027) auf rund 800 T€ (2035). Die Feldarbeit sättigt bei 550–600 T€ mit 7 Schleppern.
-- **Gewinn meist negativ.** Ausnahmen sind +37 T€ (2027), +24 T€ (2031) und +33 T€ (2033). Sonst liegt das Ergebnis
-  zwischen −40 und −130 T€.
-- **Ab 2035 insolvent** (Konto mehr als 100 T€ über dem Rahmen für 90 Tage). Danach folgt eine Abwärtsspirale:
-  Kontokorrentzinsen bis 281 T€ im Jahr, Eigenkapital 2046 bei −2,4 Mio. €.
+| | vorher | nachher |
+| --- | --- | --- |
+| Dienste im Angebot | 11 von 18, Ernteketten erst 2034, nie Häckseln, Roden, Kommunal | alle 18 ab 2036 |
+| Umsatz | Spitze rund 800 T€ (2035) | 1,45–2,1 Mio. € ab 2034 |
+| Gewinn | 17 von 20 Jahren Verlust | 16 von 20 Jahren Gewinn, Verlustjahre bei großen Investitionen |
+| Insolvenz | ab 2035, Eigenkapital 2046 −2,4 Mio. € | nie; 2046: Eigenkapital 3,1 Mio. €, schuldenfrei |
 
-## Ursachen
+- **Gewinnspanne:** Ab 2039 liegt der Gewinn bei 4–23 % vom Umsatz.
+- **Spätjahre geschönt:** Der Bot ersetzt alte Maschinen nicht. Die AfA sinkt deshalb gegen null, der Gewinn wirkt
+  höher als bei einem Spieler, der den Fuhrpark erneuert.
+- **Umsatzstärkste Sparten ab 2037:**
+  - Rübenroden 200–380 T€ im Jahr
+  - Lkw-Transport rund 220 T€
+  - Feldarbeit 450–620 T€
+  - eigener Ackerbau 160–950 T€ auf 165–310 ha
+- **Jahr 2 bleibt knapp:** Der Ausbau auf 5 Schlepper bringt einen Verlust. Das soll so sein: Wachstum kostet erst.
 
-1. **Lohnarbeit auf dem Feld deckt kaum die Vollkosten.** Beispiel 2031:
-   - Feldumsatz 602 T€
-   - dagegen Personal 164 T€, Diesel 132 T€, Werkstatt 93 T€, AfA 176 T€, Versicherung 12 T€, Zinsen 21 T€
-2. **Deckungsbeitrag je ha** (Umsatz minus Diesel, Lohn und Verschleiß):
-   - Gülle ~70 €, Einzelkorn ~39 €, Pressen ~35 €, Saat ~33 €, Grubbern ~27 €, Stoppel ~17 €, Pflanzenschutz ~14 €
-   - Das reicht nicht für Abschreibung und Fixkosten.
-3. **Werkstatt und Verschleiß sind hoch:** 90–125 T€ im Jahr bei 25 Maschinen, viele davon gebraucht gekauft.
-4. **Eigener Ackerbau verliert Geld.** Auf den Sandböden übersteigen Pacht und Betriebsmittel den Ernteerlös.
-5. **Erntemaschinen sind schlecht ausgelastet.** Der Drescher bringt 70–84 T€ im Jahr, das sind etwa 250–550 ha.
-   Realistisch wären 600–1000 ha. Dazu kommt die Leasingrate von 89 T€ im Jahr.
-6. **Saisonalität:** Feste Löhne und Schlepper laufen im Winter weiter. Ohne Winterdienst gibt es keine Arbeit.
+## Was geändert wurde
 
-## Gefundene und behobene Fehler im Spiel
+### Balance
 
-- Gülle-Auftrag pendelte am Ende leer zwischen Lager und Feld (Rundung der Fläche).
-- Neue und gebrauchte Maschinen verloren Nutzlast, Tankvolumen und Gewicht aus dem Katalog.
-- Winterdienst galt als verspätet und kostete je Tour Ruf. Maßgeblich ist jetzt der Beginn.
-- Nie begonnene Aufträge blieben ewig offen. Jetzt storniert der Kunde 7 Tage nach Frist.
-- Keine Insolvenz: Die Kasse konnte beliebig ins Minus laufen. Jetzt gibt es Warnungen nach 30 und 60 Tagen und die
-  Insolvenz nach 90 Tagen; Kredite und Käufe sind dann gesperrt.
-- Rechnungsnummern hätten sich nach dem Archivieren wiederholt (jetzt `invoiceSeq`).
-- Jahresarchiv am 2.1. hält den Spielstand klein: Aufträge und Rechnungen älter als 1 Jahr, Anfragen älter als
-  60 Tage, Buchungen älter als 2 Jahre.
+- **Preise der Felddienste rund +15 %**, Richtung LWK-Sätze und übliche Lohnunternehmer-Preise:
+  - Grubbern 63 €/ha, Stoppel 44, Drillsaat 78, Einzelkorn 64, Pflanzenschutz 25, Pressen 68, Striegeln 39, Hacken 68
+  - Gülle 4,60 €/m³
+- **Erntepreise rund +10 %:**
+  - Drusch 165 €/ha bzw. 215 €/ha mit Abfuhr
+  - Häckseln 250 bzw. 470 €/ha
+  - Rübenroden 310 €/ha
+  - Kartoffelroden 360 bzw. 460 €/ha
+- **Pannen seltener:** Grundrate 0,14 % statt 0,2 % je Stunde; schlechter Zustand wirkt schwächer (÷35 statt ÷25).
+- **Mehr Erntenachfrage:** Drusch, Häckseln und Roden werden in ihrer Saison öfter angefragt (Gewichte etwa +40–50 %).
+- **Ortsübliche Pacht** auf Uelzener Sand 540 statt 620 €/ha bei Ackerzahl 35.
 
-## Stellschrauben (Balance, noch nicht umgesetzt)
+### Fehler im Spiel, gefunden über den Langzeitlauf
 
-- Preise der Felddienste um 15–20 % anheben, Richtung LWK-Sätze in `docs/maschinen.md`.
-- Werkstatt- und Verschleißkosten senken (`repairPerHour`, `wear`), vor allem bei Gebrauchten.
-- Mehr Erntenachfrage je Maschine, damit 600–1000 ha je Drescher bzw. Roder möglich sind.
-- Pachtpreise bzw. Erträge so, dass Ackerbau auf mittleren Böden eine kleine Marge bringt.
-- Winterarbeit (Winterdienst, Kommunal, Holz) früher erreichbar machen.
-- Bilanz zum Buchwert statt Marktwert.
-- Insolvenz als Spielende oder mit Sanierungsphase.
+- **Abfahrer wartete für immer am alten Feld.** Wechselte die Erntemaschine das Feld, während Kipper oder
+  Häckselwagen unterwegs war, wartete der Wagen am alten Feldrand. Drescher bzw. Häcksler stand mit vollem Tank, der
+  Auftrag lief ewig weiter, und Fahrer und Maschinen waren blockiert. Im Lauf vorher führte das ab 2039 zu 8.760
+  Druschstunden im Jahr und am Ende zur Insolvenz.
+  - Jetzt fährt der Wagen nach (`haulWait` in `engine.ts`).
+  - Test: `harvest.test.ts`, „Abfahrer bei Feldwechsel“.
+- **Eigene Ernte blockierte die Pachtfläche dauerhaft.** Wurde eine eigene Ernte nie begonnen, blieb die Fläche
+  belegt: keine neue Kultur, aber weiter Pacht.
+  - Jetzt erntet drei Wochen nach dem Fenster ein fremder Lohnunternehmer (Kosten wie Fremdleistung, Ertrag −2 %
+    je Tag Verspätung, höchstens −50 %).
+  - Test: `farming.test.ts`.
+- **Bereits früher behoben:**
+  - Gülle-Pendeln am Auftragsende
+  - Katalogwerte gingen beim Kauf verloren
+  - Winterdienst-Pünktlichkeit
+  - Storno nie begonnener Aufträge
+  - Insolvenz
+  - Rechnungsnummern nach dem Archiv
 
-Rechenzeit: 246 s
+### Bot
+
+- Rücklage nach großen Käufen: 30 % des Preises.
+- Zusätzliche Spalten im Bericht: Durchschnittslohn, Leiharbeiter, Fahrzeugstunden je Aufgabe.
+- Lange Aufgaben (über 30 Tage) werden protokolliert. Das sind meist Rübentransporte über die ganze Kampagne.
+
+## Offene Punkte
+
+- In der Bilanz zählen Maschinen zum Marktwert, im Ergebnis mit der AfA.
+- Insolvenz beendet das Spiel bisher nicht; Kredite und Käufe sind dann nur gesperrt.
+- Der Ruf schwankt stark (3–100), weil der Bot viele Aufträge zu spät fertig macht (rund 200 im Jahr).
+
+Rechenzeit: 593 s
 
 ### Jahre (Beträge in T€)
 
-| Jahr | Umsatz | Feld | Ernte | Transport | Kommunal | Ackerbau | Kosten | AfA | Gewinn | Kasse | Eigenkapital | Schulden | Schlepper | Maschinen | fest | Saison | Pacht ha | Kunden | Aufträge | verspätet | storniert | Ruf | Dienste |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| 2027 | 286 | 281 | 0 | 5 | 0 | 0 | 147 | 102 | 37 | 43 | 287 | 174 | 3 | 13 | 1 | 2 | 0 | 71 | 255 | 7 | 2 | 94 | 8 |
-| 2028 | 341 | 328 | 0 | 13 | 0 | 0 | 289 | 165 | -113 | 82 | 289 | 258 | 3 | 15 | 1 | 3 | 62 | 100 | 366 | 27 | 11 | 95 | 8 |
-| 2029 | 540 | 424 | 0 | 16 | 0 | 99 | 373 | 209 | -39 | -9 | 380 | 349 | 5 | 20 | 1 | 4 | 62 | 147 | 544 | 25 | 8 | 100 | 10 |
-| 2030 | 688 | 574 | 0 | 9 | 0 | 106 | 549 | 187 | -41 | -21 | 428 | 437 | 6 | 22 | 1 | 5 | 100 | 191 | 705 | 22 | 2 | 100 | 10 |
-| 2031 | 756 | 602 | 0 | 5 | 0 | 148 | 555 | 176 | 24 | 61 | 551 | 450 | 7 | 25 | 1 | 6 | 100 | 235 | 746 | 56 | 2 | 100 | 10 |
-| 2032 | 634 | 564 | 0 | 15 | 0 | 55 | 594 | 171 | -131 | 90 | 520 | 440 | 7 | 25 | 1 | 7 | 123 | 276 | 813 | 76 | 5 | 93 | 10 |
-| 2033 | 715 | 555 | 0 | 111 | 0 | 60 | 595 | 114 | 33 | 65 | 494 | 419 | 7 | 26 | 1 | 7 | 123 | 326 | 893 | 47 | 28 | 79 | 10 |
-| 2034 | 691 | 475 | 76 | 102 | 0 | 32 | 708 | 101 | -101 | -58 | 404 | 444 | 7 | 27 | 2 | 7 | 123 | 349 | 939 | 135 | 21 | 21 | 11 |
-| 2035 (insolvent) | 798 | 542 | 76 | 143 | 0 | 37 | 837 | 82 | -121 | -183 | 313 | 478 | 7 | 27 | 2 | 7 | 123 | 376 | 1054 | 121 | 9 | 79 | 11 |
-| 2036 (insolvent) | 787 | 543 | 84 | 125 | 0 | 36 | 819 | 48 | -81 | -289 | 239 | 503 | 7 | 27 | 2 | 7 | 123 | 410 | 1085 | 106 | 13 | 98 | 11 |
-| 2037 (insolvent) | 741 | 547 | 70 | 125 | 0 | 0 | 831 | 20 | -110 | -444 | 107 | 589 | 7 | 27 | 2 | 7 | 123 | 442 | 1025 | 145 | 28 | 42 | 11 |
-| 2038 (insolvent) | 635 | 520 | 81 | 25 | 0 | 0 | 756 | 19 | -138 | -606 | -59 | 697 | 7 | 25 | 2 | 7 | 123 | 449 | 949 | 82 | 33 | 100 | 11 |
-| 2039 (insolvent) | 420 | 410 | 0 | 10 | 0 | 0 | 594 | 14 | -185 | -814 | -268 | 866 | 7 | 23 | 2 | 7 | 123 | 464 | 838 | 21 | 86 | 96 | 9 |
-| 2040 (insolvent) | 416 | 405 | 0 | 11 | 0 | 0 | 596 | 9 | -189 | -1.024 | -482 | 1.048 | 7 | 23 | 2 | 7 | 123 | 482 | 828 | 19 | 78 | 98 | 9 |
-| 2041 (insolvent) | 342 | 333 | 0 | 9 | 0 | 0 | 557 | 9 | -203 | -1.238 | -730 | 1.245 | 7 | 21 | 2 | 7 | 123 | 482 | 729 | 44 | 79 | 66 | 8 |
-| 2042 (insolvent) | 330 | 321 | 0 | 9 | 0 | 0 | 571 | 9 | -250 | -1.488 | -995 | 1.488 | 7 | 21 | 2 | 7 | 123 | 477 | 769 | 33 | 74 | 100 | 8 |
-| 2043 (insolvent) | 342 | 336 | 0 | 6 | 0 | 0 | 622 | 8 | -280 | -1.763 | -1.297 | 1.763 | 7 | 20 | 2 | 7 | 123 | 479 | 809 | 31 | 76 | 79 | 8 |
-| 2044 (insolvent) | 251 | 241 | 0 | 10 | 0 | 0 | 595 | 6 | -313 | -2.073 | -1.667 | 2.073 | 7 | 18 | 2 | 7 | 123 | 478 | 573 | 47 | 79 | 89 | 7 |
-| 2045 (insolvent) | 341 | 333 | 0 | 8 | 0 | 0 | 657 | 3 | -319 | -2.392 | -1.998 | 2.392 | 7 | 18 | 2 | 7 | 123 | 478 | 751 | 46 | 44 | 52 | 7 |
-| 2046 (insolvent) | 271 | 265 | 0 | 5 | 0 | 0 | 681 | 3 | -413 | -2.806 | -2.424 | 2.806 | 7 | 18 | 2 | 7 | 123 | 477 | 644 | 46 | 51 | 26 | 7 |
+| Jahr | Umsatz | Feld | Ernte | Transport | Kommunal | Ackerbau | Kosten | AfA | Gewinn | Kasse | Eigenkapital | Schulden | Schlepper | Maschinen | fest | Saison | Leih | Ø Lohn €/h | Pacht ha | Kunden | Aufträge | verspätet | storniert | Ruf | Dienste |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 2027 | 298 | 296 | 0 | 3 | 0 | 0 | 115 | 103 | 80 | 83 | 321 | 261 | 3 | 14 | 1 | 2 | 0 | 21,7 | 0 | 60 | 236 | 11 | 5 | 91 | 7 |
+| 2028 | 444 | 440 | 0 | 4 | 0 | 0 | 301 | 187 | -44 | -17 | 369 | 363 | 5 | 20 | 1 | 4 | 0 | 21,9 | 72 | 94 | 409 | 22 | 14 | 97 | 9 |
+| 2029 | 855 | 729 | 0 | 7 | 0 | 118 | 499 | 235 | 121 | 36 | 600 | 496 | 7 | 25 | 1 | 6 | 0 | 20,8 | 72 | 177 | 716 | 24 | 10 | 99 | 9 |
+| 2030 | 955 | 815 | 0 | 14 | 0 | 126 | 609 | 210 | 140 | 53 | 649 | 579 | 8 | 29 | 1 | 7 | 0 | 20,6 | 100 | 234 | 901 | 45 | 1 | 100 | 10 |
+| 2031 | 1.026 | 842 | 0 | 44 | 0 | 154 | 632 | 193 | 202 | 103 | 908 | 729 | 9 | 32 | 1 | 8 | 0 | 20,7 | 100 | 276 | 1069 | 58 | 1 | 85 | 10 |
+| 2032 | 1.091 | 764 | 75 | 141 | 9 | 117 | 763 | 287 | 46 | 231 | 988 | 754 | 9 | 35 | 1 | 9 | 0 | 21,1 | 127 | 310 | 1060 | 86 | 29 | 76 | 12 |
+| 2033 | 1.403 | 825 | 56 | 130 | 22 | 352 | 882 | 262 | 263 | 44 | 1.310 | 1.169 | 9 | 41 | 3 | 9 | 0 | 20,8 | 127 | 344 | 1308 | 125 | 9 | 67 | 13 |
+| 2034 | 1.513 | 780 | 378 | 139 | 24 | 201 | 1.151 | 465 | -103 | 298 | 1.412 | 1.157 | 9 | 41 | 4 | 9 | 0 | 21,2 | 159 | 413 | 1348 | 185 | 23 | 68 | 16 |
+| 2035 | 1.856 | 765 | 325 | 134 | 27 | 596 | 1.281 | 429 | 147 | 615 | 1.822 | 1.014 | 10 | 43 | 4 | 9 | 0 | 21,6 | 175 | 482 | 1475 | 124 | 35 | 87 | 15 |
+| 2036 | 1.617 | 728 | 486 | 238 | 32 | 166 | 1.365 | 547 | -294 | 334 | 1.773 | 1.278 | 10 | 48 | 5 | 9 | 0 | 21,8 | 192 | 533 | 1616 | 197 | 22 | 67 | 18 |
+| 2037 | 1.672 | 611 | 417 | 232 | 31 | 369 | 1.295 | 360 | 23 | 478 | 1.966 | 1.027 | 10 | 47 | 5 | 9 | 0 | 21,8 | 165 | 549 | 1378 | 232 | 52 | 3 | 18 |
+| 2038 | 1.665 | 617 | 474 | 220 | 40 | 360 | 1.384 | 335 | -52 | 552 | 2.143 | 799 | 10 | 46 | 5 | 9 | 0 | 22 | 219 | 578 | 1487 | 181 | 52 | 74 | 18 |
+| 2039 | 1.692 | 600 | 416 | 213 | 41 | 391 | 1.426 | 162 | 105 | 600 | 2.241 | 575 | 10 | 47 | 5 | 9 | 0 | 22,2 | 228 | 611 | 1499 | 164 | 46 | 59 | 18 |
+| 2040 | 1.788 | 511 | 456 | 212 | 29 | 542 | 1.426 | 138 | 224 | 753 | 2.413 | 383 | 10 | 47 | 5 | 9 | 0 | 22,4 | 235 | 621 | 1344 | 207 | 35 | 79 | 16 |
+| 2041 | 1.640 | 529 | 505 | 235 | 25 | 362 | 1.353 | 138 | 149 | 798 | 2.523 | 204 | 10 | 47 | 5 | 9 | 0 | 22,4 | 260 | 649 | 1450 | 184 | 49 | 84 | 18 |
+| 2042 | 1.681 | 509 | 423 | 222 | 46 | 519 | 1.513 | 38 | 144 | 827 | 2.564 | 101 | 10 | 46 | 5 | 9 | 0 | 22,5 | 275 | 669 | 1386 | 216 | 42 | 64 | 17 |
+| 2043 | 1.866 | 539 | 415 | 230 | 29 | 652 | 1.551 | 30 | 284 | 1.033 | 2.737 | 20 | 10 | 46 | 5 | 9 | 0 | 22,8 | 289 | 699 | 1437 | 162 | 32 | 61 | 18 |
+| 2044 | 1.602 | 461 | 466 | 220 | 40 | 402 | 1.382 | 22 | 201 | 1.145 | 2.751 | 0 | 10 | 45 | 5 | 9 | 0 | 22,9 | 307 | 706 | 1424 | 236 | 28 | 71 | 18 |
+| 2045 | 1.454 | 472 | 285 | 208 | 42 | 423 | 1.373 | 16 | 65 | 1.180 | 2.656 | 0 | 10 | 45 | 5 | 9 | 0 | 22,9 | 292 | 706 | 1329 | 224 | 37 | 53 | 18 |
+| 2046 | 2.074 | 457 | 380 | 238 | 47 | 954 | 1.587 | 10 | 484 | 1.653 | 3.062 | 0 | 10 | 45 | 5 | 9 | 0 | 23 | 282 | 704 | 1485 | 160 | 32 | 91 | 18 |
 
 ### Ausgaben je Kategorie (T€, Zahlungen inkl. Investitionen)
 
-| Jahr | Ackerbau | Bau | Diesel | Gebäude | Leasing | Maschinenkauf | Maut | Pacht | Personal | Sonstiges | Steuern | Tilgung | Versicherung | Werkstatt | Zinsen |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 2027 | 0 | 0 | 55 | 0 | 0 | 369 | 0 | 0 | 42 | 0 | 0 | 16 | 5 | 40 | 6 |
-| 2028 | 11 | 0 | 67 | 0 | 0 | 92 | 0 | 45 | 75 | 0 | 5 | 26 | 6 | 75 | 9 |
-| 2029 | 44 | 0 | 90 | 0 | 0 | 344 | 0 | 45 | 106 | 0 | 0 | 38 | 8 | 66 | 13 |
-| 2030 | 51 | 0 | 132 | 0 | 0 | 233 | 0 | 72 | 163 | 0 | 0 | 53 | 11 | 102 | 19 |
-| 2031 | 60 | 0 | 132 | 0 | 0 | 151 | 0 | 72 | 164 | 0 | 0 | 67 | 12 | 93 | 21 |
-| 2032 | 64 | 0 | 129 | 0 | 0 | 0 | 0 | 72 | 170 | 0 | 2 | 79 | 12 | 126 | 20 |
-| 2033 | 27 | 85 | 143 | 3 | 32 | 67 | 6 | 89 | 180 | 0 | 0 | 91 | 13 | 88 | 20 |
-| 2034 | 36 | 0 | 156 | 2 | 70 | 80 | 5 | 89 | 241 | 0 | 4 | 103 | 13 | 86 | 20 |
-| 2035 | 18 | 0 | 164 | 2 | 89 | 0 | 8 | 89 | 308 | 0 | 0 | 91 | 13 | 123 | 28 |
-| 2036 | 14 | 0 | 173 | 2 | 89 | 0 | 8 | 89 | 302 | 0 | 0 | 81 | 13 | 91 | 38 |
-| 2037 | 17 | 0 | 166 | 2 | 89 | 0 | 7 | 89 | 305 | 0 | 0 | 70 | 13 | 97 | 49 |
-| 2038 | 5 | 0 | 139 | 2 | 56 | 0 | 1 | 89 | 271 | 0 | 0 | 53 | 12 | 115 | 61 |
-| 2039 | 5 | 0 | 96 | 2 | 14 | 0 | 0 | 89 | 222 | 0 | 0 | 39 | 11 | 72 | 79 |
-| 2040 | 5 | 0 | 97 | 2 | 0 | 0 | 0 | 89 | 226 | 0 | 0 | 28 | 11 | 67 | 101 |
-| 2041 | 5 | 0 | 76 | 2 | 0 | 0 | 0 | 89 | 199 | 0 | 0 | 17 | 11 | 56 | 123 |
-| 2042 | 5 | 0 | 75 | 2 | 0 | 0 | 0 | 89 | 192 | 0 | 0 | 7 | 11 | 53 | 147 |
-| 2043 | 5 | 0 | 77 | 2 | 0 | 0 | 0 | 89 | 194 | 0 | 0 | 0 | 11 | 71 | 176 |
-| 2044 | 5 | 0 | 59 | 2 | 0 | 0 | 0 | 89 | 168 | 0 | 0 | 0 | 11 | 57 | 208 |
-| 2045 | 5 | 0 | 74 | 2 | 0 | 0 | 0 | 89 | 189 | 0 | 0 | 0 | 10 | 49 | 242 |
-| 2046 | 5 | 0 | 60 | 2 | 0 | 0 | 0 | 89 | 174 | 0 | 0 | 0 | 10 | 63 | 281 |
+| Jahr | Ackerbau | Bau | Diesel | Gebäude | Maschinenkauf | Maut | Pacht | Personal | Sonstiges | Steuern | Tilgung | Versicherung | Werkstatt | Zinsen |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 2027 | 0 | 0 | 51 | 0 | 460 | 0 | 0 | 31 | 0 | 0 | 19 | 4 | 22 | 8 |
+| 2028 | 15 | 0 | 81 | 0 | 307 | 0 | 51 | 88 | 0 | 21 | 35 | 8 | 45 | 13 |
+| 2029 | 50 | 45 | 142 | 0 | 406 | 0 | 51 | 171 | 0 | 0 | 51 | 11 | 56 | 18 |
+| 2030 | 62 | 150 | 162 | 4 | 228 | 0 | 73 | 202 | 0 | 38 | 76 | 13 | 68 | 25 |
+| 2031 | 65 | 0 | 174 | 2 | 449 | 1 | 73 | 205 | 0 | 46 | 91 | 14 | 72 | 26 |
+| 2032 | 100 | 85 | 193 | 6 | 78 | 8 | 89 | 246 | 0 | 72 | 125 | 16 | 77 | 34 |
+| 2033 | 110 | 0 | 221 | 4 | 1.118 | 7 | 89 | 323 | 0 | 8 | 145 | 16 | 85 | 34 |
+| 2034 | 71 | 0 | 275 | 4 | 0 | 8 | 105 | 514 | 0 | 97 | 212 | 19 | 107 | 56 |
+| 2035 | 214 | 0 | 267 | 4 | 122 | 7 | 123 | 499 | 0 | 0 | 213 | 19 | 97 | 50 |
+| 2036 | 77 | 0 | 323 | 4 | 752 | 17 | 138 | 625 | 9 | 49 | 246 | 22 | 104 | 60 |
+| 2037 | 109 | 0 | 286 | 4 | 0 | 15 | 121 | 588 | 2 | 0 | 251 | 21 | 96 | 54 |
+| 2038 | 142 | 0 | 291 | 4 | 0 | 14 | 154 | 595 | 0 | 2 | 229 | 21 | 119 | 43 |
+| 2039 | 125 | 0 | 292 | 4 | 14 | 15 | 161 | 625 | 6 | 0 | 224 | 21 | 145 | 33 |
+| 2040 | 195 | 0 | 278 | 4 | 0 | 16 | 162 | 611 | 2 | 31 | 192 | 20 | 112 | 23 |
+| 2041 | 136 | 0 | 292 | 4 | 0 | 15 | 192 | 575 | 0 | 81 | 180 | 21 | 102 | 14 |
+| 2042 | 203 | 0 | 283 | 4 | 14 | 14 | 221 | 621 | 0 | 50 | 103 | 21 | 140 | 7 |
+| 2043 | 227 | 0 | 289 | 4 | 0 | 17 | 215 | 625 | 0 | 47 | 81 | 20 | 148 | 3 |
+| 2044 | 144 | 0 | 278 | 4 | 0 | 16 | 222 | 584 | 4 | 107 | 20 | 20 | 109 | 0 |
+| 2045 | 207 | 0 | 249 | 4 | 0 | 15 | 221 | 581 | 0 | 72 | 0 | 20 | 81 | 0 |
+| 2046 | 307 | 0 | 279 | 4 | 9 | 14 | 226 | 616 | 0 | 14 | 0 | 20 | 118 | 0 |
 
 ### Umsatz je Dienst (T€)
 
-| Jahr | drusch | einzelkorn | grubbern | guelle | hacken | pflanzenschutz | pressen | saat | stoppel | striegeln | transport |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 2027 | 0 | 24 | 92 | 75 | 6 | 44 | 0 | 0 | 33 | 7 | 5 |
-| 2028 | 0 | 14 | 102 | 103 | 21 | 44 | 0 | 0 | 30 | 13 | 13 |
-| 2029 | 0 | 22 | 113 | 104 | 25 | 74 | 16 | 21 | 34 | 15 | 16 |
-| 2030 | 0 | 30 | 118 | 142 | 47 | 66 | 34 | 68 | 48 | 21 | 9 |
-| 2031 | 0 | 37 | 91 | 167 | 47 | 61 | 33 | 86 | 55 | 26 | 5 |
-| 2032 | 0 | 32 | 86 | 129 | 46 | 81 | 40 | 79 | 50 | 22 | 15 |
-| 2033 | 0 | 32 | 36 | 155 | 49 | 74 | 46 | 91 | 51 | 20 | 111 |
-| 2034 | 76 | 47 | 79 | 57 | 32 | 81 | 50 | 54 | 59 | 17 | 102 |
-| 2035 | 76 | 47 | 70 | 88 | 54 | 97 | 40 | 84 | 34 | 27 | 143 |
-| 2036 | 84 | 50 | 74 | 78 | 51 | 85 | 50 | 90 | 41 | 23 | 125 |
-| 2037 | 70 | 45 | 70 | 94 | 69 | 79 | 47 | 84 | 38 | 22 | 125 |
-| 2038 | 81 | 36 | 43 | 110 | 68 | 66 | 47 | 85 | 37 | 27 | 25 |
-| 2039 | 0 | 45 | 0 | 64 | 60 | 82 | 29 | 83 | 33 | 15 | 10 |
-| 2040 | 0 | 44 | 0 | 89 | 45 | 63 | 36 | 83 | 30 | 15 | 11 |
-| 2041 | 0 | 43 | 0 | 74 | 45 | 63 | 37 | 51 | 0 | 21 | 9 |
-| 2042 | 0 | 38 | 0 | 79 | 50 | 56 | 37 | 49 | 0 | 12 | 9 |
-| 2043 | 0 | 32 | 0 | 72 | 37 | 88 | 31 | 62 | 0 | 14 | 6 |
-| 2044 | 0 | 0 | 0 | 79 | 21 | 47 | 26 | 54 | 0 | 16 | 10 |
-| 2045 | 0 | 0 | 0 | 142 | 39 | 55 | 22 | 52 | 0 | 22 | 8 |
-| 2046 | 0 | 0 | 0 | 106 | 26 | 43 | 33 | 40 | 0 | 17 | 5 |
+| Jahr | drusch | einzelkorn | grubbern | guelle | hacken | haeckseln | hecke | kartoffelroden | maehen | pflanzenschutz | pressen | roden | saat | stoppel | striegeln | transport | wegebau | winterdienst |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 2027 | 0 | 23 | 102 | 87 | 0 | 0 | 0 | 0 | 0 | 56 | 0 | 0 | 0 | 26 | 1 | 3 | 0 | 0 |
+| 2028 | 0 | 27 | 116 | 113 | 37 | 0 | 0 | 0 | 0 | 57 | 0 | 0 | 22 | 53 | 14 | 4 | 0 | 0 |
+| 2029 | 0 | 47 | 154 | 144 | 76 | 0 | 0 | 0 | 0 | 80 | 0 | 0 | 125 | 85 | 19 | 7 | 0 | 0 |
+| 2030 | 0 | 66 | 118 | 161 | 61 | 0 | 0 | 0 | 0 | 121 | 37 | 0 | 141 | 81 | 29 | 14 | 0 | 0 |
+| 2031 | 0 | 80 | 108 | 177 | 59 | 0 | 0 | 0 | 0 | 110 | 42 | 0 | 150 | 74 | 42 | 44 | 0 | 0 |
+| 2032 | 75 | 79 | 73 | 135 | 78 | 0 | 0 | 0 | 0 | 98 | 25 | 0 | 146 | 65 | 66 | 141 | 0 | 2 |
+| 2033 | 56 | 85 | 189 | 108 | 41 | 0 | 0 | 0 | 9 | 126 | 46 | 0 | 142 | 63 | 25 | 130 | 0 | 1 |
+| 2034 | 71 | 79 | 171 | 77 | 22 | 90 | 0 | 18 | 8 | 123 | 35 | 198 | 178 | 72 | 23 | 139 | 0 | 3 |
+| 2035 | 72 | 75 | 162 | 84 | 45 | 16 | 0 | 0 | 12 | 120 | 23 | 237 | 143 | 73 | 40 | 134 | 0 | 3 |
+| 2036 | 70 | 89 | 173 | 60 | 28 | 20 | 4 | 27 | 5 | 110 | 26 | 370 | 134 | 70 | 38 | 238 | 6 | 5 |
+| 2037 | 76 | 75 | 133 | 35 | 15 | 91 | 2 | 37 | 3 | 106 | 33 | 213 | 120 | 74 | 19 | 232 | 9 | 5 |
+| 2038 | 62 | 58 | 75 | 116 | 57 | 42 | 8 | 2 | 4 | 89 | 19 | 368 | 111 | 58 | 33 | 220 | 12 | 7 |
+| 2039 | 41 | 69 | 87 | 44 | 33 | 2 | 7 | 21 | 11 | 109 | 28 | 352 | 148 | 65 | 17 | 213 | 9 | 5 |
+| 2040 | 69 | 57 | 63 | 58 | 44 | 7 | 0 | 0 | 5 | 73 | 24 | 380 | 121 | 65 | 7 | 212 | 8 | 5 |
+| 2041 | 60 | 54 | 86 | 39 | 34 | 77 | 8 | 15 | 1 | 80 | 21 | 353 | 124 | 64 | 27 | 235 | 2 | 2 |
+| 2042 | 35 | 51 | 66 | 41 | 68 | 11 | 11 | 0 | 10 | 58 | 33 | 377 | 119 | 57 | 15 | 222 | 9 | 4 |
+| 2043 | 37 | 54 | 73 | 81 | 56 | 62 | 4 | 4 | 4 | 72 | 25 | 313 | 85 | 61 | 33 | 230 | 7 | 2 |
+| 2044 | 44 | 41 | 88 | 43 | 32 | 22 | 5 | 40 | 4 | 78 | 18 | 360 | 89 | 51 | 20 | 220 | 13 | 5 |
+| 2045 | 50 | 44 | 88 | 44 | 26 | 15 | 4 | 20 | 2 | 79 | 16 | 200 | 115 | 40 | 19 | 208 | 20 | 4 |
+| 2046 | 65 | 49 | 62 | 58 | 34 | 8 | 9 | 2 | 11 | 72 | 23 | 304 | 87 | 48 | 24 | 238 | 11 | 4 |
+
+### Fahrzeugstunden je Aufgabe (Stichprobe alle 10 min, inkl. Feierabend-Wartezeit)
+
+| Jahr | haul | haul:drusch | haul:haeckseln | job | job:drusch | job:einzelkorn | job:grubbern | job:guelle | job:hacken | job:haeckseln | job:kartoffelroden | job:pflanzenschutz | job:pressen | job:roden | job:saat | job:stoppel | job:striegeln | silo:haeckseln | tour:hecke | tour:maehen | tour:wegebau | tour:winterdienst | truck | truck:transport | visit |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 2027 | 0 | 0 | 0 | 1.402 | 0 | 187 | 2.353 | 1.153 | 0 | 0 | 0 | 315 | 0 | 0 | 0 | 732 | 0 | 0 | 0 | 0 | 0 | 0 | 9 | 59 | 32 |
+| 2028 | 0 | 0 | 0 | 2.870 | 0 | 240 | 1.873 | 3.503 | 564 | 0 | 0 | 646 | 0 | 0 | 335 | 1.231 | 50 | 0 | 0 | 0 | 0 | 0 | 0 | 206 | 14 |
+| 2029 | 0 | 0 | 0 | 3.741 | 0 | 248 | 3.568 | 2.989 | 1.289 | 0 | 0 | 763 | 0 | 0 | 2.527 | 2.170 | 171 | 0 | 0 | 0 | 0 | 0 | 64 | 341 | 0 |
+| 2030 | 0 | 0 | 0 | 4.594 | 0 | 457 | 3.019 | 4.021 | 1.200 | 0 | 0 | 533 | 750 | 0 | 2.427 | 2.007 | 148 | 0 | 0 | 0 | 0 | 0 | 44 | 989 | 0 |
+| 2031 | 0 | 0 | 0 | 5.036 | 0 | 381 | 2.878 | 3.594 | 1.191 | 0 | 0 | 796 | 634 | 0 | 2.175 | 1.761 | 222 | 0 | 0 | 0 | 0 | 0 | 71 | 2.215 | 0 |
+| 2032 | 3 | 286 | 0 | 3.923 | 691 | 626 | 2.131 | 3.513 | 1.707 | 0 | 0 | 765 | 387 | 0 | 2.884 | 1.741 | 393 | 0 | 0 | 0 | 0 | 41 | 331 | 4.647 | 0 |
+| 2033 | 0 | 76 | 0 | 2.013 | 922 | 1.253 | 5.302 | 2.631 | 903 | 0 | 0 | 2.193 | 933 | 0 | 3.119 | 1.325 | 262 | 0 | 0 | 48 | 0 | 33 | 411 | 4.320 | 0 |
+| 2034 | 0 | 11 | 743 | 1.877 | 1.041 | 1.078 | 4.831 | 2.039 | 465 | 789 | 210 | 2.117 | 581 | 1.562 | 3.837 | 1.729 | 202 | 746 | 0 | 47 | 0 | 73 | 537 | 4.294 | 0 |
+| 2035 | 9 | 55 | 0 | 1.892 | 749 | 1.036 | 4.891 | 1.865 | 876 | 47 | 1.092 | 2.295 | 519 | 1.636 | 3.794 | 2.562 | 527 | 0 | 0 | 71 | 0 | 73 | 302 | 4.524 | 0 |
+| 2036 | 0 | 183 | 524 | 1.425 | 685 | 1.180 | 5.023 | 2.017 | 610 | 547 | 350 | 2.326 | 622 | 3.992 | 3.252 | 2.541 | 505 | 356 | 16 | 29 | 11 | 102 | 699 | 8.209 | 0 |
+| 2037 | 0 | 15 | 454 | 1.234 | 857 | 1.278 | 4.458 | 1.325 | 463 | 491 | 412 | 2.463 | 684 | 3.720 | 3.657 | 2.341 | 187 | 420 | 11 | 18 | 17 | 154 | 827 | 7.237 | 0 |
+| 2038 | 0 | 121 | 427 | 1.851 | 788 | 639 | 2.960 | 3.022 | 1.377 | 526 | 231 | 1.941 | 294 | 3.245 | 2.583 | 2.151 | 295 | 428 | 38 | 25 | 21 | 173 | 571 | 7.691 | 0 |
+| 2039 | 4 | 190 | 970 | 1.625 | 901 | 1.088 | 2.624 | 1.562 | 703 | 980 | 259 | 2.509 | 500 | 3.449 | 3.642 | 1.902 | 166 | 894 | 38 | 63 | 17 | 115 | 807 | 8.184 | 0 |
+| 2040 | 0 | 152 | 884 | 1.152 | 792 | 952 | 2.509 | 1.780 | 1.245 | 883 | 333 | 2.069 | 540 | 3.096 | 3.065 | 2.272 | 158 | 852 | 0 | 25 | 18 | 120 | 570 | 7.457 | 0 |
+| 2041 | 14 | 132 | 135 | 1.168 | 652 | 732 | 2.872 | 1.044 | 1.204 | 520 | 310 | 2.011 | 420 | 3.014 | 2.716 | 2.258 | 268 | 137 | 41 | 8 | 4 | 60 | 723 | 6.595 | 0 |
+| 2042 | 0 | 137 | 942 | 1.553 | 777 | 879 | 2.648 | 1.569 | 2.077 | 999 | 395 | 1.368 | 586 | 3.047 | 3.175 | 1.807 | 148 | 941 | 54 | 54 | 17 | 102 | 563 | 7.595 | 0 |
+| 2043 | 0 | 57 | 389 | 2.113 | 880 | 519 | 2.384 | 2.050 | 1.191 | 419 | 495 | 2.147 | 559 | 3.361 | 2.457 | 1.781 | 455 | 392 | 17 | 22 | 16 | 62 | 716 | 7.862 | 0 |
+| 2044 | 0 | 91 | 481 | 872 | 926 | 683 | 2.610 | 1.588 | 786 | 508 | 442 | 2.316 | 320 | 3.144 | 2.501 | 1.939 | 333 | 335 | 27 | 25 | 27 | 102 | 818 | 7.492 | 0 |
+| 2045 | 0 | 13 | 481 | 890 | 816 | 1.253 | 2.713 | 1.102 | 660 | 478 | 299 | 2.287 | 354 | 2.191 | 2.481 | 1.600 | 285 | 522 | 24 | 14 | 38 | 87 | 607 | 7.310 | 0 |
+| 2046 | 0 | 139 | 1.117 | 1.633 | 842 | 676 | 2.200 | 1.483 | 943 | 1.131 | 499 | 2.040 | 409 | 3.057 | 2.731 | 1.841 | 363 | 1.117 | 49 | 62 | 21 | 82 | 763 | 7.039 | 0 |
 
 ### Dienste je Jahr
 
-- 2027: einzelkorn, grubbern, guelle, hacken, pflanzenschutz, stoppel, striegeln, transport
-- 2028: einzelkorn, grubbern, guelle, hacken, pflanzenschutz, stoppel, striegeln, transport
-- 2029: einzelkorn, grubbern, guelle, hacken, pflanzenschutz, pressen, saat, stoppel, striegeln, transport
+- 2027: einzelkorn, grubbern, guelle, pflanzenschutz, stoppel, striegeln, transport
+- 2028: einzelkorn, grubbern, guelle, hacken, pflanzenschutz, saat, stoppel, striegeln, transport
+- 2029: einzelkorn, grubbern, guelle, hacken, pflanzenschutz, saat, stoppel, striegeln, transport
 - 2030: einzelkorn, grubbern, guelle, hacken, pflanzenschutz, pressen, saat, stoppel, striegeln, transport
 - 2031: einzelkorn, grubbern, guelle, hacken, pflanzenschutz, pressen, saat, stoppel, striegeln, transport
-- 2032: einzelkorn, grubbern, guelle, hacken, pflanzenschutz, pressen, saat, stoppel, striegeln, transport
-- 2033: einzelkorn, grubbern, guelle, hacken, pflanzenschutz, pressen, saat, stoppel, striegeln, transport
-- 2034: drusch, einzelkorn, grubbern, guelle, hacken, pflanzenschutz, pressen, saat, stoppel, striegeln, transport
-- 2035: drusch, einzelkorn, grubbern, guelle, hacken, pflanzenschutz, pressen, saat, stoppel, striegeln, transport
-- 2036: drusch, einzelkorn, grubbern, guelle, hacken, pflanzenschutz, pressen, saat, stoppel, striegeln, transport
-- 2037: drusch, einzelkorn, grubbern, guelle, hacken, pflanzenschutz, pressen, saat, stoppel, striegeln, transport
-- 2038: drusch, einzelkorn, grubbern, guelle, hacken, pflanzenschutz, pressen, saat, stoppel, striegeln, transport
-- 2039: einzelkorn, guelle, hacken, pflanzenschutz, pressen, saat, stoppel, striegeln, transport
-- 2040: einzelkorn, guelle, hacken, pflanzenschutz, pressen, saat, stoppel, striegeln, transport
-- 2041: einzelkorn, guelle, hacken, pflanzenschutz, pressen, saat, striegeln, transport
-- 2042: einzelkorn, guelle, hacken, pflanzenschutz, pressen, saat, striegeln, transport
-- 2043: einzelkorn, guelle, hacken, pflanzenschutz, pressen, saat, striegeln, transport
-- 2044: guelle, hacken, pflanzenschutz, pressen, saat, striegeln, transport
-- 2045: guelle, hacken, pflanzenschutz, pressen, saat, striegeln, transport
-- 2046: guelle, hacken, pflanzenschutz, pressen, saat, striegeln, transport
+- 2032: drusch, einzelkorn, grubbern, guelle, hacken, pflanzenschutz, pressen, saat, stoppel, striegeln, transport, winterdienst
+- 2033: drusch, einzelkorn, grubbern, guelle, hacken, maehen, pflanzenschutz, pressen, saat, stoppel, striegeln, transport, winterdienst
+- 2034: drusch, einzelkorn, grubbern, guelle, hacken, haeckseln, kartoffelroden, maehen, pflanzenschutz, pressen, roden, saat, stoppel, striegeln, transport, winterdienst
+- 2035: drusch, einzelkorn, grubbern, guelle, hacken, haeckseln, maehen, pflanzenschutz, pressen, roden, saat, stoppel, striegeln, transport, winterdienst
+- 2036: drusch, einzelkorn, grubbern, guelle, hacken, haeckseln, hecke, kartoffelroden, maehen, pflanzenschutz, pressen, roden, saat, stoppel, striegeln, transport, wegebau, winterdienst
+- 2037: drusch, einzelkorn, grubbern, guelle, hacken, haeckseln, hecke, kartoffelroden, maehen, pflanzenschutz, pressen, roden, saat, stoppel, striegeln, transport, wegebau, winterdienst
+- 2038: drusch, einzelkorn, grubbern, guelle, hacken, haeckseln, hecke, kartoffelroden, maehen, pflanzenschutz, pressen, roden, saat, stoppel, striegeln, transport, wegebau, winterdienst
+- 2039: drusch, einzelkorn, grubbern, guelle, hacken, haeckseln, hecke, kartoffelroden, maehen, pflanzenschutz, pressen, roden, saat, stoppel, striegeln, transport, wegebau, winterdienst
+- 2040: drusch, einzelkorn, grubbern, guelle, hacken, haeckseln, maehen, pflanzenschutz, pressen, roden, saat, stoppel, striegeln, transport, wegebau, winterdienst
+- 2041: drusch, einzelkorn, grubbern, guelle, hacken, haeckseln, hecke, kartoffelroden, maehen, pflanzenschutz, pressen, roden, saat, stoppel, striegeln, transport, wegebau, winterdienst
+- 2042: drusch, einzelkorn, grubbern, guelle, hacken, haeckseln, hecke, maehen, pflanzenschutz, pressen, roden, saat, stoppel, striegeln, transport, wegebau, winterdienst
+- 2043: drusch, einzelkorn, grubbern, guelle, hacken, haeckseln, hecke, kartoffelroden, maehen, pflanzenschutz, pressen, roden, saat, stoppel, striegeln, transport, wegebau, winterdienst
+- 2044: drusch, einzelkorn, grubbern, guelle, hacken, haeckseln, hecke, kartoffelroden, maehen, pflanzenschutz, pressen, roden, saat, stoppel, striegeln, transport, wegebau, winterdienst
+- 2045: drusch, einzelkorn, grubbern, guelle, hacken, haeckseln, hecke, kartoffelroden, maehen, pflanzenschutz, pressen, roden, saat, stoppel, striegeln, transport, wegebau, winterdienst
+- 2046: drusch, einzelkorn, grubbern, guelle, hacken, haeckseln, hecke, kartoffelroden, maehen, pflanzenschutz, pressen, roden, saat, stoppel, striegeln, transport, wegebau, winterdienst
 
 ### Investitionen
 
@@ -158,49 +203,96 @@ Rechenzeit: 246 s
 - 3/2027: guellefass gebraucht Joskin Volumetra 16500 D + Schleppschlauch 15 m 62.600 € (Anfrage guelle)
 - 3/2027: schlepper gebraucht Fendt 516 Vario 69.500 € (Schlepper ausgelastet)
 - 3/2027: einzelkorn gebraucht Kverneland Optima V 8-reihig (6 m) 31.700 € (Anfrage einzelkorn)
-- 4/2027: spritze gebraucht Amazone UX 5201 Super (24 m) 49.900 € (Anfrage pflanzenschutz)
-- 5/2027: striegel gebraucht Einböck Aerostar 9 m 8.900 € (Anfrage striegeln)
-- 5/2027: schlepper gebraucht New Holland T6.180 55.500 € (Schlepper ausgelastet)
-- 6/2027: hacke gebraucht Einböck Chopstar 6-reihig mit Kamera 38.400 € (Anfrage hacken)
+- 4/2027: guellefass gebraucht Joskin Alpina 2 7100 S + Schleppschuh 7,5 m 32.700 € (Dienst ausgelastet)
+- 5/2027: striegel gebraucht Einböck Aerostar 9 m 7.100 € (Anfrage striegeln)
+- 5/2027: spritze gebraucht Kverneland iXtrack T4 (30 m) 71.900 € (Anfrage pflanzenschutz)
+- 6/2027: hacke neu gekauft Einböck Chopstar 6-reihig mit Kamera 45.000 € (Anfrage hacken)
+- 6/2027: spritze gebraucht Amazone UX 5201 Super (24 m) 58.800 € (Dienst ausgelastet)
 - 7/2027: kurzscheibenegge gebraucht Horsch Joker 3 CT 11.900 € (Anfrage stoppel)
-- 7/2027: kurzscheibenegge gebraucht Köckerling Rebell 600 T 20.400 € (Dienst ausgelastet)
-- 9/2027: grubber gebraucht Horsch Terrano 4 FX 12.000 € (Dienst ausgelastet)
-- 3/2028: guellefass gebraucht Joskin Alpina 2 7100 S + Schleppschuh 7,5 m 18.700 € (Dienst ausgelastet)
-- 5/2028: spritze gebraucht Kverneland iXtrack T4 (30 m) 73.500 € (Dienst ausgelastet)
-- 6/2029: hacke neu gekauft Einböck Chopstar 6-reihig mit Kamera 45.000 € (Dienst ausgelastet)
-- 7/2029: presse gebraucht Krone BiG Pack 1290 HDP II 82.500 € (Anfrage pressen)
-- 8/2029: drille neu gekauft Amazone KE 3002 + Centaya 3000 (3 m) 52.000 € (Anfrage saat)
-- 8/2029: schlepper gebraucht Valtra N155e 65.300 € (Schlepper ausgelastet)
-- 9/2029: grubber gebraucht Horsch Terrano 4 FX 12.500 € (Dienst ausgelastet)
-- 9/2029: schlepper gebraucht John Deere 6R 215 94.900 € (Schlepper ausgelastet)
-- 7/2030: presse gebraucht Claas Quadrant 5300 FC 140.800 € (Dienst ausgelastet)
-- 8/2030: drille gebraucht Amazone KE 3002 + Centaya 3000 (3 m) 25.800 € (Dienst ausgelastet)
-- 9/2030: schlepper gebraucht Deutz-Fahr 6165 TTV 66.700 € (Schlepper ausgelastet)
-- 9/2031: grubber neu gekauft Köckerling Trio 300 19.000 € (Dienst ausgelastet)
-- 9/2031: schlepper gebraucht Claas Axion 870 95.200 € (Schlepper ausgelastet)
-- 9/2031: grubber gebraucht Horsch Tiger 6 DT 38.000 € (Dienst ausgelastet)
-- 11/2032: lkw neu geleast Mercedes-Benz Actros 1848 + Kippsattel 178.000 € (Ausbauplan)
-- 5/2033: spritze gebraucht Kverneland iXtrack T4 (30 m) 53.000 € (Dienst ausgelastet)
-- 5/2033: striegel neu gekauft Einböck Aerostar 9 m 16.000 € (Dienst ausgelastet)
-- 2/2034: maehdrescher neu geleast Deutz-Fahr C7206 TS + 6,3 m 310.000 € (Ausbauplan)
-- 2/2034: kipper gebraucht Fliegl TDK 302 Tridem-Kipper (22 t) 33.800 € (Ausbauplan)
-- 9/2034: drille neu gekauft Amazone KE 3002 + Centaya 3000 (3 m) 52.000 € (Dienst ausgelastet)
+- 9/2027: grubber gebraucht Horsch Terrano 4 FX 12.500 € (Dienst ausgelastet)
+- 10/2027: schlepper gebraucht Deutz-Fahr 6165 TTV 51.100 € (Schlepper ausgelastet)
+- 4/2028: schlepper gebraucht Claas Arion 550 64.200 € (Schlepper ausgelastet)
+- 6/2028: hacke neu gekauft Einböck Chopstar 6-reihig mit Kamera 45.000 € (Dienst ausgelastet)
+- 8/2028: kurzscheibenegge neu gekauft Horsch Joker 3 CT 21.000 € (Dienst ausgelastet)
+- 8/2028: drille neu gekauft Amazone KE 3002 + Centaya 3000 (3 m) 52.000 € (Anfrage saat)
+- 8/2028: kurzscheibenegge gebraucht Horsch Joker 3 CT 16.500 € (Dienst ausgelastet)
+- 9/2028: schlepper gebraucht Deutz-Fahr 6165 TTV 117.600 € (Schlepper ausgelastet)
+- 7/2029: presse neu gekauft Krone BiG Pack 1290 HDP II 160.000 € (Anfrage pressen)
+- 8/2029: drille neu gekauft Amazone KE 3002 + Centaya 3000 (3 m) 52.000 € (Dienst ausgelastet)
+- 8/2029: drille gebraucht Amazone KE 3002 + Centaya 3000 (3 m) 34.700 € (Dienst ausgelastet)
+- 8/2029: schlepper gebraucht Deutz-Fahr 6165 TTV 86.900 € (Schlepper ausgelastet)
+- 9/2029: schlepper gebraucht Massey Ferguson 6S.145 89.100 € (Schlepper ausgelastet)
+- 4/2030: einzelkorn gebraucht Kverneland Optima V 8-reihig (6 m) 30.400 € (Dienst ausgelastet)
+- 5/2030: grubber gebraucht Amazone Cenius 6003-2TX 38.100 € (Dienst ausgelastet)
+- 5/2030: striegel neu gekauft Einböck Aerostar 9 m 16.000 € (Dienst ausgelastet)
+- 8/2030: presse gebraucht Krone BiG Pack 1290 HDP II 77.600 € (Dienst ausgelastet)
+- 9/2030: schlepper gebraucht Valtra N155e 67.900 € (Schlepper ausgelastet)
+- 8/2031: schlepper neu gekauft Massey Ferguson 6S.145 138.000 € (Schlepper ausgelastet)
+- 11/2031: lkw gebraucht MAN TGX 18.510 + Kippsattel 117.200 € (Ausbauplan)
+- 12/2031: maehdrescher gebraucht Deutz-Fahr C7206 TS + 6,3 m 210.400 € (Ausbauplan)
+- 1/2032: kipper gebraucht Fliegl TDK 302 Tridem-Kipper (22 t) 36.200 € (Ausbauplan)
+- 3/2032: streuer gebraucht Rauch AXEO 18.1 + Frontschild 3 m 10.400 € (Ausbauplan)
+- 9/2032: grubber neu gekauft Köckerling Trio 300 19.000 € (Dienst ausgelastet)
+- 9/2032: grubber gebraucht Horsch Terrano 4 FX 14.000 € (Dienst ausgelastet)
+- 11/2032: auslegemaeher neu gekauft Mulag MKM 700 Auslegemäher 48.000 € (Ausbauplan)
+- 11/2033: feldhaecksler gebraucht Claas Jaguar 940 + Orbis 600 221.300 € (Ausbauplan)
+- 11/2033: haeckselwagen gebraucht Fliegl Gigant ASW 391 (45 m³) 73.100 € (Ausbauplan)
+- 12/2033: haeckselwagen gebraucht Fliegl Gigant ASW 391 (45 m³) 57.700 € (Ausbauplan)
+- 12/2033: ruebenroder gebraucht Grimme Rexor 6300 Platinum 497.700 € (Ausbauplan)
+- 12/2033: radlader gebraucht Liebherr L 526 75.200 € (Ausbauplan)
+- 12/2033: kartoffelroder gebraucht Grimme EVO 290 (3-reihig, Bunker 8 t) 149.500 € (Ausbauplan)
+- 11/2034: ueberladewagen neu gekauft Fliegl Überladewagen ULW 2000 (16 t) 62.000 € (Ausbauplan)
+- 9/2035: schlepper gebraucht Massey Ferguson 6S.145 64.500 € (Schlepper ausgelastet)
+- 1/2036: astschere neu gekauft Dücker Astschere am Ausleger 38.000 € (Ausbauplan)
+- 1/2036: wegehobel gebraucht Dücker Wegepflegegerät 3 m 17.900 € (Ausbauplan)
+- 1/2036: lkw gebraucht Mercedes-Benz Actros 1848 + Kippsattel 86.000 € (Ausbauplan)
+- 1/2036: ruebenroder gebraucht Grimme Rexor 6300 Platinum 600.000 € (Ausbauplan)
+- 5/2036: striegel gebraucht Einböck Aerostar 9 m 14.300 € (Dienst ausgelastet)
+- 3/2039: grubber gebraucht Köckerling Trio 300 13.600 € (Dienst ausgelastet)
+- 10/2042: grubber gebraucht Lemken Karat 10/400 13.500 € (Dienst ausgelastet)
+- 9/2046: grubber gebraucht Köckerling Trio 300 9.100 € (Dienst ausgelastet)
 
 ### Protokoll (Auszug)
 
-- 3/2029: grubber verschlissen in Zahlung gegeben (in Zahlung gegeben für 4.300 €)
-- 10/2030: grubber verschlissen in Zahlung gegeben (in Zahlung gegeben für 6.900 €)
-- 4/2033: grubber verschlissen in Zahlung gegeben (in Zahlung gegeben für 5.400 €)
-- 4/2033: spritze verschlissen in Zahlung gegeben (in Zahlung gegeben für 22.400 €)
-- 5/2034: drille verschlissen in Zahlung gegeben (in Zahlung gegeben für 12.900 €)
-- 5/2034: fest eingestellt (wird für drescher geschult): Svenja Evers
-- 5/2034: Svenja Evers auf Lehrgang (drescher)
-- 5/2034: Svenja Evers auf Lehrgang (drescher)
-- 9/2034: kurzscheibenegge verschlissen in Zahlung gegeben (in Zahlung gegeben für 4.400 €)
-- 5/2038: grubber verschlissen in Zahlung gegeben (in Zahlung gegeben für 7.400 €)
-- 7/2039: striegel verschlissen in Zahlung gegeben (in Zahlung gegeben für 2.600 €)
-- 6/2041: kurzscheibenegge verschlissen in Zahlung gegeben (in Zahlung gegeben für 5.500 €)
-- 8/2041: drille verschlissen in Zahlung gegeben (in Zahlung gegeben für 14.700 €)
-- 5/2043: einzelkorn verschlissen in Zahlung gegeben (in Zahlung gegeben für 7.200 €)
-- 4/2044: spritze verschlissen in Zahlung gegeben (in Zahlung gegeben für 17.500 €)
-- 8/2044: presse verschlissen in Zahlung gegeben (in Zahlung gegeben für 19.700 €)
+- 3/2030: grubber verschlissen in Zahlung gegeben (in Zahlung gegeben für 4.000 €)
+- 5/2032: grubber verschlissen in Zahlung gegeben (in Zahlung gegeben für 5.600 €)
+- 5/2033: striegel verschlissen in Zahlung gegeben (in Zahlung gegeben für 3.800 €)
+- 11/2033: fest eingestellt (wird für haecksler geschult): Jan Voß
+- 11/2033: Jan Voß auf Lehrgang (haecksler)
+- 11/2033: fest eingestellt für haecksler: Wiebke Beckmann
+- 12/2033: Jan Voß auf Lehrgang (haecksler)
+- 12/2033: Jan Voß auf Lehrgang (kartoffel)
+- 1/2034: Wiebke Beckmann auf Lehrgang (kartoffel)
+- 1/2034: fest eingestellt (wird für kartoffel geschult): Bernd Wilkens
+- 1/2034: Bernd Wilkens auf Lehrgang (kartoffel)
+- 1/2036: fest eingestellt für roder: Niklas Wilkens
+- 2/2036: lange Aufgabe (über 30 Tage): Fahrzeug 9 truck Auftrag 61273 (transport ) seit 5.1.2036
+- 10/2036: lange Aufgabe (über 30 Tage): Fahrzeug 9 truck Auftrag 69526 (transport ) seit 23.9.2036
+- 12/2036: lange Aufgabe (über 30 Tage): Fahrzeug 9 truck Auftrag 71342 (transport ) seit 20.11.2036
+- 5/2037: grubber verschlissen in Zahlung gegeben (in Zahlung gegeben für 6.100 €)
+- 11/2037: lange Aufgabe (über 30 Tage): Fahrzeug 17 job Auftrag 81943 (roden ) seit 31.10.2037
+- 11/2038: grubber verschlissen in Zahlung gegeben (in Zahlung gegeben für 7.700 €)
+- 11/2038: lange Aufgabe (über 30 Tage): Fahrzeug 9 truck Auftrag 90978 (transport ) seit 15.10.2038
+- 12/2038: lange Aufgabe (über 30 Tage): Fahrzeug 16 truck Auftrag 92068 (transport ) seit 21.11.2038
+- 2/2039: lange Aufgabe (über 30 Tage): Fahrzeug 9 truck Auftrag 93500 (transport ) seit 18.1.2039
+- 11/2039: lange Aufgabe (über 30 Tage): Fahrzeug 16 truck Auftrag 102067 (transport ) seit 12.10.2039
+- 1/2040: lange Aufgabe (über 30 Tage): Fahrzeug 9 truck Auftrag 103549 (transport ) seit 2.12.2039
+- 2/2040: lange Aufgabe (über 30 Tage): Fahrzeug 16 truck Auftrag 104506 (transport ) seit 18.1.2040
+- 11/2040: lange Aufgabe (über 30 Tage): Fahrzeug 9 truck Auftrag 112288 (transport ) seit 2.10.2040
+- 1/2041: lange Aufgabe (über 30 Tage): Fahrzeug 9 truck Auftrag 114091 (transport ) seit 3.12.2040
+- 12/2041: lange Aufgabe (über 30 Tage): Fahrzeug 9 truck Auftrag 124260 (transport ) seit 7.11.2041
+- 1/2042: lange Aufgabe (über 30 Tage): Fahrzeug 16 truck Auftrag 125355 (transport ) seit 27.12.2041
+- 10/2042: grubber verschlissen in Zahlung gegeben (in Zahlung gegeben für 6.600 €)
+- 10/2042: drille verschlissen in Zahlung gegeben (in Zahlung gegeben für 8.500 €)
+- 12/2042: lange Aufgabe (über 30 Tage): Fahrzeug 9 truck Auftrag 134474 (transport ) seit 4.11.2042
+- 2/2043: lange Aufgabe (über 30 Tage): Fahrzeug 9 truck Auftrag 136087 (transport ) seit 5.1.2043
+- 11/2043: lange Aufgabe (über 30 Tage): Fahrzeug 9 truck Auftrag 145130 (transport ) seit 15.10.2043
+- 11/2043: lange Aufgabe (über 30 Tage): Fahrzeug 16 truck Auftrag 145504 (transport ) seit 22.10.2043
+- 1/2044: lange Aufgabe (über 30 Tage): Fahrzeug 16 truck Auftrag 147217 (transport ) seit 30.12.2043
+- 9/2044: kurzscheibenegge verschlissen in Zahlung gegeben (in Zahlung gegeben für 2.400 €)
+- 12/2044: lange Aufgabe (über 30 Tage): Fahrzeug 9 truck Auftrag 156942 (transport ) seit 9.11.2044
+- 1/2045: lange Aufgabe (über 30 Tage): Fahrzeug 16 truck Auftrag 157442 (transport ) seit 6.12.2044
+- 12/2045: lange Aufgabe (über 30 Tage): Fahrzeug 16 truck Auftrag 168472 (transport ) seit 29.11.2045
+- 5/2046: grubber verschlissen in Zahlung gegeben (in Zahlung gegeben für 6.600 €)
+- 11/2046: lange Aufgabe (über 30 Tage): Fahrzeug 9 truck Auftrag 177600 (transport ) seit 2.10.2046
+- 2/2047: lange Aufgabe (über 30 Tage): Fahrzeug 9 truck Auftrag 180455 (transport ) seit 16.1.2047

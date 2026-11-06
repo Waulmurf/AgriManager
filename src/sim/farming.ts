@@ -109,9 +109,9 @@ export function fieldIrrigated(i: number): boolean {
   return h < 0.6;
 }
 
-/** Ortsüblicher Pachtpreis je ha (Annahme: Niedersachsen 643 € Bestand, 755 € Neupacht) */
+/** Ortsüblicher Pachtpreis je ha (Annahme: Niedersachsen 643 € Bestand, 755 € Neupacht; Uelzener Sand darunter) */
 export function referenceRent(soil: number, irrigated: boolean): number {
-  return Math.round((620 + (soil - 35) * 12 + (irrigated ? 140 : 0)) / 5) * 5;
+  return Math.round((540 + (soil - 35) * 12 + (irrigated ? 140 : 0)) / 5) * 5;
 }
 
 /** Ertragsfaktor Boden: Ackerzahl 35 = 1,0, je Punkt ±1,2 % */

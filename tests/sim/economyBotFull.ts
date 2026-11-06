@@ -5,6 +5,7 @@
  * Er investiert nach einem Plan, wenn Eigenkapital und Kreditrahmen es erlauben, stellt Fahrer
  * mit passender Qualifikation ein oder schickt sie auf Lehrgänge. Ergebnis: Jahresbericht.
  */
+import { writeFileSync } from 'node:fs';
 import type { Simulation } from '../../src/sim/engine';
 import { CATALOG, dealersFor } from '../../src/data/catalog';
 import { HARVEST_TOWED, HAULER_TYPES, SERVICE_IMPLEMENT, SERVICE_SKILL, isHarvest, type Order, type Service } from '../../src/sim/business';
@@ -33,8 +34,8 @@ export interface YearRow {
   revenue: number; expenses: number; afa: number; profit: number; insolvent: boolean;
   byBranch: Record<BranchKey, number>;
   cash: number; equity: number; debt: number;
-  tractors: number; machines: number; staffFest: number; staffSaison: number;
-  services: string[]; costs: Record<string, number>; bySvc: Record<string, number>; orders: number; late: number; cancelled: number; reputation: number; leaseHa: number; known: number;
+  tractors: number; machines: number; staffFest: number; staffSaison: number; wage: number; leih: number;
+  services: string[]; costs: Record<string, number>; bySvc: Record<string, number>; taskH: Record<string, number>; orders: number; late: number; cancelled: number; reputation: number; leaseHa: number; known: number;
 }
 
 export interface FullResult { years: YearRow[]; purchases: string[]; log: string[]; seconds: number }
@@ -59,7 +60,7 @@ export function runFullBot(s: Simulation, years: number): FullResult {
   let planDueSince = -1;
   const ordersLastYear: Record<string, number> = {};
   // Jahreswerte
-  const yearAcc = () => ({ byBranch: { feld: 0, ernte: 0, transport: 0, kommunal: 0, ackerbau: 0 } as Record<BranchKey, number>, services: new Set<string>(), orders: 0, late: 0, cancelled: 0, costs: {} as Record<string, number>, bySvc: {} as Record<string, number>, svcOrders: {} as Record<string, number> });
+  const yearAcc = () => ({ byBranch: { feld: 0, ernte: 0, transport: 0, kommunal: 0, ackerbau: 0 } as Record<BranchKey, number>, services: new Set<string>(), orders: 0, late: 0, cancelled: 0, costs: {} as Record<string, number>, bySvc: {} as Record<string, number>, svcOrders: {} as Record<string, number>, taskMin: {} as Record<string, number> });
   let acc = yearAcc();
   const seenInv = new Set<number>();
   const seenOrder = new Set<number>();
@@ -96,8 +97,10 @@ export function runFullBot(s: Simulation, years: number): FullResult {
   const buyPlan = (type: MachineType, usedOnly: boolean, allowLease: boolean): boolean => {
     const used = b.offers.filter((o) => o.machine.type === type && o.machine.condition >= 50).sort((x, y) => x.price - y.price)[0];
     if (used) {
-      if (c.cash - used.price < 30_000) borrow(used.price + 30_000 - c.cash);
-      if (c.cash - used.price >= 30_000 && !/Geld|nicht|Insolvent/.test(s.command({ kind: 'buy', offerId: used.id }))) {
+      // Rücklage nach dem Kauf: mindestens 30.000 €, bei großen Maschinen 30 % des Preises (Saisonkosten bis zur Ernte)
+      const reserve = Math.max(30_000, used.price * 0.3);
+      if (c.cash - used.price < reserve) borrow(used.price + reserve - c.cash);
+      if (c.cash - used.price >= reserve && !/Geld|nicht|Insolvent/.test(s.command({ kind: 'buy', offerId: used.id }))) {
         purchases.push(`${gameDate(s.time).month}/${gameDate(s.time).year}: ${type} gebraucht ${used.machine.brand} ${used.machine.model} ${Math.round(used.price).toLocaleString('de-DE')} € (Ausbauplan)`);
         return true;
       }
@@ -107,8 +110,9 @@ export function runFullBot(s: Simulation, years: number): FullResult {
     const model = CATALOG.filter((x) => x.type === type).sort((x, y) => x.newPrice - y.newPrice)[0];
     const dealer = model && dealersFor(model.brand)[0];
     if (!model || !dealer) return false;
-    if (c.cash - model.newPrice < 30_000) borrow(model.newPrice + 30_000 - c.cash);
-    const lease = c.cash - model.newPrice < 30_000;
+    const reserveNew = Math.max(30_000, model.newPrice * 0.3);
+    if (c.cash - model.newPrice < reserveNew) borrow(model.newPrice + reserveNew - c.cash);
+    const lease = c.cash - model.newPrice < reserveNew;
     if (lease && !allowLease) return false;
     const r = s.command({ kind: 'order', dealerId: dealer.id, modelKey: model.key, leaseMonths: lease ? 60 : undefined });
     if (/bestellt|geleast/.test(r)) { purchases.push(`${gameDate(s.time).month}/${gameDate(s.time).year}: ${type} neu ${lease ? 'geleast' : 'gekauft'} ${model.brand} ${model.model} ${model.newPrice.toLocaleString('de-DE')} € (Ausbauplan)`); return true; }
@@ -375,7 +379,9 @@ export function runFullBot(s: Simulation, years: number): FullResult {
       cash: Math.round(c.cash), equity: Math.round(bal.equity), debt: Math.round(bal.debt),
       tractors: ofType('schlepper').length, machines: c.machines.length,
       staffFest: c.drivers.filter((d) => d.kind === 'fest' || d.kind === 'chef').length, staffSaison: c.drivers.filter((d) => d.kind === 'saison').length,
-      services: [...acc.services].sort(), costs: Object.fromEntries(Object.entries(acc.costs).map(([k, v]) => [k, Math.round(v)])), bySvc: Object.fromEntries(Object.entries(acc.bySvc).map(([k, v]) => [k, Math.round(v)])), orders: acc.orders, late: acc.late, cancelled: acc.cancelled, reputation: Math.round(b.reputation),
+      wage: (() => { const st = c.drivers.filter((d) => d.kind !== 'chef' && d.kind !== 'leih'); return st.length ? Math.round((st.reduce((a, d) => a + d.wage, 0) / st.length) * 10) / 10 : 0; })(),
+      leih: c.drivers.filter((d) => d.kind === 'leih').length,
+      services: [...acc.services].sort(), costs: Object.fromEntries(Object.entries(acc.costs).map(([k, v]) => [k, Math.round(v)])), bySvc: Object.fromEntries(Object.entries(acc.bySvc).map(([k, v]) => [k, Math.round(v)])), taskH: Object.fromEntries(Object.entries(acc.taskMin).map(([k, v]) => [k, Math.round(v / 60)])), orders: acc.orders, late: acc.late, cancelled: acc.cancelled, reputation: Math.round(b.reputation),
       leaseHa: Math.round(b.leases.reduce((a, l) => a + l.areaHa, 0)), known: fs.farms.filter((f) => f.known && !f.closed).length,
     });
     for (const k of Object.keys(ordersLastYear)) delete ordersLastYear[k];
@@ -384,11 +390,37 @@ export function runFullBot(s: Simulation, years: number): FullResult {
   };
 
   const days = Math.round(years * 365.25);
+  let orderById = new Map<number, Order>();
+  const stuck = new Map<number, { orderId: number; since: number; reported?: boolean }>();
+  const dumped = new Set<number>();
   for (let day = 0; day < days; day++) {
+    orderById = new Map(b.orders.map((o) => [o.id, o]));
     for (let minute = 0; minute < 1440; minute++) {
       const mod = s.time % 1440;
       if (mod === 30) { respond(); admin(); invest(); }
       if (mod % 120 === 45 && mod < 11 * 60) startJobs();
+      // Fahrerstunden je Aufgabe (alle 10 Minuten eine Stichprobe)
+      if (mod % 10 === 0) {
+        const vs = (s as unknown as { vehicles: { owner: string; task?: { kind: string; orderId?: number } }[] }).vehicles;
+        for (let vi = 0; vi < vs.length; vi++) {
+          const v = vs[vi];
+          if (v.owner !== 'player' || !v.task) continue;
+          // hängende Aufgabe erkennen: dasselbe Fahrzeug über 30 Tage am selben Auftrag
+          if (v.task.orderId !== undefined) {
+            const st = stuck.get(vi);
+            if (!st || st.orderId !== v.task.orderId) stuck.set(vi, { orderId: v.task.orderId, since: s.time });
+            else if (s.time - st.since > 30 * 1440 && !st.reported) {
+              st.reported = true;
+              const o = orderById.get(v.task.orderId);
+              say(`lange Aufgabe (über 30 Tage): Fahrzeug ${vi} ${v.task.kind} Auftrag ${v.task.orderId} (${o?.service} ${o?.chain ?? ''}) seit ${gameDate(st.since).day}.${gameDate(st.since).month}.${gameDate(st.since).year}`);
+              if (process.env.ECONOMY_STUCK_DUMP && o && isHarvest(o.service) && !dumped.has(o.id)) { dumped.add(o.id); writeFileSync(`${process.env.ECONOMY_STUCK_DUMP}-${o.id}.json`, JSON.stringify({ vi, state: s.serialize() })); }
+            }
+          } else stuck.delete(vi);
+          const o = v.task.orderId !== undefined ? orderById.get(v.task.orderId) : undefined;
+          const key = o ? `${v.task.kind}:${o.service}` : v.task.kind;
+          acc.taskMin[key] = (acc.taskMin[key] ?? 0) + 10;
+        }
+      }
       s.step();
     }
     collect();
@@ -402,10 +434,10 @@ export function runFullBot(s: Simulation, years: number): FullResult {
 export function fullReport(r: FullResult, title: string): string {
   const k = (v: number) => `${Math.round(v / 1000).toLocaleString('de-DE')}`;
   const L = [`# ${title}`, '', `Rechenzeit: ${r.seconds} s`, '', '## Jahre (Beträge in T€)', '',
-    '| Jahr | Umsatz | Feld | Ernte | Transport | Kommunal | Ackerbau | Kosten | AfA | Gewinn | Kasse | Eigenkapital | Schulden | Schlepper | Maschinen | fest | Saison | Pacht ha | Kunden | Aufträge | verspätet | storniert | Ruf | Dienste |',
-    '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |'];
+    '| Jahr | Umsatz | Feld | Ernte | Transport | Kommunal | Ackerbau | Kosten | AfA | Gewinn | Kasse | Eigenkapital | Schulden | Schlepper | Maschinen | fest | Saison | Leih | Ø Lohn €/h | Pacht ha | Kunden | Aufträge | verspätet | storniert | Ruf | Dienste |',
+    '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |'];
   for (const y of r.years) {
-    L.push(`| ${y.year}${y.insolvent ? ' (insolvent)' : ''} | ${k(y.revenue)} | ${k(y.byBranch.feld)} | ${k(y.byBranch.ernte)} | ${k(y.byBranch.transport)} | ${k(y.byBranch.kommunal)} | ${k(y.byBranch.ackerbau)} | ${k(y.expenses)} | ${k(y.afa)} | ${k(y.profit)} | ${k(y.cash)} | ${k(y.equity)} | ${k(y.debt)} | ${y.tractors} | ${y.machines} | ${y.staffFest} | ${y.staffSaison} | ${y.leaseHa} | ${y.known} | ${y.orders} | ${y.late} | ${y.cancelled} | ${y.reputation} | ${y.services.length} |`);
+    L.push(`| ${y.year}${y.insolvent ? ' (insolvent)' : ''} | ${k(y.revenue)} | ${k(y.byBranch.feld)} | ${k(y.byBranch.ernte)} | ${k(y.byBranch.transport)} | ${k(y.byBranch.kommunal)} | ${k(y.byBranch.ackerbau)} | ${k(y.expenses)} | ${k(y.afa)} | ${k(y.profit)} | ${k(y.cash)} | ${k(y.equity)} | ${k(y.debt)} | ${y.tractors} | ${y.machines} | ${y.staffFest} | ${y.staffSaison} | ${y.leih} | ${y.wage.toLocaleString('de-DE')} | ${y.leaseHa} | ${y.known} | ${y.orders} | ${y.late} | ${y.cancelled} | ${y.reputation} | ${y.services.length} |`);
   }
   const cats = [...new Set(r.years.flatMap((y) => Object.keys(y.costs)))].sort();
   L.push('', '## Ausgaben je Kategorie (T€, Zahlungen inkl. Investitionen)', '', `| Jahr | ${cats.join(' | ')} |`, `| --- |${cats.map(() => ' ---: |').join('')}`);
@@ -413,6 +445,9 @@ export function fullReport(r: FullResult, title: string): string {
   const svcs = [...new Set(r.years.flatMap((y) => Object.keys(y.bySvc)))].sort();
   L.push('', '## Umsatz je Dienst (T€)', '', `| Jahr | ${svcs.join(' | ')} |`, `| --- |${svcs.map(() => ' ---: |').join('')}`);
   for (const y of r.years) L.push(`| ${y.year} | ${svcs.map((c) => k(y.bySvc[c] ?? 0)).join(' | ')} |`);
+  const tasks = [...new Set(r.years.flatMap((y) => Object.keys(y.taskH)))].sort();
+  L.push('', '## Fahrzeugstunden je Aufgabe (Stichprobe alle 10 min, inkl. Feierabend-Wartezeit)', '', `| Jahr | ${tasks.join(' | ')} |`, `| --- |${tasks.map(() => ' ---: |').join('')}`);
+  for (const y of r.years) L.push(`| ${y.year} | ${tasks.map((c) => (y.taskH[c] ?? 0).toLocaleString('de-DE')).join(' | ')} |`);
   L.push('', '## Dienste je Jahr', '', ...r.years.map((y) => `- ${y.year}: ${y.services.join(', ') || '–'}`));
   L.push('', '## Investitionen', '', ...r.purchases.map((p) => `- ${p}`), '', '## Protokoll (Auszug)', '', ...r.log.slice(0, 120).map((l) => `- ${l}`));
   return L.join('\n') + '\n';

@@ -48,8 +48,8 @@ const md = (t: number) => { const d = gameDate(t); return d.month * 100 + d.day;
 
 describe('Pacht und eigener Ackerbau', () => {
   it('Grundwerte: Pachtpreis, Bodenfaktor, Fruchtfolge', () => {
-    expect(referenceRent(35, false)).toBe(620);
-    expect(referenceRent(35, true)).toBe(760);
+    expect(referenceRent(35, false)).toBe(540);
+    expect(referenceRent(35, true)).toBe(680);
     expect(soilFactor(45)).toBeCloseTo(1.12);
     expect(rotationFactor('weizen', 'weizen')).toBe(0.85);
     expect(rotationFactor('raps', 'raps')).toBe(0.75);
@@ -139,6 +139,26 @@ describe('Pacht und eigener Ackerbau', () => {
     const o = b.orders.find((x) => x.ownLeaseId === l.id && x.service === 'drusch')!;
     expect(o.chain).toBe('haecksler');
     expect(b.ledger.some((x) => x.text.startsWith('Mähdrusch'))).toBe(false);
+  });
+
+  it('eigene Ernte nicht begonnen: drei Wochen nach dem Fenster erntet ein fremder Lohnunternehmer', () => {
+    const s = world(4);
+    const b = s.business;
+    s.company.cash = 1_000_000;
+    const l = winLease(s);
+    s.company.machines.push({ id: 900, type: 'maehdrescher', brand: 'Claas', model: 'Lexion', year: 2022, hours: 0, condition: 95, newPrice: 500000, purchasePrice: 500000, afaYears: 10, boughtAt: 0, power: 435, width: 9.3, haPerHour: 3, payloadT: 9 });
+    s.command({ kind: 'setCrop', leaseId: l.id, crop: 'raps' });
+    runUntil(s, () => b.orders.some((o) => o.ownLeaseId === l.id && o.service === 'drusch'), 520 * 1440);
+    const o = b.orders.find((x) => x.ownLeaseId === l.id && x.service === 'drusch')!;
+    const to = l.steps.find((x) => x.orderId === o.id)!.to;
+    // Drescher wird nie gestartet
+    s.run(to + 20 * 1440 - s.time);
+    expect(o.status).toBe('offen');
+    runUntil(s, () => l.history.length > 0, 5 * 1440);
+    expect(o.status).toBe('fertig');
+    expect(o.cancelled).toBe(true);
+    expect(b.ledger.some((x) => x.category === 'Ackerbau' && x.text.includes('fremden Lohnunternehmer'))).toBe(true);
+    expect(l.history[0].tonnes).toBeGreaterThan(0);
   });
 
   it('Vermarktung: Lager verkaufen, Vorkontrakt liefern, Fehlmenge kostet Ausgleich', () => {
