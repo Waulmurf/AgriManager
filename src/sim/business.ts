@@ -587,6 +587,8 @@ export class Business {
   readonly requests: Request[] = [];
   readonly orders: Order[] = [];
   readonly invoices: Invoice[] = [];
+  /** laufende Rechnungsnummer (unabhängig vom Archiv) */
+  private invoiceSeq = 0;
   readonly ledger: LedgerEntry[] = [];
   readonly applicants: Applicant[] = [];
   readonly deliveries: Delivery[] = [];
@@ -695,6 +697,7 @@ export class Business {
       dieselTodayL: this.dieselTodayL,
       dieselTodayEur: this.dieselTodayEur,
       tollToday: this.tollToday,
+      invoiceSeq: this.invoiceSeq,
       workYear: this.workYear,
       workMinutesYear: this.workMinutesYear,
       applicants: this.applicants,
@@ -738,6 +741,7 @@ export class Business {
     this.dieselTodayL = s.dieselTodayL;
     this.dieselTodayEur = s.dieselTodayEur;
     this.tollToday = s.tollToday ?? 0;
+    this.invoiceSeq = s.invoiceSeq ?? this.invoices.length;
     this.workYear = s.workYear ?? 0;
     for (const k of Object.keys(this.workMinutesYear)) delete this.workMinutesYear[Number(k)];
     Object.assign(this.workMinutesYear, s.workMinutesYear ?? {});
@@ -2128,7 +2132,9 @@ export class Business {
       o.priceHa = Math.round(((minutes / 60) * WINTER_EUR_H / o.areaHa) * 100) / 100;
     }
     this.emit(time, 'auftrag', `${SERVICE_NAMES[o.service]} für ${this.farmName(o.farmId)} erledigt (${Math.round(km)} km, ${Math.round(minutes / 60 * 10) / 10} h).`);
-    this.changeReputation(time <= o.latest ? 1 : -2);
+    // Winterdienst: Frist gilt fürs Ausrücken (2 h), nicht fürs Ende der Tour
+    const onTime = o.service === 'winterdienst' ? (o.startedAt ?? time) <= o.latest : time <= o.latest;
+    this.changeReputation(onTime ? 1 : -2);
     this.issueInvoice(o, time);
   }
 
@@ -2413,6 +2419,23 @@ export class Business {
     }
   }
 
+  /**
+   * Archiv (einmal im Jahr, 2. Januar): erledigte Aufträge, Anfragen und Rechnungen älter als ein Jahr,
+   * Buchungen älter als zwei Jahre werden entfernt. Hält Spielstand und Rechenzeit in langen Spielen klein;
+   * Jahresabschlüsse bleiben erhalten.
+   */
+  private archive(time: number) {
+    const year = 365 * 1440;
+    const keep = <T,>(arr: T[], ok: (x: T) => boolean) => { const k = arr.filter(ok); arr.length = 0; arr.push(...k); };
+    const used = new Set(this.invoices.filter((i) => i.status === 'offen' || i.status === 'überfällig').map((i) => i.orderId));
+    keep(this.orders, (o) => o.status !== 'fertig' || (o.finishedAt ?? time) > time - year || used.has(o.id));
+    keep(this.requests, (r) => r.status === 'offen' || r.createdAt > time - 60 * 1440);
+    keep(this.invoices, (i) => i.status === 'offen' || i.status === 'überfällig' || (i.paidAt ?? i.issuedAt) > time - year);
+    keep(this.ledger, (l) => l.time > time - 2 * year);
+    this.analyticsCache = null;
+    this.version++;
+  }
+
   /** laufender Rahmenvertrag eines Betriebs */
   frameOf(farmId: number): FrameContract | undefined {
     return this.frames.find((f) => f.farmId === farmId);
@@ -2564,6 +2587,7 @@ export class Business {
     this.eventsDaily(time);
     this.campaignDaily(time);
     if (gameDate(time).month === 1 && gameDate(time).day === 1) this.structuralChange(time);
+    if (gameDate(time).month === 1 && gameDate(time).day === 2) this.archive(time);
     if (this.company.dispatcher && gameDate(time).day === 1) this.book(time, 'Disponent (Büro)', -DISPATCHER_MONTH, 'Personal');
     this.biogasDaily(time);
     // Auftrag steht wegen Panne: Kunde wartet und wird unzufriedener (MZ-07)
@@ -2734,6 +2758,7 @@ export class Business {
   /** Darlehen aufnehmen (WF-01): Annuität, Zins nach Laufzeit und Bonität */
   takeLoan(amount: number, years: number, time: number): string {
     if (!(amount >= 5_000)) return 'Mindestens 5.000 €';
+    if (this.company.insolventAt !== undefined) return 'Insolvent – keine Darlehen';
     if (![3, 5, 8, 10].includes(years)) return 'Laufzeit 3, 5, 8 oder 10 Jahre';
     const free = this.company.creditLimit - this.company.loan;
     if (amount > free) return `Kreditrahmen reicht nicht (frei ${fmtEur(free)})`;
@@ -2808,6 +2833,23 @@ export class Business {
     if (this.company.cash < 0) this.overdraftInterest += (-this.company.cash * OVERDRAFT_RATE) / 365;
     if (this.company.cash < -(this.company.overdraftLimit ?? 0)) {
       this.emit(time, 'warnung', `Konto über dem Kontokorrentrahmen (${fmtEur(this.company.cash)}). Neue Käufe sind gesperrt – Geld eintreiben, Maschinen verkaufen oder Darlehen aufnehmen.`);
+    }
+    // Insolvenz: mehr als 100.000 € über dem Rahmen – nach 90 Tagen kündigt die Bank
+    const c = this.company;
+    if (c.insolventAt === undefined) {
+      if (c.cash < -(c.overdraftLimit ?? 0) - 100_000) {
+        c.overLimitSince ??= time;
+        const days = Math.floor((time - c.overLimitSince) / 1440);
+        if (days === 30 || days === 60) this.emit(time, 'warnung', `Die Bank mahnt: Das Konto liegt seit ${days} Tagen weit über dem Rahmen. Nach 90 Tagen droht die Insolvenz.`);
+        if (days >= 90) {
+          c.insolventAt = time;
+          this.emit(time, 'warnung', 'Insolvenz: Die Bank hat die Kredite gekündigt. Neue Käufe und Darlehen sind gesperrt – Spielstand laden oder Maschinen verkaufen und Schulden abbauen.');
+        }
+      } else c.overLimitSince = undefined;
+    } else if (c.cash >= -(c.overdraftLimit ?? 0)) {
+      c.insolventAt = undefined;
+      c.overLimitSince = undefined;
+      this.emit(time, 'info', 'Die Bank arbeitet wieder mit dem Betrieb zusammen: Konto im Rahmen.');
     }
     const d = gameDate(time);
     if (d.day === 1) {
@@ -2903,6 +2945,7 @@ export class Business {
     const committed = this.deliveries.filter((x) => !x.leaseMonths).reduce((a, x) => a + x.price, 0);
     if (!leaseMonths && !this.canPay(committed + price)) return 'Nicht genug Geld für Bestellung und Lieferung – Kredit oder Leasing?';
     if (leaseMonths && ![36, 48, 60].includes(leaseMonths)) return 'Leasing über 36, 48 oder 60 Monate';
+    if (this.company.insolventAt !== undefined) return 'Insolvent – keine Bestellungen';
     const weeks = m.deliveryWeeks + (this.rng.int(3) - 1);
     const del: Delivery = {
       id: this.nextMachineId(),
@@ -2910,6 +2953,8 @@ export class Business {
         type: m.type, brand: m.brand, model: m.model, year: gameDate(time).year, hours: 0, condition: 100,
         newPrice: m.newPrice, power: m.power, width: m.width, powerNeed: m.powerNeed, haPerHour: m.haPerHour,
         workKmh: m.workKmh, dieselLHa: m.dieselLHa, serviceAtH: serviceInterval(m), seats: m.seats, carKind: m.carKind,
+        // Nutzlast/Bunker, Tank, Betriebsgewicht aus dem Katalog (Kipper, Lkw, Erntemaschinen, Fässer, Radlader)
+        payloadT: m.payloadT, tankM3: m.tankM3, weightT: m.weightT,
       },
       dealerId,
       at: time + weeks * 7 * 1440,
@@ -2981,7 +3026,7 @@ export class Business {
       machine: {
         type: m.type, brand: m.brand, model: m.model, year: year - age, hours, condition, newPrice: m.newPrice,
         power: m.power, width: m.width, powerNeed: m.powerNeed, haPerHour: m.haPerHour, workKmh: m.workKmh, dieselLHa: m.dieselLHa,
-        seats: m.seats, carKind: m.carKind,
+        seats: m.seats, carKind: m.carKind, payloadT: m.payloadT, tankM3: m.tankM3, weightT: m.weightT,
         serviceAtH: hours + (r.next() < 0.3 ? -50 : serviceInterval(m) - r.int(200)),
         // privat: jeder vierte mit verstecktem Mangel
         defect: !dealer && r.next() < 0.25 ? true : undefined,
@@ -3394,7 +3439,7 @@ export class Business {
     const d = gameDate(time);
     const inv: Invoice = {
       id: this.nextId++,
-      number: `RE-${d.year}-${String(this.invoices.length + 1).padStart(4, '0')}`,
+      number: `RE-${d.year}-${String(++this.invoiceSeq).padStart(4, '0')}`,
       orderId: o.id,
       farmId: o.farmId,
       text: o.chain

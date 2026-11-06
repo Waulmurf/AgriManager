@@ -306,3 +306,21 @@ describe('Verschleißteillager', () => {
     expect(full).toBeGreaterThan(ok * 1.5);
   });
 });
+
+describe('Maschinendaten aus dem Katalog', () => {
+  it('Neubestellung und Gebrauchtangebot übernehmen Nutzlast, Tank und Gewicht', () => {
+    const s = world(5);
+    const b = s.business as unknown as { usedOffer(m: unknown, t: number, d: number): { machine: { payloadT?: number; tankM3?: number; weightT?: number } } };
+    const cat = CATALOG;
+    const kipper = cat.find((m) => m.type === 'kipper')!;
+    const fass = cat.find((m) => m.type === 'guellefass')!;
+    const rad = cat.find((m) => m.type === 'radlader')!;
+    expect(b.usedOffer(kipper, s.time, 0).machine.payloadT).toBe(kipper.payloadT);
+    expect(b.usedOffer(fass, s.time, 0).machine.tankM3).toBe(fass.tankM3);
+    expect(b.usedOffer(rad, s.time, 0).machine.weightT).toBe(rad.weightT);
+    s.company.cash = 1_000_000;
+    const dealer = DEALERS.find((d) => [...d.tractorBrands, ...d.implementBrands].includes(kipper.brand))!;
+    expect(s.command({ kind: 'order', dealerId: dealer.id, modelKey: kipper.key })).toMatch(/bestellt/);
+    expect(s.business.deliveries.at(-1)!.machine.payloadT).toBe(kipper.payloadT);
+  });
+});

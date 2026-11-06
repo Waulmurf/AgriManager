@@ -1131,3 +1131,10 @@ Lohnsatz fürs Hacken und Striegeln gibt es nicht; für Striegeln mit eigener Ma
   - Bilanz zum Buchwert statt Marktwert.
   - Pflanzenschutz-Satz (14 €/ha DB) und Stoppel prüfen.
   - Bot um Erntedienste und Winterarbeit erweitern, um Wachstumsstrategien zu vergleichen.
+
+## Wirtschaftlichkeit (Stand 6. Nov. 2026)
+
+- 20-Jahres-Lauf mit Ausbau auf alle Dienste: `docs/wirtschaft-20-jahre.md`. Ergebnis: Umsatz bis ~800 T€, meist Verlust,
+  insolvent ab 2035; Ernteketten kommen spät, Kommunal/Winterdienst nie.
+- Offen (Balance, Entscheidung Nils): Feldpreise +15–20 %, Werkstatt/Verschleiß senken, mehr Erntenachfrage je Maschine,
+  Pacht/Ertrag, Winterarbeit früher, Bilanz zum Buchwert, Insolvenz als Spielende oder Sanierung.

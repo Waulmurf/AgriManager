@@ -126,6 +126,9 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
   Nordzucker-Abfuhrfenster `campaignDaily`/`nzScore` (Kunde `NZ_ID`). Ideen 20–25 und 31–45 warten auf Auswahl.
 - Wirtschaftlichkeits-Test: `tests/unit/economy-sim.test.ts` + Bot `tests/sim/economyBot.ts` (2 Jahre, echte Karte), Bericht
   `docs/wirtschaft-simulation.md`; Kunden sagen nie begonnene Aufträge ab (`cancelStaleOrders`).
+- Langzeit-Bot alle Dienste `tests/sim/economyBotFull.ts` + `tests/unit/economy-full.test.ts` (CI 3 Jahre, `ECONOMY_FULL_YEARS=20`),
+  Bericht `docs/wirtschaft-20-jahre.md`: Feldarbeit deckt kaum Vollkosten, insolvent ab Jahr 9 → Balance offen. Insolvenz
+  (`Company.overLimitSince/insolventAt`), Jahresarchiv am 2.1. (`archive`), `invoiceSeq`.
 - macOS: Mindestversion 12 (WebGL 2, Module-Worker), `src/polyfills.ts` + Startprüfung, Kürzel ohne Cmd/Strg, Selbsttest im
   macOS-CI-Job (läuft bei `[mac]` in der Commit-Nachricht).
 

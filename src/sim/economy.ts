@@ -430,6 +430,9 @@ export interface Company {
   drivers: Employee[];
   /** Standorte (Phase „Standorte“): Stammhof Nr. 1 und weitere */
   sites?: Site[];
+  /** Insolvenz: Konto seit … deutlich über dem Rahmen; insolvent ab (Bank hat gekündigt) */
+  overLimitSince?: number;
+  insolventAt?: number;
   /** Disponent im Büro (Vorschlag 10) */
   dispatcher?: { autoAccept: boolean; autoStart: boolean; autoRemind: boolean };
   /** Verschleißteillager am Hof (Warenwert €): Schare, Zinken, Filter, Riemen, Schläuche … */
