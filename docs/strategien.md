@@ -130,7 +130,10 @@ Spielstand ließ sich laden.
 | --- | --- | --- | --- |
 | vorsichtig | +76 T€, 9 Dienste | 1,3 Mio. € Eigenkapital, 4 Gewinnjahre | Sanierung 2041, insolvent 2046 |
 | normal | +38 T€, 10 Dienste | 1,5 Mio. € Eigenkapital, 7 Gewinnjahre, 15 Dienste | Sanierung 2041, insolvent 2048 |
-| mutig | −11 T€ | 1,9 Mio. € Eigenkapital, 7 Gewinnjahre, 16 Schlepper | (Lauf noch nicht fertig) |
+| mutig | −11 T€ | 1,9 Mio. € Eigenkapital, 7 Gewinnjahre, 16 Schlepper | 50 Jahre durchgespielt, 25 Gewinnjahre, Spitze 3,9 Mio. € Eigenkapital (2049), dann Abstieg, Sanierung ab 2071, Ende −0,57 Mio. € |
+
+Offen: Im mutigen 50-Jahres-Lauf meldet die Prüfung zweimal eine Erntekette, die 72 Arbeitsstunden ohne Fortschritt
+stand. Das ist noch nicht untersucht; der Lauf dauert gut 80 Minuten.
 
 Der organische Betrieb wächst gesund bis etwa Jahr 15 (über 2 Mio. € Umsatz). Danach steigen die Personalkosten auf
 über 1 Mio. € im Jahr, weil der Bot je Erntemaschine und Lkw einen festen Fahrer einstellt (am Ende 12 feste plus
