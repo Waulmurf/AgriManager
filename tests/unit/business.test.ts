@@ -5,6 +5,14 @@ import { Simulation, SNAPSHOT_STRIDE, VehicleState } from '../../src/sim/engine'
 import { gameDate } from '../../src/sim/economy';
 import { buildRoadGraphBuffer } from './helpers/grid';
 import { buildFieldsBuffer } from './helpers/fields';
+import { SERVICE_IMPLEMENT, type Service } from '../../src/sim/business';
+import type { Simulation as Sim } from '../../src/sim/engine';
+
+/** Gerät für einen Dienst in den Fuhrpark (macht den Dienst zum Angebot des Betriebs) */
+function offer(s: Sim, service: Service) {
+  s.company.machines.push({ id: 900 + s.company.machines.length, type: SERVICE_IMPLEMENT[service], brand: 'Test', model: 'Gerät', year: 2020, hours: 0, condition: 90, newPrice: 10_000, purchasePrice: 10_000, afaYears: 5, boughtAt: 0 });
+  s.company.drivers[0].skills.pflanzenschutz = Math.max(1, s.company.drivers[0].skills.pflanzenschutz ?? 0);
+}
 
 /** 8×8 km Gitter mit Ortsstraßen und 200 Feldern (Mais, Rüben, Kartoffeln kommen vor) */
 function world(seed = 3) {
@@ -130,10 +138,35 @@ describe('Besuch, Anfrage, Auftrag', () => {
       if (s.business.requests.length) break;
     }
     const r = s.business.requests[0];
+    offer(s, r.service);
     const sat = s.farms!.farms[r.farmId].satisfaction;
     s.run(3 * 1440);
     expect(r.status).toBe('abgelaufen');
     expect(s.farms!.farms[r.farmId].satisfaction).toBeLessThan(sat);
+  });
+
+  it('Dienste, die der Betrieb nicht anbietet: Absage und Verfall ohne Folgen für Zufriedenheit und Ruf', () => {
+    const s = world(5);
+    for (const farm of s.farms!.farms) {
+      s.command({ kind: 'visit', farmId: farm.id });
+      runUntil(s, () => !s.chefBusy);
+      if (s.business.requests.filter((r) => r.status === 'offen').length >= 2) break;
+    }
+    const open = s.business.requests.filter((r) => r.status === 'offen');
+    expect(open.length).toBeGreaterThanOrEqual(1);
+    const [a, b] = open;
+    expect(s.business.offersService(a)).toBe(false);
+    const satA = s.farms!.farms[a.farmId].satisfaction;
+    expect(s.command({ kind: 'respond', requestId: a.id, action: 'reject' })).toMatch(/nicht im Angebot/);
+    expect(s.farms!.farms[a.farmId].satisfaction).toBe(satA);
+    if (b) {
+      const satB = s.farms!.farms[b.farmId].satisfaction;
+      const rep = s.business.reputation;
+      s.run(3 * 1440);
+      expect(b.status).toBe('abgelaufen');
+      expect(s.farms!.farms[b.farmId].satisfaction).toBeGreaterThanOrEqual(satB);
+      expect(s.business.reputation).toBeGreaterThanOrEqual(rep);
+    }
   });
 
   it('bekannte Betriebe melden sich per Anruf oder Nachricht', () => {
@@ -383,6 +416,7 @@ describe('Kundenbindung', () => {
       if (s.business.requests.some((r) => r.status === 'offen' && r.service === 'grubbern')) break;
     }
     const req = s.business.requests.find((r) => r.status === 'offen' && r.service === 'grubbern')!;
+    offer(s, 'grubbern');
     const farm = s.farms!.farms[req.farmId];
     const sat = farm.satisfaction;
     s.command({ kind: 'respond', requestId: req.id, action: 'reject' });

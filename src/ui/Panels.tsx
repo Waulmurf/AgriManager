@@ -142,6 +142,7 @@ function RequestItem({ r, game, time, estimate }: { r: Request; game: GameContro
       {r.competitorPriceHa !== undefined && r.status === 'offen' && (
         <small className="hint">Konkurrenz bietet etwa {r.gabe ? `${(r.competitorPriceHa / r.gabe).toLocaleString('de-DE', { maximumFractionDigits: 2 })} €/m³` : `${Math.round(r.competitorPriceHa).toLocaleString('de-DE')} €/ha`} – deutlich darüber verliert man den Auftrag</small>
       )}
+      {r.status === 'offen' && r.notOffered && <small className="hint" data-testid="not-offered">Bieten wir (noch) nicht an – Absage oder keine Antwort hat keine Folgen für Ruf und Zufriedenheit.</small>}
       {r.status === 'offen' && <EstimateLine e={estimate} latest={r.latest} />}
       {r.status === 'offen' ? (
         <>

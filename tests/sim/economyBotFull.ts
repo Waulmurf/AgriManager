@@ -59,6 +59,11 @@ export interface BotProfile {
   plan: { year: number; type: MachineType; ifBusy?: Service; core?: boolean }[] | 'standard';
   farming: boolean;
   invest: InvestLevel;
+  /**
+   * organisch wachsen: keine Ausbaupläne und kein Leasing. Neue Sparten (Erntemaschine, Lkw, Kommunalgerät) erst,
+   * wenn Kunden sie im Vorjahr oft angefragt haben, gebraucht und überwiegend aus eigener Kasse.
+   */
+  organic?: boolean;
 }
 
 const SPECIALISTS: Omit<BotProfile, 'invest'>[] = [
@@ -74,15 +79,16 @@ const SPECIALISTS: Omit<BotProfile, 'invest'>[] = [
     plan: [{ year: 1, type: 'streuer', core: true }, { year: 1, type: 'auslegemaeher', core: true }, { year: 2, type: 'astschere' }, { year: 2, type: 'wegehobel' }, { year: 3, type: 'streuer' }] },
   { key: 'feld', name: 'Feldarbeit-Allrounder (alle Felddienste, keine Ernte)', routine: 'all', farming: false, plan: [] },
 ];
+const ORGANIC: Omit<BotProfile, 'invest'> = { key: 'organisch', name: 'Organisch wachsend (nur was Kunden nachfragen, aus eigener Kraft)', routine: 'all', farming: true, plan: [], organic: true };
 const ALLROUND: Omit<BotProfile, 'invest'> = { key: 'allround', name: 'Allrounder (alle Dienste, Ackerbau)', routine: 'all', farming: true, plan: 'standard' };
 
 /** alle Strategien × Investitionsfreude */
 export function botProfile(key: string, invest: InvestLevel = 'normal'): BotProfile {
-  const base = key === 'allround' ? ALLROUND : SPECIALISTS.find((p) => p.key === key);
+  const base = key === 'allround' ? ALLROUND : key === 'organisch' ? ORGANIC : SPECIALISTS.find((p) => p.key === key);
   if (!base) throw new Error(`Strategie ${key} unbekannt`);
   return { ...base, invest };
 }
-export const STRATEGY_KEYS = [...SPECIALISTS.map((p) => p.key), 'allround'];
+export const STRATEGY_KEYS = [...SPECIALISTS.map((p) => p.key), 'organisch', 'allround'];
 
 export interface YearRow {
   year: number;
@@ -121,6 +127,12 @@ export function runFullBot(s: Simulation, years: number, profile: BotProfile = b
   const ofType = (t: MachineType) => c.machines.filter((m) => m.type === t);
   const driverFree = (id: number) => !s.driverBusy(id) && !s.queue.some((q) => q.driverId === id) && !b.absence(id, s.time);
   const missedBy: Record<string, number> = {};
+  // organisch: nicht bediente Anfragen je Maschinenart im laufenden und im Vorjahr
+  const demandYear: Record<string, number> = {};
+  const demandLast: Record<string, number> = {};
+  const want = (type: MachineType) => { demandYear[type] = (demandYear[type] ?? 0) + 1; };
+  let organicBoughtMonth = -1;
+  const seenTender = new Set<number>();
   let util = 0; // gleitende Auslastung der Schlepper (Arbeitszeit)
   let planIdx = 0;
   let planDueSince = -1;
@@ -158,7 +170,7 @@ export function runFullBot(s: Simulation, years: number, profile: BotProfile = b
     // Schlepper ohne Gebrauchtangebot: neu mit Darlehen (nicht bei vorsichtiger Strategie)
     if (type === 'schlepper' && profile.invest !== 'vorsichtig' && c.cash - model.newPrice < 50_000) borrow(model.newPrice + 50_000 - c.cash);
     const lease = c.cash - model.newPrice < 50_000;
-    if (lease && !allowLease) return false;
+    if (lease && (!allowLease || profile.organic)) return false;
     const r = s.command({ kind: 'order', dealerId: dealer.id, modelKey: model.key, leaseMonths: lease ? 60 : undefined });
     if (/bestellt|geleast/.test(r)) { purchases.push(`${gameDate(s.time).month}/${gameDate(s.time).year}: ${type} neu ${lease ? 'geleast' : 'gekauft'} ${model.brand} ${model.model} ${model.newPrice.toLocaleString('de-DE')} € (${why})`); return true; }
     return false;
@@ -246,6 +258,31 @@ export function runFullBot(s: Simulation, years: number, profile: BotProfile = b
         if (pulled.includes(p.type) && ofType('schlepper').length < 3 + Math.floor(planIdx / 3)) buy('schlepper', 'Zugschlepper', 150);
       }
     }
+    // organisch: neue Sparte, wenn Kunden sie im Vorjahr mindestens 12-mal angefragt haben (Kommunal: 3 Ausschreibungen);
+    // gebraucht, Kasse plus höchstens die Hälfte des freien Kreditrahmens, 60.000 € Rücklage, ein Kauf im Monat
+    if (profile.organic && (m >= 11 || m <= 2) && organicBoughtMonth !== s.time - (s.time % (30 * 1440)) && !c.sanierung) {
+      const kommunal: MachineType[] = ['streuer', 'auslegemaeher', 'astschere', 'wegehobel'];
+      const cands = Object.entries(demandLast).filter(([t, n]) => n >= (kommunal.includes(t as MachineType) ? 3 : 12))
+        .sort((x, y) => y[1] - x[1]).map(([t]) => t as MachineType);
+      for (const t of cands) {
+        const have = ofType(t).length + b.deliveries.filter((d) => d.machine.type === t).length;
+        if (have >= Math.min(3, 1 + Math.floor((demandLast[t] ?? 0) / 40))) continue;
+        const maxPow = Math.max(0, ...ofType('schlepper').map((x) => x.power ?? 0));
+        const used = b.offers.filter((o) => o.machine.type === t && o.machine.condition >= 50 && (o.machine.powerNeed ?? 0) <= maxPow).sort((x, y) => x.price - y.price)[0];
+        if (!used) continue;
+        const room = Math.max(0, c.creditLimit * 0.5 - c.loan);
+        if (used.price + 60_000 > c.cash + room) continue;
+        if (c.cash - used.price < 60_000) borrow(used.price + 60_000 - c.cash);
+        if (c.cash - used.price < 60_000) continue;
+        if (!/Geld|nicht|Sanierung/.test(s.command({ kind: 'buy', offerId: used.id }))) {
+          purchases.push(`${gameDate(s.time).month}/${gameDate(s.time).year}: ${t} gebraucht ${used.machine.brand} ${used.machine.model} ${Math.round(used.price).toLocaleString('de-DE')} € (Nachfrage im Vorjahr: ${demandLast[t]} Anfragen)`);
+          organicBoughtMonth = s.time - (s.time % (30 * 1440));
+          // Zugschlepper für Wagen und Anbaugeräte
+          if (!['maehdrescher', 'ruebenroder', 'feldhaecksler', 'lkw'].includes(t) && ofType('schlepper').length < P.maxTractors) buy('schlepper', 'Zugschlepper', 150, false);
+          break;
+        }
+      }
+    }
     // Qualifikation: je Hauptmaschine ein eigener Fahrer (eine Person zählt nur für eine Maschine)
     const taken = new Set<number>();
     for (const t of ['maehdrescher', 'ruebenroder', 'feldhaecksler', 'kartoffelroder', 'lkw', 'radlader'] as MachineType[]) {
@@ -267,11 +304,13 @@ export function runFullBot(s: Simulation, years: number, profile: BotProfile = b
       let ok = false;
       if (r.service === 'transport') {
         ok = r.liquid ? ofType('zubringer').length + ofType('guellefass').length > 0 : ofType('lkw').length * 3 > openOf((o) => o.service === 'transport' && !o.liquid);
+        if (!ok && !r.liquid) want('lkw');
       } else if (isHarvest(r.service)) {
         const harv = ofType(SERVICE_IMPLEMENT[r.service]).length;
         const wagons = (HAULER_TYPES[r.service] ?? []).reduce((a, t) => a + ofType(t).length, 0);
         const needW = r.service === 'haeckseln' ? 2 : 1;
         ok = harv > 0 && harv * 4 > openOf((o) => o.service === r.service) && (r.chain !== 'komplett' || wagons >= needW);
+        if (!ok) { want(SERVICE_IMPLEMENT[r.service]); if (r.chain === 'komplett' && wagons < needW) want((HAULER_TYPES[r.service] ?? ['kipper'])[0]); }
       } else if (ROUTINE.includes(r.service) && routineOk(r.service)) {
         const type = SERVICE_IMPLEMENT[r.service];
         const skillOk = r.service !== 'pflanzenschutz' || c.drivers.some((d) => (d.skills.pflanzenschutz ?? 0) >= 1);
@@ -288,6 +327,7 @@ export function runFullBot(s: Simulation, years: number, profile: BotProfile = b
       else s.command({ kind: 'respond', requestId: r.id, action: 'reject' });
     }
     // Kommunal: Ausschreibungen und Winterdienst
+    for (const t of b.tenders) if (t.playerEurKm === undefined && !ofType(TOUR[t.service].implement).length && !seenTender.has(t.id)) { seenTender.add(t.id); want(TOUR[t.service].implement); }
     for (const t of b.tenders) if (t.playerEurKm === undefined && ofType(TOUR[t.service].implement).length) s.command({ kind: 'tenderBid', tenderId: t.id, eurKm: Math.round(TOUR[t.service].eurKm * 0.97) });
     for (const w of [...b.winterOffers]) if (ofType('streuer').length && b.winterContracts.length < ofType('streuer').length * 2) s.command({ kind: 'winterAccept', offerId: w.id });
     // Rahmenverträge annehmen
@@ -473,6 +513,9 @@ export function runFullBot(s: Simulation, years: number, profile: BotProfile = b
       services: [...acc.services].sort(), costs: Object.fromEntries(Object.entries(acc.costs).map(([k, v]) => [k, Math.round(v)])), bySvc: Object.fromEntries(Object.entries(acc.bySvc).map(([k, v]) => [k, Math.round(v)])), taskH: Object.fromEntries(Object.entries(acc.taskMin).map(([k, v]) => [k, Math.round(v / 60)])), orders: acc.orders, late: acc.late, cancelled: acc.cancelled, reputation: Math.round(b.reputation),
       leaseHa: Math.round(b.leases.reduce((a, l) => a + l.areaHa, 0)), known: fs.farms.filter((f) => f.known && !f.closed).length,
     });
+    for (const k of Object.keys(demandLast)) delete demandLast[k];
+    Object.assign(demandLast, demandYear);
+    for (const k of Object.keys(demandYear)) delete demandYear[k];
     for (const k of Object.keys(ordersLastYear)) delete ordersLastYear[k];
     Object.assign(ordersLastYear, acc.svcOrders);
     acc = yearAcc();

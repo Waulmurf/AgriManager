@@ -138,6 +138,8 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
 - Strategie-Tests `tests/unit/strategies.test.ts` (Profile in `economyBotFull.ts`: Spezialisten, Feldarbeit, Allrounder × vorsichtig/normal/mutig),
   Bericht `docs/strategien.md`: Feldarbeit-Allrounder am stärksten, Spezialisten (Drusch, Rüben, Transport, Kommunal) nicht tragfähig →
   Vorschläge warten auf Entscheidung. Endgültige Insolvenz nach gescheiterter Sanierung (`Company.bankruptAt`, Spiel vorbei).
+- Absage/Verfall für Dienste ohne Angebot ohne Folgen (`Business.offersService`, Hinweis „Bieten wir (noch) nicht an“).
+  Profil `organisch` (nur nachgefragte Sparten, gebraucht, eigene Kraft). Erklärung der Pleiten in `docs/strategien.md`.
 - macOS: Mindestversion 12 (WebGL 2, Module-Worker), `src/polyfills.ts` + Startprüfung, Kürzel ohne Cmd/Strg, Selbsttest im
   macOS-CI-Job (läuft bei `[mac]` in der Commit-Nachricht).
 

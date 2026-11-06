@@ -26,7 +26,7 @@ const OUT = process.env.STRATEGY_OUT;
 const newSim = () => new Simulation(parseRoadGraph(buf('roadgraph.bin')), { seed: SEED, vehicleCount: 0, fields: parseFields(buf('fields.bin')) });
 
 /** Hauptsparte je Strategie: muss im ersten Jahr Umsatz bringen */
-const MAIN: Record<string, 'feld' | 'ernte' | 'transport' | 'kommunal'> = { guelle: 'feld', drusch: 'ernte', rueben: 'ernte', transport: 'transport', kommunal: 'kommunal', feld: 'feld', allround: 'feld' };
+const MAIN: Record<string, 'feld' | 'ernte' | 'transport' | 'kommunal'> = { guelle: 'feld', drusch: 'ernte', rueben: 'ernte', transport: 'transport', kommunal: 'kommunal', feld: 'feld', organisch: 'feld', allround: 'feld' };
 
 const runs: { key: string; invest: InvestLevel; years: number }[] = process.env.STRATEGY_PROFILES
   ? process.env.STRATEGY_PROFILES.split(',').map((x) => { const [key, invest] = x.split(':'); return { key, invest: (invest ?? 'normal') as InvestLevel, years: Number(process.env.STRATEGY_YEARS ?? 2) }; })

@@ -218,6 +218,8 @@ export interface Request {
   gabe?: number;
   /** Häckseln: nur Häcksler oder Komplettkette */
   chain?: 'haecksler' | 'komplett';
+  /** Anzeige: Dienst gehört (noch) nicht zum Angebot des Betriebs – Absage und Verfall ohne Folgen */
+  notOffered?: boolean;
   /** Transport: Menge je ha (t), Ladestelle, Ziel (Knoten, Name) */
   tPerHa?: number;
   pickupNode?: number;
@@ -1718,6 +1720,19 @@ export class Business {
   }
 
   /** Auftrag an die Konkurrenz verloren (Statistik, Meldungstext) */
+  /**
+   * Bietet der Betrieb diesen Dienst an? Passende Maschine im Fuhrpark (oder bestellt), bei Ketten mit Abfuhr
+   * auch ein Abfahrwagen, bei Pflanzenschutz ein Fahrer mit Sachkunde. Sonst sind Absage und Verfall folgenlos.
+   */
+  offersService(r: Pick<Request, 'service' | 'chain' | 'liquid'>): boolean {
+    const have = (types: MachineType[]) => this.company.machines.some((m) => types.includes(m.type)) || this.deliveries.some((d) => types.includes(d.machine.type));
+    if (r.service === 'transport') return have(r.liquid ? ['guellefass', 'zubringer'] : ['lkw']);
+    if (!have([SERVICE_IMPLEMENT[r.service]])) return false;
+    if (r.chain === 'komplett' && HAULER_TYPES[r.service] && !have(HAULER_TYPES[r.service]!)) return false;
+    if (r.service === 'pflanzenschutz' && !this.company.drivers.some((d) => (d.skills.pflanzenschutz ?? 0) >= 1)) return false;
+    return true;
+  }
+
   private lostTo(r: Request): string {
     this.lost++;
     const c = this.competitors.find((x) => x.id === r.competitorId);
@@ -2625,6 +2640,8 @@ export class Business {
     for (const r of this.requests) {
       if (r.status === 'offen' && time >= r.replyBy) {
         r.status = 'abgelaufen';
+        // Dienst nicht im Angebot: Kunde sucht sich ohne Groll jemand anderen
+        if (!this.offersService(r)) { this.emit(time, 'info', `${this.farmName(r.farmId)} hat für ${SERVICE_NAMES[r.service]} ein anderes Lohnunternehmen gefunden (bieten wir nicht an).${this.lostTo(r)}`, r.farmId); continue; }
         this.emit(time, 'warnung', `${this.farmName(r.farmId)} hat sich anderweitig umgesehen (keine Antwort).${this.lostTo(r)}`, r.farmId);
         this.satisfy(r.farmId, -5, time);
         this.changeReputation(-1);
@@ -2651,9 +2668,11 @@ export class Business {
     if (!r || r.status !== 'offen') return 'Anfrage nicht mehr offen';
     if (action === 'reject') {
       r.status = 'abgelehnt';
-      this.emit(time, 'info', `Anfrage von ${this.farmName(r.farmId)} abgelehnt.${this.lostTo(r)}`, r.farmId);
-      this.satisfy(r.farmId, -2, time);
-      return 'abgelehnt';
+      // Dienst, den der Betrieb nicht anbietet: der Kunde nimmt es nicht übel
+      const offered = this.offersService(r);
+      this.emit(time, 'info', `Anfrage von ${this.farmName(r.farmId)} abgelehnt${offered ? '' : ' (bieten wir nicht an)'}.${this.lostTo(r)}`, r.farmId);
+      if (offered) this.satisfy(r.farmId, -2, time);
+      return offered ? 'abgelehnt' : 'abgelehnt (nicht im Angebot, ohne Folgen)';
     }
     let price = r.priceHa;
     if (action === 'counter') {

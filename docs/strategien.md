@@ -90,6 +90,92 @@ Spielstand ließ sich laden.
 7. **Bot:** Er erneuert den Fuhrpark nicht und tauscht kranke Fahrer nicht aus. Ein Spieler würde das tun; die
    Spätjahre der Allrounder sind deshalb eher zu schlecht.
 
+## Nachtrag: Absagen ohne Folgen und organisch wachsender Betrieb
+
+### Absagen für Dienste, die der Betrieb nicht anbietet
+
+**Bisher:**
+- Jede Absage kostete beim Kunden −2 Zufriedenheit.
+- Eine unbeantwortete Anfrage kostete −5 Zufriedenheit und −1 Ruf.
+- Das galt auch für Dienste, für die der Betrieb gar keine Maschine hat. Kunden fragen jeden Dienst der Saison an.
+- Spezialisten verloren dadurch laufend Zufriedenheit. Unter 20 % wechselt ein Kunde zur Konkurrenz, also blieben
+  die Kunden auch für den eigentlichen Dienst weg.
+
+**Jetzt:** Absage und Verfall sind folgenlos, wenn der Betrieb den Dienst nicht anbietet.
+- Ein Dienst gilt als nicht angeboten, wenn keine passende Maschine im Fuhrpark ist oder bestellt wurde.
+- Bei Ketten mit Abfuhr fehlt ein Abfahrwagen, beim Pflanzenschutz ein Fahrer mit Sachkunde.
+- Die Anfrage zeigt den Hinweis „Bieten wir (noch) nicht an“.
+- Code: `Business.offersService`; Test in `business.test.ts`.
+
+**Wirkung über 10 Jahre (normal):**
+
+| Strategie | vorher | nachher |
+| --- | --- | --- |
+| Gülle | 6 Gewinnjahre, Gewinn gesamt −3 T€ | 9 Gewinnjahre, +350 T€, Umsatz 68 → 118 T€ |
+| Rüben | insolvent 2036 | 6 Gewinnjahre, +37 T€, Umsatz 57 → 285 T€ |
+| Transport | insolvent 2036 | überlebt, −59 T€ |
+| Drusch | insolvent 2031 | insolvent 2033 |
+| Feldarbeit | +1.190 T€ | +1.279 T€ |
+
+### Organisch wachsender Betrieb (Strategie `organisch`)
+
+**So wächst er:**
+- Er startet mit dem Schlepper vom Hof.
+- Geräte kauft er erst, wenn ein Kunde den Dienst anfragt; Schlepper und Saisonkräfte erst, wenn er ausgelastet ist.
+- Erntemaschinen, Lkw und Kommunalgeräte kommen erst, wenn Kunden sie im Vorjahr mindestens 12-mal angefragt haben
+  (Kommunal: 3 Ausschreibungen).
+- Er kauft nur gebraucht, aus der Kasse plus höchstens dem halben freien Kreditrahmen, ohne Leasing.
+
+| Investitionsfreude | 2 Jahre | 10 Jahre | 50 Jahre |
+| --- | --- | --- | --- |
+| vorsichtig | +76 T€, 9 Dienste | 1,3 Mio. € Eigenkapital, 4 Gewinnjahre | Sanierung 2041, insolvent 2046 |
+| normal | +38 T€, 10 Dienste | 1,5 Mio. € Eigenkapital, 7 Gewinnjahre, 15 Dienste | Sanierung 2041, insolvent 2048 |
+| mutig | −11 T€ | 1,9 Mio. € Eigenkapital, 7 Gewinnjahre, 16 Schlepper | (Lauf noch nicht fertig) |
+
+Der organische Betrieb wächst gesund bis etwa Jahr 15 (über 2 Mio. € Umsatz). Danach steigen die Personalkosten auf
+über 1 Mio. € im Jahr, weil der Bot je Erntemaschine und Lkw einen festen Fahrer einstellt (am Ende 12 feste plus
+9 Saisonkräfte). Dazu kommen ältere Maschinen mit steigenden Werkstattkosten (bis 200 T€). Dann folgen Verluste,
+Sanierung und Insolvenz.
+
+## Warum gehen Betriebe pleite, obwohl die Aufträge profitabel sind?
+
+Jeder einzelne Auftrag bringt mehr ein, als er an Diesel, Lohnstunden und Verschleiß kostet. Ein Betrieb muss aber
+auch die festen Kosten tragen. Pleite geht er, wenn die Aufträge im Jahr nicht reichen, um die festen Kosten zu
+decken.
+
+1. **Feste Kosten gegen Saisonarbeit.** Am Beispiel Drusch-Spezialist, normal, Werte aus dem Lauf:
+   - Ein Hektar bringt 165 € (mit Abfuhr 215 €). Diesel kostet etwa 25 €/ha, das Fahrerentgelt je Stunde ist im
+     festen Lohn enthalten. Es bleiben gut 140 €/ha Deckungsbeitrag.
+   - Feste Kosten im Jahr:
+     - Leasing des Dreschers: 55 T€
+     - Personal (fester Fahrer für den Drescher, Saisonkraft): 57 T€
+     - AfA für Kipper und Zugschlepper: 59 T€
+     - Versicherung: 5 T€
+     - zusammen rund 175 T€
+   - Daraus folgt eine Gewinnschwelle von rund 1.250 ha im Jahr. Der Drescher schafft in 6–7 Wochen Ernte (10-h-Tag,
+     morgens Tau, Regentage) aber nur 300–550 ha, also bleiben 80–100 T€ Verlust im Jahr.
+2. **Fester Lohn für Saisonmaschinen.** Erntemaschinen und Lkw arbeiten 2–4 Monate. Ein fest angestellter Fahrer
+   kostet 12 Monate, rund 45–55 T€. Beim organischen Betrieb fallen dadurch 2040 1,07 Mio. € Personalkosten bei
+   2,2 Mio. € Umsatz an. Saisonkräfte, die nur für geleistete Stunden bezahlt werden, wären günstiger. Der Bot nutzt
+   sie für Erntefahrer bisher nicht.
+3. **Teure neue Großmaschinen.** Ein neuer Rexor kostet geleast 123 T€ im Jahr. Die Rübenkampagne bringt einem
+   kleinen Betrieb 90–175 T€ Roder-Umsatz. Gebrauchte Großmaschinen sind selten und für Neulinge kaum bezahlbar.
+4. **Saisonale Nachfrage.** Lkw-Fracht gibt es nur in der Ernte- und Rübenkampagne. Kommunal bringt wenige
+   Ausschreibungen, und Winterdienst gibt es nur an Glättetagen. Maschinen und Leute stehen den Rest des Jahres.
+5. **Kunden gingen verloren** durch Absagen für nicht angebotene Dienste (bis heute; jetzt behoben, siehe oben).
+6. **Schuldenspirale.**
+   - Ein Verlustjahr mit großen Käufen drückt das Konto über den Rahmen.
+   - Dort kostet jeder Euro 11 % Zins.
+   - Dann kommt die Sanierung, und die Bank verwertet die wertvollsten Maschinen.
+   - Danach fehlt der Umsatz, um je wieder herauszukommen.
+7. **Alternder Fuhrpark.** Der Bot erneuert alte Maschinen nicht. Die Werkstattkosten steigen, die Pannen nehmen zu,
+   Aufträge kommen zu spät, und der Ruf sinkt.
+
+**Was trägt:**
+- Feldarbeit mit Schlepper und Anbaugeräten: über 10 Monate verteilt, günstige Geräte, Saisonkräfte nach Stunden.
+- Spezialisierung nur dort, wo die Saison lang ist (Gülle Februar bis Mai und August/September).
+- Erntemaschinen erst, wenn genug Fläche zusammenkommt, und mit Saisonfahrern statt fester Stelle.
+
 ## Alle Läufe
 
 | Strategie | Invest | Jahre (geplant) | Umsatz Ø letzte 5 J. (T€) | Gewinn Ø letzte 5 J. (T€) | Gewinnjahre | Gewinn gesamt (T€) | Eigenkapital Ende (T€) | EK min (T€) | Schulden max (T€) | Sanierung ab | Insolvenz | Dienste | Schlepper / Maschinen / Personal | verspätet % | storniert % | Ruf Ende (min) | hängende Ernte | Rechenzeit |

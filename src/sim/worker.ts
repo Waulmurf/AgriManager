@@ -111,7 +111,7 @@ function sendBusiness(force = false) {
   const state: BusinessState = {
     time: sim.time,
     company: structuredClone(sim.company),
-    requests: b.requests.filter((r) => r.status === 'offen' || sim!.time - r.createdAt < 3 * 1440).map((r) => ({ ...r })),
+    requests: b.requests.filter((r) => r.status === 'offen' || sim!.time - r.createdAt < 3 * 1440).map((r) => ({ ...r, notOffered: !b.offersService(r) })),
     orders: b.orders.map((o) => ({ ...o, fields: [...o.fields], doneFields: [...o.doneFields] })),
     offers: structuredClone(b.offers),
     units: sim.playerUnits(),
