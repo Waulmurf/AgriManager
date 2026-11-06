@@ -1138,4 +1138,5 @@ Lohnsatz fürs Hacken und Striegeln gibt es nicht; für Striegeln mit eigener Ma
 - Umgesetzt (Nils: „Ja“): Feldpreise +15 %, Erntepreise +10 %, Pannen seltener, mehr Erntenachfrage, Pacht −80 €/ha; Fehler
   Abfahrer am alten Feld und blockierte eigene Ernte behoben. Neuer Lauf: alle 18 Dienste ab 2036, 16 von 20 Jahren Gewinn, keine
   Insolvenz.
-- Offen: Bilanz zum Buchwert statt Marktwert, Insolvenz als Spielende oder Sanierungsphase.
+- Nils am 6. Nov.: Bilanz einfach lassen; Insolvenz → Sanierungsphase (umgesetzt). Drehschemel-Zug, Anhänger am Feldrand mit
+  Füllstand, Überladewagen für Drescher/Roder umgesetzt.

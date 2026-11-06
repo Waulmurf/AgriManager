@@ -332,6 +332,25 @@ export class GameController {
           })),
         });
       }
+      // abgestellte Anhänger am Feldrand mit Füllstand
+      const parkKey = st.parkedTrailers.map((p) => `${p.id}:${Math.round(p.load)}:${p.lonLat.join(',')}`).join('|');
+      if (parkKey !== this.parkKey && this.map?.getSource('parked')) {
+        this.parkKey = parkKey;
+        // mehrere Anhänger am selben Feldrand leicht versetzt zeigen
+        const seen = new Map<string, number>();
+        (this.map.getSource('parked') as GeoJSONSource).setData({
+          type: 'FeatureCollection',
+          features: st.parkedTrailers.map((p) => {
+            const k = p.lonLat.join(',');
+            const n = seen.get(k) ?? 0;
+            seen.set(k, n + 1);
+            return {
+              type: 'Feature', properties: { label: `${Math.round(p.load)}/${p.cap} t`, full: p.load >= p.cap - 0.3, fill: Math.min(1, p.load / p.cap), name: p.name },
+              geometry: { type: 'Point', coordinates: [p.lonLat[0] + n * 0.00025, p.lonLat[1]] },
+            };
+          }),
+        });
+      }
       // Konkurrenten auf der Karte aktualisieren (nur bei Änderung)
       const compKey = st.market.competitors.map((c) => `${c.id}:${c.warUntil > st.time ? 1 : 0}`).join(',');
       if (compKey !== this.competitorKey && this.map?.getSource('competitors')) {
@@ -443,6 +462,7 @@ export class GameController {
   private closedFarms = new Set<number>();
   private organicFarms = new Set<number>();
   private referralCount = 0;
+  private parkKey = '';
   private ownKey = '';
   private ownFields = new Set<number>();
 
@@ -729,6 +749,27 @@ export class GameController {
     // Empfehlungen zwischen Betrieben (Vorschlag 27)
     map.addSource('referrals', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
     map.addLayer({ id: 'referrals-line', type: 'line', source: 'referrals', minzoom: 9, paint: { 'line-color': '#2a78d6', 'line-width': 1.5, 'line-dasharray': [2, 2], 'line-opacity': 0.7 } });
+    // abgestellte Anhänger (Wechselbetrieb): Quadrat, Farbe nach Füllstand, Beschriftung „12/13 t“
+    map.addSource('parked', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    map.addLayer({
+      id: 'parked-dot', type: 'circle', source: 'parked', minzoom: 10,
+      paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 3, 15, 7],
+        'circle-color': ['interpolate', ['linear'], ['get', 'fill'], 0, '#f2e6c4', 0.5, '#e0b84a', 1, '#c0392b'],
+        'circle-stroke-color': '#3d3529', 'circle-stroke-width': 1.2,
+      },
+    });
+    map.addLayer({
+      id: 'parked-label', type: 'symbol', source: 'parked', minzoom: 12,
+      layout: { 'text-field': ['get', 'label'], 'text-font': ['Noto Sans Medium'], 'text-size': 11, 'text-offset': [0, -1.2], 'text-anchor': 'bottom', 'text-allow-overlap': true },
+      paint: { 'text-color': '#3d3529', 'text-halo-color': '#fff', 'text-halo-width': 1.4 },
+    });
+    map.on('click', 'parked-dot', (e) => {
+      const p = e.features?.[0]?.properties as { name: string; label: string; full: boolean } | undefined;
+      if (!p) return;
+      e.preventDefault();
+      new maplibregl.Popup({ maxWidth: '240px' }).setLngLat(e.lngLat).setHTML(`<strong>${p.name}</strong><br><small>am Feldrand abgestellt · ${p.label}${p.full ? ' · voll, wartet auf Abholung' : ''}</small>`).addTo(map);
+    });
     map.addSource('farms', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
     map.addLayer({
       id: 'farms-dot',

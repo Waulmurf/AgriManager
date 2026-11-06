@@ -254,6 +254,7 @@ LWK-Flächenleistung: Kreiselegge + Drille 3 m 1,1–1,2 ha/h; Mulchsaat 3 m 2,0
 | Krampe | AS 750.3 (Abschiebewagen) | 44 m³ | 24 t | offen | Bj. 2024: 66.583 € |
 | Krone | ZX 430 GD (Lade-/Häckselwagen) | 43 m³ | ca. 20 t | offen | Bj. 2024: 149.500 €; Bj. 2021, 2.930 h: 77.900 € |
 
+Drehschemel-Kipper (Zug mit zwei Anhängern möglich): Fliegl ZDK 180 und Krampe Zweiachs-Dreiseitenkipper, 18 t zGG, rund 13 t Nutzlast, 34.000–36.000 € (Annahme, Modellbezeichnungen vereinfacht). Mulden, Tandem-/Tridemkipper und Häckselwagen lassen sich nicht koppeln.
 LWK: Dreiachs-Dreiseitenkipper 18 t 94,50 €/h, Muldenkipper 10 t 74,50 €/h. Offen: Kröger, Fliegl, Annaburger, Brantner, Joskin-Kipper, Überladewagen, Ladewagen anderer Marken.
 
 ### Hof- und Silotechnik

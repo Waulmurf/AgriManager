@@ -163,3 +163,30 @@ anderen Unternehmen. Typische Fälle:
 
 Zeitpunkt: mit dem Maschinenkatalog in Phase 3 (Fuhrpark) die Grundlagen (Rollen, Anhänger,
 Bunker), die Ernteketten mit Phase 4 (Wirtschaft, Jahreslauf).
+
+## Umgesetzt: Zug, Anhänger am Feldrand, Überladewagen (6. Nov. 2026)
+
+- **Drehschemel-Zug:** Zwei Drehschemel-Kipper (Katalog: Fliegl ZDK 180, Krampe Zweiachs-Dreiseitenkipper,
+  je 18 t zulässiges Gesamtgewicht, rund 13 t Nutzlast) lassen sich hinter einem Schlepper zu einem Zug
+  koppeln.
+  - Mulden, Tandem-/Tridemkipper und Häckselwagen fahren nur einzeln.
+  - Der Zug fährt höchstens 25 km/h (Annahme) und nie neben der Erntemaschine her, sondern stellt immer am
+    Feldrand ab.
+  - Rechtlicher Rahmen: Gesamtlänge eines Zuges höchstens 18,75 m ([§ 32 StVZO](https://gesetze.legal/bund/stvzo/32)).
+    Tempo, Bremsen und Gewicht bei zwei Anhängern sind vereinfacht und nicht im Einzelnen geprüft.
+- **Anhänger am Feldrand (Wechselbetrieb), Drusch und Kartoffelroden:**
+  - Der Schlepper stellt seine Anhänger am Feldrand ab (3 min je Anhänger).
+  - Ist der Korntank bzw. Bunker voll, fährt die Erntemaschine zum Rand und überlädt (4 min).
+  - Sobald ein Anhänger voll ist und ein anderer zum Weiterbefüllen stehen bleibt, hängt der Schlepper die
+    vollen an (höchstens zwei) und bringt sie zum Hof des Kunden. Leere stellt er wieder ab.
+  - Anhänger vom vorigen Feld holt er nach. Am Ende sammelt er alle ein.
+  - Füllstand: auf der Karte (Punkt, Farbe nach Füllstand, Beschriftung „12/13 t“) und im Status von
+    Schlepper und Erntemaschine.
+  - Code: `Simulation.parked`, `parkWait`, `fillParked`; Test: `harvest.test.ts`.
+- **Überladewagen:**
+  - Drusch und Kartoffelroden: Er kippt am Feldrand zuerst in abgestellte Anhänger, der Rest geht auf
+    Lkw/Anhänger des Kunden.
+  - Rübenroden: Der Roder bunkert während der Fahrt auf den Überladewagen über, statt zur Miete zu fahren.
+    Der Überladewagen kippt auf die Feldrandmiete. Überladen ohne Anhalten bringt laut Hersteller rund 20 %
+    Mehrleistung ([topagrar, Ropa Taurus](https://www.topagrar.com/technik/news/dazu-ist-der-ropa-taurus-da-20028964.html)).
+

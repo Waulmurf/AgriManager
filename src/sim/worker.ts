@@ -154,6 +154,7 @@ function sendBusiness(force = false) {
       organic: (sim.farms?.farms ?? []).filter((f) => !f.closed && isOrganic(f)).map((f) => f.id),
     },
     referrals: b.referrals.map((r) => ({ ...r })),
+    parkedTrailers: sim.parkedTrailers(),
     nz: { score: b.nzScore, quota: b.nzQuotaT },
     municipal: { tenders: structuredClone(b.tenders), winterOffers: structuredClone(b.winterOffers), winterContracts: structuredClone(b.winterContracts) },
     incidents: { storm: b.stormDay === Math.floor(sim.time / 1440), hailInsured: b.hailInsured, fairDiscount: b.fairDiscount(sim.time) },

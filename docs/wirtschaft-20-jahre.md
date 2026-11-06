@@ -68,8 +68,8 @@ Neu erzeugen: `ECONOMY_FULL_YEARS=20 ECONOMY_FULL_REPORT=<datei> npx vitest run 
 
 ## Offene Punkte
 
-- In der Bilanz zählen Maschinen zum Marktwert, im Ergebnis mit der AfA.
-- Insolvenz beendet das Spiel bisher nicht; Kredite und Käufe sind dann nur gesperrt.
+- Bilanz bleibt bewusst einfach (Maschinen zum Marktwert), Entscheidung Nils.
+- Insolvenz ist jetzt eine Sanierungsphase (Umschuldung, 12 Monate Sperre, Verwertung bei erneutem Überzug).
 - Der Ruf schwankt stark (3–100), weil der Bot viele Aufträge zu spät fertig macht (rund 200 im Jahr).
 
 Rechenzeit: 593 s

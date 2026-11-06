@@ -150,7 +150,7 @@ export function runFullBot(s: Simulation, years: number): FullResult {
     const m = gameDate(s.time).month;
     // Ausbau nur mit Gewinn im Vorjahr (ab Jahr 3), Rücklage und ohne Insolvenz
     const lastProfit = rows.at(-1)?.profit ?? 0;
-    const healthy = c.insolventAt === undefined && c.cash > 30_000 && (yearNo() <= 2 || lastProfit > -50_000);
+    const healthy = !c.sanierung && c.cash > 30_000 && (yearNo() <= 2 || lastProfit > -50_000);
     void lastProfit;
     while (planIdx < PLAN.length && PLAN[planIdx].ifBusy && PLAN[planIdx].year <= yearNo() && (ordersLastYear[PLAN[planIdx].ifBusy!] ?? 0) < 40 && m === 1) planIdx++;
     if (planIdx < PLAN.length && PLAN[planIdx].year <= yearNo() && (m <= 3 || m >= 11) && bal.equity > 100_000 && healthy) {
@@ -373,7 +373,7 @@ export function runFullBot(s: Simulation, years: number): FullResult {
     const bal = b.balance(s.time);
     rows.push({
       year: y?.year ?? gameDate(s.time).year - 1,
-      insolvent: c.insolventAt !== undefined,
+      insolvent: !!c.sanierung,
       revenue: Math.round(y?.revenue ?? 0), expenses: Math.round(y?.expenses ?? 0), afa: Math.round(y?.afa ?? 0), profit: Math.round(y?.profit ?? 0),
       byBranch: Object.fromEntries(Object.entries(acc.byBranch).map(([k, v]) => [k, Math.round(v)])) as Record<BranchKey, number>,
       cash: Math.round(c.cash), equity: Math.round(bal.equity), debt: Math.round(bal.debt),
@@ -437,7 +437,7 @@ export function fullReport(r: FullResult, title: string): string {
     '| Jahr | Umsatz | Feld | Ernte | Transport | Kommunal | Ackerbau | Kosten | AfA | Gewinn | Kasse | Eigenkapital | Schulden | Schlepper | Maschinen | fest | Saison | Leih | Ø Lohn €/h | Pacht ha | Kunden | Aufträge | verspätet | storniert | Ruf | Dienste |',
     '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |'];
   for (const y of r.years) {
-    L.push(`| ${y.year}${y.insolvent ? ' (insolvent)' : ''} | ${k(y.revenue)} | ${k(y.byBranch.feld)} | ${k(y.byBranch.ernte)} | ${k(y.byBranch.transport)} | ${k(y.byBranch.kommunal)} | ${k(y.byBranch.ackerbau)} | ${k(y.expenses)} | ${k(y.afa)} | ${k(y.profit)} | ${k(y.cash)} | ${k(y.equity)} | ${k(y.debt)} | ${y.tractors} | ${y.machines} | ${y.staffFest} | ${y.staffSaison} | ${y.leih} | ${y.wage.toLocaleString('de-DE')} | ${y.leaseHa} | ${y.known} | ${y.orders} | ${y.late} | ${y.cancelled} | ${y.reputation} | ${y.services.length} |`);
+    L.push(`| ${y.year}${y.insolvent ? ' (Sanierung)' : ''} | ${k(y.revenue)} | ${k(y.byBranch.feld)} | ${k(y.byBranch.ernte)} | ${k(y.byBranch.transport)} | ${k(y.byBranch.kommunal)} | ${k(y.byBranch.ackerbau)} | ${k(y.expenses)} | ${k(y.afa)} | ${k(y.profit)} | ${k(y.cash)} | ${k(y.equity)} | ${k(y.debt)} | ${y.tractors} | ${y.machines} | ${y.staffFest} | ${y.staffSaison} | ${y.leih} | ${y.wage.toLocaleString('de-DE')} | ${y.leaseHa} | ${y.known} | ${y.orders} | ${y.late} | ${y.cancelled} | ${y.reputation} | ${y.services.length} |`);
   }
   const cats = [...new Set(r.years.flatMap((y) => Object.keys(y.costs)))].sort();
   L.push('', '## Ausgaben je Kategorie (T€, Zahlungen inkl. Investitionen)', '', `| Jahr | ${cats.join(' | ')} |`, `| --- |${cats.map(() => ' ---: |').join('')}`);

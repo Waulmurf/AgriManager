@@ -170,7 +170,7 @@ function ChopStart({ o, game, status, show }: { o: Order; game: GameController |
   const wagonType = HAULER_TYPE[o.service];
   const sk = MACHINE_SKILL[harvType]!;
   const harvName = TYPE_NAMES[harvType];
-  const wagonName = wagonType ? TYPE_NAMES[wagonType] : '';
+  const wagonName = wagonType ? TYPE_NAMES[wagonType] : o.service === 'roden' ? TYPE_NAMES.ueberladewagen : '';
   const harvesters = c.machines.filter((m) => m.type === harvType);
   const tractors = c.machines.filter((m) => m.type === 'schlepper');
   const wagonTypes = HAULER_TYPES[o.service] ?? [];
@@ -182,11 +182,13 @@ function ChopStart({ o, game, status, show }: { o: Order; game: GameController |
   const name = (d: Employee) => (d.isPlayer ? 'Chef' : d.name);
   const [h, setH] = useState(harvesters[0]?.id ?? 0);
   const [hd, setHd] = useState(drivers.find((d) => (d.skills[sk.skill] ?? 0) >= sk.min)?.id ?? 1);
-  const [haulers, setHaulers] = useState<{ driverId: number; tractorId: number; implementId: number }[]>([]);
+  const [haulers, setHaulers] = useState<{ driverId: number; tractorId: number; implementId: number; implementId2?: number; park?: boolean }[]>([]);
+  // Wechselbetrieb (Anhänger am Feldrand) und Zug nur bei Erntemaschinen mit Korntank/Bunker
+  const parkOk = o.service === 'drusch' || o.service === 'kartoffelroden';
   const [roller, setRoller] = useState<{ driverId: number; machineId: number } | null>(null);
   const addHauler = () => {
     const usedD = new Set([hd, ...haulers.map((x) => x.driverId)]);
-    const usedM = new Set(haulers.flatMap((x) => [x.tractorId, x.implementId]));
+    const usedM = new Set(haulers.flatMap((x) => [x.tractorId, x.implementId, ...(x.implementId2 ? [x.implementId2] : [])]));
     const d = drivers.find((x) => !usedD.has(x.id) && (x.skills.boden ?? 0) >= 1);
     const t = tractors.find((x) => !usedM.has(x.id));
     const w = wagons.find((x) => !usedM.has(x.id));
@@ -221,14 +223,25 @@ function ChopStart({ o, game, status, show }: { o: Order; game: GameController |
           <select value={x.tractorId} onChange={(e) => setHaulers(haulers.map((y, j) => (j === i ? { ...y, tractorId: Number(e.target.value) } : y)))} aria-label="Schlepper Abfahrer">
             {tractors.map((t) => <option key={t.id} value={t.id}>{machineName(t)} ({t.power} PS)</option>)}
           </select>
-          <select value={x.implementId} onChange={(e) => setHaulers(haulers.map((y, j) => (j === i ? { ...y, implementId: Number(e.target.value) } : y)))} aria-label={wagonName}>
-            {wagons.map((w) => <option key={w.id} value={w.id}>{machineName(w)} ({w.payloadT} t{w.type === 'ueberladewagen' ? ', Überladewagen' : ''})</option>)}
+          <select value={x.implementId} onChange={(e) => setHaulers(haulers.map((y, j) => (j === i ? { ...y, implementId: Number(e.target.value), implementId2: undefined } : y)))} aria-label={wagonName}>
+            {wagons.map((w) => <option key={w.id} value={w.id}>{machineName(w)} ({w.payloadT} t{w.type === 'ueberladewagen' ? ', Überladewagen' : w.drehschemel ? ', Drehschemel' : ''})</option>)}
           </select>
+          {parkOk && wagons.find((w) => w.id === x.implementId)?.drehschemel && (
+            <select value={x.implementId2 ?? 0} onChange={(e) => setHaulers(haulers.map((y, j) => (j === i ? { ...y, implementId2: Number(e.target.value) || undefined } : y)))} aria-label="Zweiter Anhänger (Zug)">
+              <option value={0}>ohne zweiten Anhänger</option>
+              {wagons.filter((w) => w.drehschemel && w.id !== x.implementId).map((w) => <option key={w.id} value={w.id}>+ {machineName(w)} ({w.payloadT} t) als Zug</option>)}
+            </select>
+          )}
+          {parkOk && wagons.find((w) => w.id === x.implementId)?.type === 'kipper' && (
+            <label title="Anhänger am Feldrand abstellen: Die Erntemaschine überlädt hinein, der Schlepper holt die vollen ab. Ein Zug stellt immer ab.">
+              <input type="checkbox" checked={!!x.park || !!x.implementId2} disabled={!!x.implementId2} onChange={(e) => setHaulers(haulers.map((y, j) => (j === i ? { ...y, park: e.target.checked } : y)))} /> am Feldrand abstellen
+            </label>
+          )}
           <button onClick={() => setHaulers(haulers.filter((_, j) => j !== i))}>✕</button>
         </div>
       ))}
       <div className="card-actions">
-        {wagonType && <button onClick={addHauler} disabled={!wagons.length}>+ Abfahrer</button>}
+        {(wagonType || wagonTypes.length > 0) && <button onClick={addHauler} disabled={!wagons.length}>{o.service === 'roden' ? '+ Überladewagen' : '+ Abfahrer'}</button>}
         {loaders.length > 0 && (
           roller ? (
             <>
@@ -248,12 +261,12 @@ function ChopStart({ o, game, status, show }: { o: Order; game: GameController |
       </div>
       <small className="hint">
         {o.service === 'roden'
-          ? 'Der Rübenroder bunkert rund 30 t und legt am Vorgewende eine Feldrandmiete an. Verladung und Abfuhr übernimmt die Zuckerfabrik.'
+          ? 'Der Rübenroder bunkert rund 30 t und legt am Vorgewende eine Feldrandmiete an. Mit Überladewagen bunkert er während der Fahrt über und muss nicht zum Feldrand – der Überladewagen kippt auf die Miete. Verladung und Abfuhr übernimmt die Zuckerfabrik.'
           : o.service === 'kartoffelroden'
             ? 'Gezogener Bunkerroder (6–8 t). Nur Roden: Der Kunde stellt Anhänger am Feldrand. Mit Abfuhr: eigene Kipper fahren zum Lager, ein Überladewagen lädt am Feldrand über.'
           : o.service === 'drusch'
             ? o.chain === 'komplett'
-              ? 'Drusch mit Abfuhr: eigene Kipper fahren das Korn zum Hof des Kunden (mindestens einer). Der Drescher füllt den Korntank und steht erst, wenn er voll ist.'
+              ? 'Drusch mit Abfuhr: eigene Kipper fahren das Korn zum Hof des Kunden (mindestens einer). Der Drescher füllt den Korntank und steht erst, wenn er voll ist. Drehschemel-Anhänger lassen sich zu einem Zug koppeln (max. 25 km/h) und am Feldrand abstellen: Der Drescher (oder ein Überladewagen) füllt sie, der Schlepper holt die vollen ab. Füllstand auf der Karte.'
               : 'Nur Drusch: Der Kunde stellt Anhänger am Feldrand. Drusch nur bei trockenem Korn (ab etwa 9 Uhr, nicht im Regen).'
             : o.chain === 'komplett'
               ? 'Komplettkette: Abfahrer vom Lohnbetrieb (mindestens einer, besser zwei bis drei). Ohne eigenen Radlader walzt eine Fremdwalze (110 €/h). Der Häcksler arbeitet nur mit Abfahrer nebenher.'
@@ -1624,6 +1637,15 @@ export function FinanceTab({ status, game }: { status: GameStatus; game: GameCon
   return (
     <>
       <h2>Konto</h2>
+      {c.sanierung && (
+        <p className="warn" data-testid="sanierung">
+          Sanierungsphase bis {fmtDay(c.sanierung.until)}: keine Käufe, Bestellungen und neuen Darlehen. Konto im Rahmen halten –
+          sonst verkauft die Bank Maschinen{c.sanierung.forced ? ` (bisher ${c.sanierung.forced} verwertet)` : ''}.
+        </p>
+      )}
+      {!c.sanierung && c.overLimitSince !== undefined && (
+        <p className="warn">Das Konto liegt weit über dem Rahmen. Nach 90 Tagen beginnt die Sanierung (Umschuldung, 12 Monate keine Käufe).</p>
+      )}
       <dl>
         <dt>Kontostand</dt><dd data-testid="cash-finance" className={c.cash < 0 ? 'neg' : ''}>{eur(c.cash)}</dd>
         <dt>Kontokorrent</dt><dd>{eur(c.overdraftLimit ?? 0)} Rahmen · 11 % Zins im Minus</dd>

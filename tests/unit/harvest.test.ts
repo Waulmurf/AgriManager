@@ -118,6 +118,79 @@ describe('Abfahrer bei Feldwechsel', () => {
   });
 });
 
+describe('Drehschemel-Zug und Anhänger am Feldrand', () => {
+  const lexion = { type: 'maehdrescher' as const, model: 'Lexion 6800', power: 435, width: 9.3, haPerHour: 3, workKmh: 6, dieselLHa: 18, payloadT: 9 };
+  const ds = { type: 'kipper' as const, model: 'ZDK 180 Drehschemel', payloadT: 13, powerNeed: 110, drehschemel: true };
+  const setup = () => {
+    const x = harvestOrder('drusch', Crop.Getreide, 8, 1, 'komplett');
+    const helper = { ...structuredClone(x.chef), id: 7, name: 'Abfahrer', isPlayer: false, kind: 'fest' as const, absences: [] };
+    x.s.company.drivers.push(helper);
+    runUntil(x.s, () => !x.s.weather.threshBlocked(x.s.time) && x.s.time % 1440 > 200 && x.s.time % 1440 < 300, 10 * 1440);
+    return x;
+  };
+
+  it('Mulde oder Tandemkipper lassen sich nicht koppeln', () => {
+    const { s, o } = setup();
+    const m = addMachine(s, lexion);
+    const tr = addMachine(s, { type: 'schlepper', model: 'Axion 870', power: 280 });
+    const mulde = addMachine(s, { type: 'kipper', model: 'Halfpipe HP 20', payloadT: 18, powerNeed: 160 });
+    const d = addMachine(s, ds);
+    expect(s.command({ kind: 'startJob', orderId: o.id, tractorId: m.id, implementId: m.id, haulers: [{ tractorId: tr.id, implementId: mulde.id, implementId2: d.id, driverId: 7 }] })).toMatch(/Drehschemel/);
+  });
+
+  it('Zug aus zwei Drehschemel-Anhängern: am Feldrand abgestellt, Drescher überlädt, volle werden abgeholt, Menge stimmt', () => {
+    const { s, o } = setup();
+    const m = addMachine(s, lexion);
+    const tr = addMachine(s, { type: 'schlepper', model: 'Axion 870', power: 280 });
+    const a1 = addMachine(s, ds);
+    const a2 = addMachine(s, { ...ds, model: 'ZDK 180 (2)' });
+    expect(s.command({ kind: 'startJob', orderId: o.id, tractorId: m.id, implementId: m.id, haulers: [{ tractorId: tr.id, implementId: a1.id, implementId2: a2.id, driverId: 7 }] })).toMatch(/gestartet/);
+    // Zug fährt höchstens 25 km/h
+    let maxKmh = 0, sawParked = false, sawFill = false;
+    for (let i = 0; i < 6 * 1440 && o.status !== 'fertig'; i++) {
+      s.step();
+      const u = s.playerUnits().find((x) => x.machineId === tr.id)!;
+      if (/Zug/.test(u.status)) maxKmh = Math.max(maxKmh, u.kmh);
+      const p = s.parkedTrailers();
+      if (p.length === 2) sawParked = true;
+      if (p.some((x) => x.load > 1)) sawFill = true;
+    }
+    expect(o.status).toBe('fertig');
+    expect(sawParked).toBe(true);
+    expect(sawFill).toBe(true);
+    expect(maxKmh).toBeGreaterThan(0);
+    expect(maxKmh).toBeLessThanOrEqual(25);
+    // am Ende: alles eingesammelt und abgeliefert
+    runUntil(s, () => s.parkedTrailers().length === 0 && !s.busyMachineIds().includes(a1.id) && !s.busyMachineIds().includes(a2.id), 3 * 1440);
+    expect(s.parkedTrailers().length).toBe(0);
+    expect(o.doneT!).toBeGreaterThan(o.areaHa * 7.5 * 0.8);
+    expect(o.doneT!).toBeLessThan(o.areaHa * 7.5 * 1.2);
+  });
+
+  it('Überladewagen füllt die am Feldrand abgestellten Anhänger', () => {
+    const { s, o, chef } = setup();
+    const m = addMachine(s, lexion);
+    const tr = addMachine(s, { type: 'schlepper', model: 'Axion 870', power: 280 });
+    const tr2 = addMachine(s, { type: 'schlepper', model: 'Arion 550', power: 180 });
+    const ulw = addMachine(s, { type: 'ueberladewagen', model: 'ULW 2000', payloadT: 16, powerNeed: 160 });
+    const a1 = addMachine(s, ds);
+    const a2 = addMachine(s, { ...ds, model: 'ZDK 180 (2)' });
+    const h2 = { ...structuredClone(chef), id: 8, name: 'Überlader', isPlayer: false, kind: 'fest' as const, absences: [] };
+    s.company.drivers.push(h2);
+    expect(s.command({ kind: 'startJob', orderId: o.id, tractorId: m.id, implementId: m.id, haulers: [
+      { tractorId: tr2.id, implementId: ulw.id, driverId: 8 },
+      { tractorId: tr.id, implementId: a1.id, implementId2: a2.id, driverId: 7 },
+    ] })).toMatch(/gestartet/);
+    let sawFill = false;
+    for (let i = 0; i < 6 * 1440 && o.status !== 'fertig'; i++) {
+      s.step();
+      if (s.parkedTrailers().some((x) => x.load > 1)) sawFill = true;
+    }
+    expect(o.status).toBe('fertig');
+    expect(sawFill).toBe(true);
+  });
+});
+
 describe('Mehrere Maschinen auf einem Feld', () => {
   it('zweiter Drescher steigt mitten im Feld ein: Feld wird geteilt, schneller fertig, Menge stimmt', () => {
     const one = harvestOrder('drusch', Crop.Getreide, 8, 1, 'haecksler');
@@ -179,6 +252,28 @@ describe('Rübenroden', () => {
     expect(o.status).toBe('fertig');
     expect(o.doneT!).toBeGreaterThan(o.areaHa * 80 * 0.85);
     expect(o.doneT!).toBeLessThan(o.areaHa * 80 * 1.15);
+  });
+
+  it('mit Überladewagen bunkert der Roder während der Fahrt über und ist schneller fertig', () => {
+    const run = (withUlw: boolean) => {
+      const { s, o, chef } = harvestOrder('roden', Crop.Zuckerrueben, 10, 5);
+      const m = addMachine(s, { type: 'ruebenroder', brand: 'Grimme', model: 'Rexor 6300', power: 627, width: 2.7, haPerHour: 1.6, workKmh: 6, dieselLHa: 32, payloadT: 30 });
+      const tr = addMachine(s, { type: 'schlepper', model: 'Axion 870', power: 280 });
+      const ulw = addMachine(s, { type: 'ueberladewagen', model: 'ULW 3000', payloadT: 22, powerNeed: 200 });
+      s.company.drivers.push({ ...structuredClone(chef), id: 7, name: 'Überlader', isPlayer: false, kind: 'fest' as const, absences: [] });
+      runUntil(s, () => !s.weather.fieldBlocked(s.time) && s.time % 1440 > 10 && s.time % 1440 < 200, 15 * 1440);
+      expect(s.command({ kind: 'startJob', orderId: o.id, tractorId: m.id, implementId: m.id, haulers: withUlw ? [{ driverId: 7, tractorId: tr.id, implementId: ulw.id }] : [] })).toMatch(/gestartet/);
+      const t0 = s.time;
+      runUntil(s, () => o.status === 'fertig', 10 * 1440);
+      expect(o.status).toBe('fertig');
+      runUntil(s, () => !s.busyMachineIds().includes(ulw.id), 1440);
+      expect(o.doneT!).toBeGreaterThan(o.areaHa * 80 * 0.85);
+      expect(o.doneT!).toBeLessThan(o.areaHa * 80 * 1.15);
+      return s.time - t0;
+    };
+    const solo = run(false);
+    const ulw = run(true);
+    expect(ulw).toBeLessThan(solo);
   });
 });
 

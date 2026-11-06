@@ -92,6 +92,8 @@ export interface BusinessState {
   /** Strukturwandel und Öko (Vorschläge 28, 29): aufgegebene Betriebe, Ökobetriebe; Empfehlungen (27); Nordzucker (30) */
   farmFlags: { closed: number[]; organic: number[] };
   referrals: { from: number; to: number; time: number }[];
+  /** am Feldrand abgestellte Anhänger mit Füllstand (Wechselbetrieb) */
+  parkedTrailers: { id: number; orderId: number; name: string; lonLat: [number, number]; load: number; cap: number }[];
   nz: { score: number; quota: number };
   /** Übernahmeangebot eines kleinen Konkurrenten (Vorschlag 12) */
   takeoverOffer: { competitorId: number; price: number; until: number } | null;

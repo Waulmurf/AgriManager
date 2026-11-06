@@ -129,6 +129,34 @@ describe('Finanzen im Spiel', () => {
     expect(new Set(prices).size).toBeGreaterThan(50);
   });
 
+  it('Sanierung statt Insolvenz: Umschuldung, Sperre, Verwertung, Ende nach 12 Monaten', () => {
+    const s = world(5);
+    const b = s.business, c = s.company;
+    const limit = c.overdraftLimit ?? 0;
+    c.cash = -limit - 150_000;
+    // Warnungen, nach 90 Tagen Sanierung: Kontokorrent wird zum Sanierungsdarlehen
+    s.run(91 * 1440);
+    expect(c.sanierung).toBeDefined();
+    const loan = (c.loans ?? []).at(-1)!;
+    expect(loan.principal).toBeGreaterThan(limit + 100_000);
+    expect(loan.months).toBe(60);
+    expect(c.cash).toBeGreaterThan(-limit);
+    expect(b.ledger.some((l) => l.text.startsWith('Sanierungsberater'))).toBe(true);
+    // Sperre: keine Darlehen, keine Bestellungen
+    expect(s.command({ kind: 'takeLoan', amount: 10_000, years: 5 })).toMatch(/Sanierung/);
+    // Konto wieder über dem Rahmen: nach 30 Tagen verwertet die Bank Maschinen
+    const before = c.machines.length;
+    c.cash = -limit - 20_000;
+    s.run(32 * 1440);
+    expect(c.machines.length).toBeLessThan(before);
+    expect(c.sanierung!.forced).toBeGreaterThan(0);
+    // nach 12 Monaten im Rahmen: Sanierung beendet
+    c.cash = 200_000;
+    s.run(c.sanierung!.until - s.time + 2 * 1440);
+    expect(c.sanierung).toBeUndefined();
+    expect(s.command({ kind: 'takeLoan', amount: 10_000, years: 5 })).not.toMatch(/Sanierung/);
+  });
+
   it('Spielstand mit Darlehen und Leasing läuft bitgleich weiter', () => {
     const a = world(6);
     a.command({ kind: 'takeLoan', amount: 50_000, years: 3 });

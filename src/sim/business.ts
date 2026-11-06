@@ -78,6 +78,12 @@ export const RIVAL_TRUST_SATISFACTION = 40;
 export const TRIAL_MAX_HA = 10;
 /** kalkulatorische Maschinenkosten für die Auswertung (Annahmen, LWK-Größenordnung) */
 export const REPAIR_TRACTOR_EUR_H = 8;
+/** Sanierung (statt Insolvenz): Auslöser über dem Rahmen (€), Darlehen (Jahre, Zinsaufschlag), Berater (€), Verwertungsquote */
+export const SANIERUNG_TRIGGER_EUR = 100_000;
+export const SANIERUNG_YEARS = 5;
+export const SANIERUNG_SURCHARGE = 0.04;
+export const SANIERUNG_FEE_EUR = 15_000;
+export const SANIERUNG_SALE_SHARE = 0.7;
 export const WEAR_GRUBBER_EUR_HA = 3;
 
 export type Service = 'grubbern' | 'stoppel' | 'guelle' | 'haeckseln' | 'drusch' | 'roden' | 'transport'
@@ -92,7 +98,7 @@ export const SERVICE_SKILL: Record<Service, Skill> = { grubbern: 'boden', stoppe
 /** Erntedienste: selbstfahrende Hauptmaschine (Fahrzeug und Gerät zugleich), Abfahrer-Wagen (falls nötig) */
 export const HARVEST_SERVICES: Service[] = ['haeckseln', 'drusch', 'roden', 'kartoffelroden'];
 /** Wagen für die Abfuhr (erster = Standard); Überladewagen laden am Feldrand über */
-export const HAULER_TYPES: Partial<Record<Service, MachineType[]>> = { haeckseln: ['haeckselwagen'], drusch: ['kipper', 'ueberladewagen'], kartoffelroden: ['kipper', 'ueberladewagen'] };
+export const HAULER_TYPES: Partial<Record<Service, MachineType[]>> = { haeckseln: ['haeckselwagen'], drusch: ['kipper', 'ueberladewagen'], kartoffelroden: ['kipper', 'ueberladewagen'], roden: ['ueberladewagen'] };
 export const HAULER_TYPE: Partial<Record<Service, MachineType>> = { haeckseln: 'haeckselwagen', drusch: 'kipper', kartoffelroden: 'kipper' };
 /** gezogene Erntemaschinen (Schlepper + Gerät statt Selbstfahrer) */
 export const HARVEST_TOWED: Service[] = ['kartoffelroden'];
@@ -501,7 +507,8 @@ export type Command =
       /** Gülle-Kette: Zubringer mit eigenem Fahrer, Schlepper und Zubringerfass */
       feeder?: { driverId: number; tractorId: number; implementId: number };
       /** Häckselkette: Abfahrer (Fahrer, Schlepper, Häckselwagen) und Radlader am Silo */
-      haulers?: { driverId: number; tractorId: number; implementId: number }[];
+      /** Abfahrer: Schlepper mit Wagen; implementId2 = zweiter Drehschemel-Anhänger (Zug); park = Anhänger am Feldrand abstellen */
+      haulers?: { driverId: number; tractorId: number; implementId: number; implementId2?: number; park?: boolean }[];
       roller?: { driverId: number; machineId: number };
     }
   | { kind: 'buy'; offerId: number }
@@ -2715,6 +2722,7 @@ export class Business {
     const idx = this.offers.findIndex((o) => o.id === offerId);
     if (idx < 0) return 'Angebot nicht mehr verfügbar';
     const o = this.offers[idx];
+    if (this.company.sanierung) return 'Sanierungsphase – keine Maschinenkäufe';
     if (!this.canPay(o.price)) return 'Nicht genug Geld (auch nicht mit Kontokorrent) – Kredit aufnehmen?';
     this.company.cash -= o.price;
     const id = this.nextMachineId();
@@ -2772,7 +2780,7 @@ export class Business {
   /** Darlehen aufnehmen (WF-01): Annuität, Zins nach Laufzeit und Bonität */
   takeLoan(amount: number, years: number, time: number): string {
     if (!(amount >= 5_000)) return 'Mindestens 5.000 €';
-    if (this.company.insolventAt !== undefined) return 'Insolvent – keine Darlehen';
+    if (this.company.sanierung) return 'Sanierungsphase – die Bank gibt keine neuen Darlehen';
     if (![3, 5, 8, 10].includes(years)) return 'Laufzeit 3, 5, 8 oder 10 Jahre';
     const free = this.company.creditLimit - this.company.loan;
     if (amount > free) return `Kreditrahmen reicht nicht (frei ${fmtEur(free)})`;
@@ -2837,6 +2845,84 @@ export class Business {
     }
   }
 
+  /** Maschine gerade im Einsatz (setzt der Rechenkern); für die Verwertung in der Sanierung */
+  machineInUse?: (id: number) => boolean;
+
+  /**
+   * Sanierung statt Insolvenz: Liegt das Konto 90 Tage mehr als 100.000 € über dem Rahmen, schuldet die Bank
+   * den Fehlbetrag in ein Sanierungsdarlehen um (5 Jahre, Zinsaufschlag), berechnet den Sanierungsberater und
+   * sperrt für 12 Monate Käufe, Bestellungen und neue Darlehen. Liegt das Konto in dieser Zeit 30 Tage über dem
+   * Rahmen, verkauft die Bank Maschinen (70 % des Marktwerts), bis es wieder passt. Ende nach 12 Monaten,
+   * wenn das Konto im Rahmen ist, sonst 3 Monate länger.
+   */
+  private sanierungDaily(time: number) {
+    const c = this.company;
+    const limit = c.overdraftLimit ?? 0;
+    if (c.insolventAt !== undefined && !c.sanierung) { c.insolventAt = undefined; c.overLimitSince = time - 90 * 1440; } // alter Spielstand
+    const s = c.sanierung;
+    if (!s) {
+      if (c.cash < -limit - SANIERUNG_TRIGGER_EUR) {
+        c.overLimitSince ??= time;
+        const days = Math.floor((time - c.overLimitSince) / 1440);
+        if (days === 30 || days === 60) this.emit(time, 'warnung', `Die Bank mahnt: Das Konto liegt seit ${days} Tagen weit über dem Rahmen. Nach 90 Tagen kommt die Sanierung (Umschuldung, 12 Monate keine Käufe).`);
+        if (days >= 90) this.startSanierung(time);
+      } else c.overLimitSince = undefined;
+      return;
+    }
+    // in der Sanierung: Konto über dem Rahmen → nach 30 Tagen verwertet die Bank Maschinen
+    if (c.cash < -limit) {
+      s.overSince ??= time;
+      if (time - s.overSince >= 30 * 1440) this.forcedSale(time);
+    } else s.overSince = undefined;
+    if (time >= s.until) {
+      if (c.cash >= -limit) {
+        c.sanierung = undefined;
+        c.overLimitSince = undefined;
+        this.changeReputation(5);
+        this.emit(time, 'info', 'Sanierung abgeschlossen: Die Bank arbeitet wieder normal mit dem Betrieb. Käufe und Darlehen sind wieder möglich.');
+      } else {
+        s.until = time + 90 * 1440;
+        this.emit(time, 'warnung', `Sanierung verlängert bis ${fmtDay(s.until)}: Das Konto liegt noch über dem Rahmen.`);
+      }
+    }
+    this.version++;
+  }
+
+  private startSanierung(time: number) {
+    const c = this.company;
+    const debt = Math.round(Math.max(0, -c.cash) / 1000) * 1000;
+    const rate = loanBaseRate(SANIERUNG_YEARS) + SANIERUNG_SURCHARGE;
+    const months = SANIERUNG_YEARS * 12;
+    if (debt > 0) {
+      const loan: Loan = { id: this.nextId++, principal: debt, rate, months, monthly: annuity(debt, rate, months), remaining: debt, startAt: time };
+      (c.loans ??= []).push(loan);
+      c.loan = Math.round((c.loan + debt) * 100) / 100;
+      this.book(time, `Sanierungsdarlehen ${SANIERUNG_YEARS} Jahre zu ${(rate * 100).toLocaleString('de-DE', { maximumFractionDigits: 2 })} % (Umschuldung Kontokorrent)`, debt, 'Kredit');
+    }
+    this.book(time, 'Sanierungsberater und Bankgebühren', -SANIERUNG_FEE_EUR, 'Sonstiges');
+    c.sanierung = { since: time, until: time + 365 * 1440, forced: 0 };
+    c.overLimitSince = undefined;
+    this.changeReputation(-10);
+    this.version++;
+    this.emit(time, 'warnung', `Sanierungsphase: Die Bank schuldet ${fmtEur(debt)} in ein Sanierungsdarlehen um (${SANIERUNG_YEARS} Jahre, ${(rate * 100).toLocaleString('de-DE', { maximumFractionDigits: 1 })} %). Bis ${fmtDay(c.sanierung.until)} keine Käufe, Bestellungen und neuen Darlehen. Rutscht das Konto wieder über den Rahmen, verkauft die Bank Maschinen.`);
+  }
+
+  /** Verwertung: freie Maschine mit dem höchsten Wert zu 70 % des Marktwerts, bis das Konto im Rahmen ist */
+  private forcedSale(time: number) {
+    const c = this.company;
+    const limit = c.overdraftLimit ?? 0;
+    const cand = c.machines
+      .filter((m) => !m.lease && m.type !== 'firmenwagen' && !(this.machineInUse?.(m.id) ?? false))
+      .sort((x, y) => this.machineValueNow(y, time) - this.machineValueNow(x, time));
+    for (const m of cand) {
+      if (c.cash >= -limit) break;
+      const price = Math.round((this.machineValueNow(m, time) * SANIERUNG_SALE_SHARE) / 100) * 100;
+      this.removeMachine(m, price, time, 'von der Bank verwertet (Sanierung)');
+      c.sanierung!.forced++;
+    }
+    c.sanierung!.overSince = undefined;
+  }
+
   /**
    * Täglich: Dieselpreis, Dispozinsen, am Monatsersten Raten, Leasing, Versicherung, Bonität;
    * am 1. Januar Jahresabschluss, Steuer fällig am 31. Mai des Folgejahres.
@@ -2848,23 +2934,7 @@ export class Business {
     if (this.company.cash < -(this.company.overdraftLimit ?? 0)) {
       this.emit(time, 'warnung', `Konto über dem Kontokorrentrahmen (${fmtEur(this.company.cash)}). Neue Käufe sind gesperrt – Geld eintreiben, Maschinen verkaufen oder Darlehen aufnehmen.`);
     }
-    // Insolvenz: mehr als 100.000 € über dem Rahmen – nach 90 Tagen kündigt die Bank
-    const c = this.company;
-    if (c.insolventAt === undefined) {
-      if (c.cash < -(c.overdraftLimit ?? 0) - 100_000) {
-        c.overLimitSince ??= time;
-        const days = Math.floor((time - c.overLimitSince) / 1440);
-        if (days === 30 || days === 60) this.emit(time, 'warnung', `Die Bank mahnt: Das Konto liegt seit ${days} Tagen weit über dem Rahmen. Nach 90 Tagen droht die Insolvenz.`);
-        if (days >= 90) {
-          c.insolventAt = time;
-          this.emit(time, 'warnung', 'Insolvenz: Die Bank hat die Kredite gekündigt. Neue Käufe und Darlehen sind gesperrt – Spielstand laden oder Maschinen verkaufen und Schulden abbauen.');
-        }
-      } else c.overLimitSince = undefined;
-    } else if (c.cash >= -(c.overdraftLimit ?? 0)) {
-      c.insolventAt = undefined;
-      c.overLimitSince = undefined;
-      this.emit(time, 'info', 'Die Bank arbeitet wieder mit dem Betrieb zusammen: Konto im Rahmen.');
-    }
+    this.sanierungDaily(time);
     const d = gameDate(time);
     if (d.day === 1) {
       // Darlehen: Zins und Tilgung
@@ -2959,7 +3029,7 @@ export class Business {
     const committed = this.deliveries.filter((x) => !x.leaseMonths).reduce((a, x) => a + x.price, 0);
     if (!leaseMonths && !this.canPay(committed + price)) return 'Nicht genug Geld für Bestellung und Lieferung – Kredit oder Leasing?';
     if (leaseMonths && ![36, 48, 60].includes(leaseMonths)) return 'Leasing über 36, 48 oder 60 Monate';
-    if (this.company.insolventAt !== undefined) return 'Insolvent – keine Bestellungen';
+    if (this.company.sanierung) return 'Sanierungsphase – keine Bestellungen und kein Leasing';
     const weeks = m.deliveryWeeks + (this.rng.int(3) - 1);
     const del: Delivery = {
       id: this.nextMachineId(),
@@ -2968,7 +3038,7 @@ export class Business {
         newPrice: m.newPrice, power: m.power, width: m.width, powerNeed: m.powerNeed, haPerHour: m.haPerHour,
         workKmh: m.workKmh, dieselLHa: m.dieselLHa, serviceAtH: serviceInterval(m), seats: m.seats, carKind: m.carKind,
         // Nutzlast/Bunker, Tank, Betriebsgewicht aus dem Katalog (Kipper, Lkw, Erntemaschinen, Fässer, Radlader)
-        payloadT: m.payloadT, tankM3: m.tankM3, weightT: m.weightT,
+        payloadT: m.payloadT, tankM3: m.tankM3, weightT: m.weightT, drehschemel: m.drehschemel,
       },
       dealerId,
       at: time + weeks * 7 * 1440,
@@ -3040,7 +3110,7 @@ export class Business {
       machine: {
         type: m.type, brand: m.brand, model: m.model, year: year - age, hours, condition, newPrice: m.newPrice,
         power: m.power, width: m.width, powerNeed: m.powerNeed, haPerHour: m.haPerHour, workKmh: m.workKmh, dieselLHa: m.dieselLHa,
-        seats: m.seats, carKind: m.carKind, payloadT: m.payloadT, tankM3: m.tankM3, weightT: m.weightT,
+        seats: m.seats, carKind: m.carKind, payloadT: m.payloadT, tankM3: m.tankM3, weightT: m.weightT, drehschemel: m.drehschemel,
         serviceAtH: hours + (r.next() < 0.3 ? -50 : serviceInterval(m) - r.int(200)),
         // privat: jeder vierte mit verstecktem Mangel
         defect: !dealer && r.next() < 0.25 ? true : undefined,

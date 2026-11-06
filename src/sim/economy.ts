@@ -51,6 +51,8 @@ export interface Machine {
   /** Häckselwagen: Nutzlast Silomais (t); Radlader: Betriebsgewicht (t, Walzgewicht) */
   payloadT?: number;
   weightT?: number;
+  /** Drehschemel-Kipper: koppelbar zum Zug (zwei Anhänger) */
+  drehschemel?: boolean;
   /** Firmenwagen: Sitzplätze inkl. Fahrer und Art */
   seats?: number;
   carKind?: CarKind;
@@ -430,9 +432,15 @@ export interface Company {
   drivers: Employee[];
   /** Standorte (Phase „Standorte“): Stammhof Nr. 1 und weitere */
   sites?: Site[];
-  /** Insolvenz: Konto seit … deutlich über dem Rahmen; insolvent ab (Bank hat gekündigt) */
+  /** Konto seit … deutlich über dem Rahmen (nach 90 Tagen beginnt die Sanierung) */
   overLimitSince?: number;
+  /** alter Spielstand: insolvent ab (wird beim Laden zur Sanierung) */
   insolventAt?: number;
+  /**
+   * Sanierungsphase: Die Bank schuldet das Konto in ein Sanierungsdarlehen um. Bis `until` keine Käufe,
+   * Bestellungen und neuen Darlehen; rutscht das Konto wieder über den Rahmen, verwertet die Bank Maschinen.
+   */
+  sanierung?: { since: number; until: number; overSince?: number; forced: number };
   /** Disponent im Büro (Vorschlag 10) */
   dispatcher?: { autoAccept: boolean; autoStart: boolean; autoRemind: boolean };
   /** Verschleißteillager am Hof (Warenwert €): Schare, Zinken, Filter, Riemen, Schläuche … */

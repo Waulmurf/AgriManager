@@ -78,6 +78,17 @@ interface Vehicle extends VehicleInfo {
 
 export const SAVE_VERSION = 1;
 
+/** Anhänger ohne Schlepper am Feldrand (Wechselbetrieb): wartet auf Beladung durch Drescher/Roder bzw. Überladewagen */
+export interface ParkedTrailer { id: number; orderId: number; node: number; cap: number; load: number }
+/** Zug (Schlepper mit zwei Anhängern): höchstens 25 km/h (Annahme), höchstens zwei Anhänger */
+export const ZUG_KMH = 25;
+export const ZUG_MAX_TRAILERS = 2;
+/** Anhänger ab- bzw. ankuppeln (min je Anhänger), Erntemaschine fährt zum Feldrand und überlädt (min) */
+export const PARK_COUPLE_MIN = 3;
+export const PARK_UNLOAD_MIN = 4;
+/** Wechselbetrieb nur bei Erntemaschinen mit Korntank bzw. Bunker, die zum Feldrand fahren können */
+export const PARK_SERVICES: Service[] = ['drusch', 'kartoffelroden'];
+
 export interface SaveState {
   version: number;
   time: number;
@@ -93,6 +104,8 @@ export interface SaveState {
   weather?: ReturnType<Weather['serialize']>;
   /** je Betrieb [bekannt 0/1, Zufriedenheit, bei der Konkurrenz bis, erledigte Aufträge] */
   farms: [number, number, number?, number?][];
+  /** am Feldrand abgestellte Anhänger (Wechselbetrieb) */
+  parked?: ParkedTrailer[];
   vehicles: {
     state: VehicleState; node: number; seg: number; segOff: number; dist: number; waitMin: number;
     next: 'field' | 'home' | 'leave-field'; fieldNode: number; trips: number; restUntil: number; chargedRoute: number;
@@ -216,7 +229,15 @@ type PlayerTask =
   | {
       /** Abfahrer (Häckselkette): fährt neben dem Häcksler, bringt das Häckselgut zum Silo */
       kind: 'haul'; driverId: number; implementId: number; orderId: number; harvester: number; cap: number; load: number; silo: number;
-      phase: 'prep' | 'toField' | 'wait' | 'load' | 'toSilo' | 'waitSilo' | 'unload' | 'back' | 'unhitch';
+      /**
+       * Wechselbetrieb (Feldrandanhänger): angehängte Anhänger mit Nutzlast und Ladung (Zug = zwei Drehschemel-
+       * Anhänger). Der Schlepper stellt sie am Feldrand ab, die Erntemaschine überlädt hinein, er holt die vollen.
+       */
+      park?: boolean;
+      trailers?: { id: number; cap: number; load: number }[];
+      /** holt abgestellte Anhänger an diesem Knoten (altes Feld) */
+      fetchNode?: number;
+      phase: 'prep' | 'toField' | 'wait' | 'load' | 'toSilo' | 'waitSilo' | 'unload' | 'back' | 'unhitch' | 'park' | 'waitPark' | 'hitch' | 'fetch';
     }
   | {
       /** Lkw-Transport: pendelt zwischen Ladestelle und Ziel, bis die Menge abgefahren ist */
@@ -292,6 +313,8 @@ export class Simulation {
   readonly router: Router;
   private rng: Rng;
   private vehicles: Vehicle[] = [];
+  /** am Feldrand abgestellte Anhänger */
+  parked: ParkedTrailer[] = [];
   private nextRouteId = 1;
   private pending: RouteGeom[] = [];
   private fieldNodes: Uint32Array;
@@ -365,6 +388,7 @@ export class Simulation {
     this.business = new Business(opts.seed, this.company, this.farms, this.fields);
     this.weather = new Weather(opts.seed);
     this.business.nodeLonLat = (node) => unproject(this.graph, this.graph.x[node], this.graph.y[node]);
+    this.business.machineInUse = (id) => this.machineBusy(id);
     this.business.rainOfDay = (day) => this.weather.day(day).rain;
     this.business.tempOfDay = (day) => this.weather.day(day).temp;
     this.business.lonLatNode = (ll) => { const [x, y] = project(graph, ll[0], ll[1]); return nearestNode(graph, x, y); };
@@ -491,6 +515,8 @@ export class Simulation {
 
   /** Maschine gerade bei einer Aufgabe (Schlepper/Wagen mit Aufgabe oder Gerät im Auftrag) */
   private machineBusy(machineId: number): boolean {
+    if (this.parked.some((p) => p.id === machineId)) return true;
+    if (this.vehicles.some((v) => v.task?.kind === 'haul' && (v.task.trailers ?? []).some((x) => x.id === machineId))) return true;
     return this.vehicles.some((v) => v.owner === 'player' && !!v.task && (v.machineId === machineId || ((v.task.kind === 'job' || v.task.kind === 'feeder' || v.task.kind === 'haul' || v.task.kind === 'truck' || v.task.kind === 'tour') && v.task.implementId === machineId)));
   }
 
@@ -564,6 +590,7 @@ export class Simulation {
       const busyDrivers = new Set<number>();
       for (const v of this.vehicles) if (v.owner === 'player' && v.task) busyDrivers.add(v.task.driverId);
       this.business.daily(this.time, this.driverMinutes, this.driverSurcharge, busyDrivers); // täglich 06:00
+      this.parkedCleanup();
       this.driverMinutes = {};
       this.driverSurcharge = {};
       // Ausgeschiedene Mitarbeiter: ihre Planung entfällt
@@ -665,14 +692,14 @@ export class Simulation {
     if (cmd.kind === 'visit') return this.freeCar(1) ? null : 'Firmenwagen sind unterwegs';
     const ids = [
       cmd.tractorId, cmd.implementId, ...(cmd.feeder ? [cmd.feeder.tractorId, cmd.feeder.implementId] : []),
-      ...(cmd.haulers ?? []).flatMap((h) => [h.tractorId, h.implementId]), ...(cmd.roller ? [cmd.roller.machineId] : []),
+      ...(cmd.haulers ?? []).flatMap((h) => [h.tractorId, h.implementId, ...(h.implementId2 ? [h.implementId2] : [])]), ...(cmd.roller ? [cmd.roller.machineId] : []),
     ];
     for (const id of ids) {
       const m = this.company.machines.find((x) => x.id === id);
       if (m && (m.downUntil ?? 0) > this.time) return `${m.brand} ${m.model}: ${m.downReason ?? 'in der Werkstatt'}`;
     }
     for (const h of cmd.haulers ?? []) {
-      if (this.machineBusy(h.tractorId) || this.machineBusy(h.implementId)) return 'Abfahrer: Schlepper oder Wagen im Einsatz';
+      if (this.machineBusy(h.tractorId) || this.machineBusy(h.implementId) || (h.implementId2 !== undefined && this.machineBusy(h.implementId2))) return 'Abfahrer: Schlepper oder Wagen im Einsatz';
       if (this.driverBusy(h.driverId) || this.driverBlocked(h.driverId)) return `${this.driverName(h.driverId)} (Abfahrer) ist nicht frei`;
     }
     if (cmd.roller) {
@@ -1306,7 +1333,7 @@ export class Simulation {
       const wagonType = HAULER_TYPE[o.service];
       const wagonTypes = HAULER_TYPES[o.service] ?? [];
       if (towed && (impl.powerNeed ?? 0) > (tractor.power ?? 0)) return 'Schlepper zu schwach für den Roder';
-      if (!wagonType && (cmd.haulers ?? []).length) return 'Der Rübenroder legt eine Feldrandmiete an – Abfahrer sind nicht nötig';
+      if (!wagonTypes.length && (cmd.haulers ?? []).length) return 'Abfahrer sind hier nicht nötig';
       if (cmd.roller && o.service !== 'haeckseln') return 'Radlader am Silo gibt es nur beim Häckseln';
       if (o.chain === 'komplett' && !(cmd.haulers ?? []).length) return `${o.service === 'drusch' ? 'Drusch mit Abfuhr' : 'Komplettkette'}: mindestens ein Abfahrer (Fahrer, Schlepper, ${o.service === 'drusch' ? 'Kipper' : 'Häckselwagen'})`;
       const used = new Set<number>([driver.id]);
@@ -1315,10 +1342,19 @@ export class Simulation {
         const d = this.company.drivers.find((x) => x.id === h.driverId);
         const t = this.company.machines.find((x) => x.id === h.tractorId && x.type === 'schlepper');
         const w = this.company.machines.find((x) => x.id === h.implementId && wagonTypes.includes(x.type));
-        if (!d || !t || !w) return `Abfahrer: Fahrer, Schlepper und ${wagonType === 'kipper' ? 'Kipper' : 'Häckselwagen'} wählen`;
+        if (!d || !t || !w) return `Abfahrer: Fahrer, Schlepper und ${o.service === 'roden' ? 'Überladewagen' : wagonType === 'kipper' ? 'Kipper' : 'Häckselwagen'} wählen`;
         if (used.has(d.id) || machines.has(t.id) || machines.has(w.id)) return 'Jeder Abfahrer braucht eigenen Fahrer, Schlepper und Wagen';
         if ((d.skills.boden ?? 0) < 1) return `${this.driverName(d.id)} ist nicht als Traktorfahrer qualifiziert`;
         if ((w.powerNeed ?? 0) > (t.power ?? 0)) return 'Abfahrer: Schlepper zu schwach für den Wagen';
+        if (h.implementId2 !== undefined) {
+          const w2 = this.company.machines.find((x) => x.id === h.implementId2);
+          if (!w2 || w2.id === w.id || machines.has(w2.id)) return 'Zug: zweiten Anhänger wählen (jeder Anhänger nur einmal)';
+          if (!w.drehschemel || !w2.drehschemel) return 'Zug: Koppeln geht nur mit Drehschemel-Anhängern – Mulden, Tandem-/Tridemkipper und Häckselwagen fahren einzeln';
+          if (!PARK_SERVICES.includes(o.service)) return 'Zug mit zwei Anhängern gibt es nur beim Drusch und Kartoffelroden (Anhänger am Feldrand)';
+          if ((t.power ?? 0) < Math.max(w.powerNeed ?? 0, w2.powerNeed ?? 0) + 40) return 'Zug: Schlepper zu schwach für zwei Anhänger';
+          machines.add(w2.id);
+        }
+        if (h.park && (!PARK_SERVICES.includes(o.service) || w.type === 'ueberladewagen')) return 'Anhänger am Feldrand abstellen geht nur mit Kippern beim Drusch und Kartoffelroden';
         used.add(d.id); machines.add(t.id); machines.add(w.id);
       }
       if (cmd.roller) {
@@ -1467,7 +1503,11 @@ export class Simulation {
         const w = this.company.machines.find((m) => m.id === h.implementId)!;
         // Überladewagen: lädt am Feldrand über (auf Lkw/Anhänger des Kunden), also kurzer Umlauf
         const dropAt = w.type === 'ueberladewagen' ? access : silo;
-        hu.task = { kind: 'haul', driverId: h.driverId, implementId: w.id, orderId: o.id, harvester: unit.id, cap: w.payloadT ?? 12, load: 0, silo: dropAt, phase: 'prep' };
+        const w2 = h.implementId2 !== undefined ? this.company.machines.find((m) => m.id === h.implementId2) : undefined;
+        // Zug (zwei Anhänger) fährt nicht neben der Erntemaschine her: immer Wechselbetrieb am Feldrand
+        const park = !!(h.park || w2) && w.type !== 'ueberladewagen';
+        const trailers = park ? [w, ...(w2 ? [w2] : [])].map((x) => ({ id: x.id, cap: x.payloadT ?? 12, load: 0 })) : undefined;
+        hu.task = { kind: 'haul', driverId: h.driverId, implementId: w.id, orderId: o.id, harvester: unit.id, cap: trailers ? trailers.reduce((a, x) => a + x.cap, 0) : w.payloadT ?? 12, load: 0, silo: dropAt, phase: 'prep', park: park || undefined, trailers };
         hu.state = VehicleState.Waiting;
         hu.waitMin = RUEST_HOF_MIN;
       }
@@ -1516,7 +1556,12 @@ export class Simulation {
             prep: 'hängt den Häckselwagen an', toField: 'fährt zum Häcksler', wait: 'wartet am Feldrand auf den Häcksler',
             load: `fährt neben dem Häcksler (${Math.round(t.load)} von ${t.cap} t)`, toSilo: `bringt ${Math.round(t.load)} t zum Silo`,
             waitSilo: 'wartet am Silo (Walze kommt nicht nach)', unload: 'kippt am Silo ab', back: 'fährt zurück zum Hof', unhitch: 'stellt den Wagen ab',
+            park: `stellt ${(t.trailers?.length ?? 0) > 1 ? 'die Anhänger' : 'den Anhänger'} am Feldrand ab`,
+            waitPark: `wartet am Feldrand auf volle Anhänger (${this.parkedText(t.orderId, v.node) || 'keine da'})`,
+            hitch: `hängt ${(t.trailers?.length ?? 0) > 1 ? `zwei Anhänger an (Zug, ${Math.round(t.load)} von ${t.cap} t)` : `den Anhänger an (${Math.round(t.load)} von ${t.cap} t)`}`,
+            fetch: 'holt abgestellte Anhänger vom vorigen Feld',
           } as Record<string, string>)[t.phase];
+          if ((t.trailers?.length ?? 0) > 1 && (t.phase === 'toSilo' || t.phase === 'toField' || t.phase === 'back')) status += ' · Zug, max. 25 km/h';
         }
         if (t?.kind === 'truck') {
           const o = b.orders.find((x) => x.id === t.orderId);
@@ -1555,7 +1600,7 @@ export class Simulation {
             prep: 'baut am Hof das Gerät an (Rüstzeit)',
             to: `fährt zum Feld (${who}, ${n})`,
             setup: `richtet das Gerät am Feld ein (${n})`,
-            work: `${o ? SERVICE_VERB[o.service] : 'arbeitet'} für ${who} (${n}${sl ? `, ${Math.round(sl.progress * 100)} %` : ''})`,
+            work: `${o ? SERVICE_VERB[o.service] : 'arbeitet'} für ${who} (${n}${sl ? `, ${Math.round(sl.progress * 100)} %` : ''}${t.chop?.bunker ? `, Tank ${Math.round(t.chop.bunker.load)}/${t.chop.bunker.cap} t` : ''})${t.chop && this.parked.some((p) => p.orderId === t.orderId) ? ` · Feldrand: ${this.parkedText(t.orderId)}` : ''}`,
             back: 'fährt zurück zum Hof',
             unhitch: 'baut am Hof das Gerät ab',
             toFill: `fährt zum Güllelager (${who})`,
@@ -1833,6 +1878,7 @@ export class Simulation {
       })),
       queue: structuredClone(this.queue),
       nextQueueId: this.nextQueueId,
+      parked: structuredClone(this.parked),
     };
   }
 
@@ -1861,6 +1907,7 @@ export class Simulation {
     this.pending = [];
     this.queue = structuredClone(s.queue ?? []).map((q) => ({ ...q, driverId: q.driverId ?? 1 }));
     this.nextQueueId = s.nextQueueId ?? 1;
+    this.parked = structuredClone(s.parked ?? []);
     s.vehicles.forEach((d, i) => {
       const v = this.vehicles[i];
       Object.assign(v, {
@@ -2055,6 +2102,16 @@ export class Simulation {
   }
 
   private startRoute(v: Vehicle, r: RouteGeom) {
+    // Zug mit zwei Anhängern: höchstens 25 km/h
+    if (v.task?.kind === 'haul' && (v.task.trailers?.length ?? 0) >= 2 && r.kind !== 'field') {
+      const cap = ZUG_KMH / 3.6;
+      let dur = 0;
+      for (let i = 0; i < r.speed.length; i++) {
+        if (r.speed[i] > cap) r.speed[i] = cap;
+        dur += (r.cum[i + 1] - r.cum[i]) / (r.speed[i] || 1);
+      }
+      r.duration = dur;
+    }
     v.route = r;
     v.seg = 0;
     v.segOff = 0;
@@ -2100,6 +2157,7 @@ export class Simulation {
     }
     if (t?.kind === 'feeder' && t.phase === 'wait') { this.feederWait(v); return; }
     if (t?.kind === 'haul' && t.phase === 'wait') { this.haulWait(v); return; }
+    if (t?.kind === 'haul' && t.phase === 'waitPark') { this.parkWait(v); return; }
     if (t?.kind === 'haul' && t.phase === 'load') return; // Häcksler steuert
     if (t?.kind === 'haul' && t.phase === 'waitSilo') { this.haulAtSilo(v); return; }
     if (t?.kind === 'silo' && t.phase === 'work') { this.siloWork(v); return; }
@@ -2229,7 +2287,12 @@ export class Simulation {
       return;
     }
     if (t.kind === 'haul') {
-      if (t.phase === 'toField') { t.phase = 'wait'; v.state = VehicleState.Waiting; }
+      if (t.phase === 'toField' && t.park) {
+        // Wechselbetrieb: Anhänger abstellen (falls welche dran sind), sonst am Feldrand auf volle warten
+        if (t.trailers?.length) { t.phase = 'park'; v.state = VehicleState.Waiting; v.waitMin = PARK_COUPLE_MIN * t.trailers.length; }
+        else { t.phase = 'waitPark'; v.state = VehicleState.Waiting; }
+      } else if (t.phase === 'fetch') { t.phase = 'waitPark'; v.state = VehicleState.Waiting; }
+      else if (t.phase === 'toField') { t.phase = 'wait'; v.state = VehicleState.Waiting; }
       else if (t.phase === 'toSilo') { t.phase = 'waitSilo'; v.state = VehicleState.Waiting; }
       else if (t.phase === 'back') { t.phase = 'unhitch'; v.state = VehicleState.Waiting; v.waitMin = RUEST_ABBAU_MIN; }
       b.version++;
@@ -2338,10 +2401,32 @@ export class Simulation {
       if (t.phase === 'prep') { t.phase = 'toField'; this.driveTo(v, this.harvesterNode(t)); }
       else if (t.phase === 'unload') {
         const o = this.business.orders.find((x) => x.id === t.orderId);
-        if (o) o.doneT = Math.round(((o.doneT ?? 0) + t.load) * 10) / 10;
+        // Überladewagen am Feldrand: zuerst in abgestellte Anhänger, der Rest auf Lkw/Anhänger des Kunden
+        const ulw = this.company.machines.find((x) => x.id === t.implementId)?.type === 'ueberladewagen';
+        const placed = ulw ? this.fillParked(t.orderId, v.node, t.load) : 0;
+        if (o) o.doneT = Math.round(((o.doneT ?? 0) + t.load - placed) * 10) / 10;
         t.load = 0;
+        for (const x of t.trailers ?? []) x.load = 0;
         const h = this.vehicles[t.harvester]?.task;
-        if (h?.kind === 'job' && h.orderId === t.orderId && h.phase !== 'back' && h.phase !== 'unhitch') { t.phase = 'toField'; this.driveTo(v, this.harvesterNode(t)); }
+        const active = h?.kind === 'job' && h.orderId === t.orderId && h.phase !== 'back' && h.phase !== 'unhitch';
+        const left = t.park ? this.parked.find((p) => p.orderId === t.orderId) : undefined;
+        if (active) { t.phase = 'toField'; this.driveTo(v, this.harvesterNode(t)); }
+        else if (left) { t.phase = 'fetch'; t.fetchNode = left.node; this.driveTo(v, left.node); }
+        else { t.phase = 'back'; this.driveTo(v, this.homeOf(v)); }
+      } else if (t.phase === 'park') {
+        // Anhänger am Feldrand abstellen
+        for (const x of t.trailers ?? []) this.parked.push({ id: x.id, orderId: t.orderId, node: v.node, cap: x.cap, load: x.load });
+        t.trailers = [];
+        t.load = 0;
+        t.cap = 0;
+        t.phase = 'waitPark';
+        v.state = VehicleState.Waiting;
+      } else if (t.phase === 'hitch') {
+        const h = this.vehicles[t.harvester]?.task;
+        const active = h?.kind === 'job' && h.orderId === t.orderId && h.phase !== 'back' && h.phase !== 'unhitch';
+        // volle (oder bei Kettenende alle beladenen) Anhänger zum Silo bzw. Hof; halbleere vom alten Feld zum neuen
+        if (t.load > 0.5 && (!active || t.load >= 0.5 * t.cap)) { t.phase = 'toSilo'; this.driveTo(v, t.silo); }
+        else if (active) { t.phase = 'toField'; this.driveTo(v, this.harvesterNode(t)); }
         else { t.phase = 'back'; this.driveTo(v, this.homeOf(v)); }
       } else if (t.phase === 'unhitch') v.task = undefined;
       this.business.version++;
@@ -2454,6 +2539,99 @@ export class Simulation {
    */
   // ---------- Häckselkette ----------
 
+  /** In abgestellte Anhänger des Auftrags an diesem Knoten füllen (der Reihe nach); liefert die untergebrachte Menge */
+  private fillParked(orderId: number, node: number, amount: number): number {
+    let rest = amount;
+    for (const p of this.parked) {
+      if (rest <= 0) break;
+      if (p.orderId !== orderId || p.node !== node) continue;
+      const add = Math.min(rest, p.cap - p.load);
+      if (add <= 0) continue;
+      p.load = Math.round((p.load + add) * 100) / 100;
+      rest -= add;
+    }
+    if (rest < amount) this.business.version++;
+    return amount - rest;
+  }
+
+  /**
+   * Wechselbetrieb: Schlepper ohne Anhänger wartet am Feldrand. Er hängt volle Anhänger an (bis zu zwei), sobald
+   * mindestens einer voll ist und ein anderer zum Weiterbefüllen stehen bleibt (oder alle voll sind). Anhänger am
+   * alten Feld (Feldwechsel) holt er nach; ist die Ernte vorbei, sammelt er alle ein.
+   */
+  private parkWait(v: Vehicle) {
+    const t = v.task;
+    if (t?.kind !== 'haul') return;
+    const h = this.vehicles[t.harvester]?.task;
+    const active = h?.kind === 'job' && h.orderId === t.orderId && h.phase !== 'back' && h.phase !== 'unhitch';
+    const hNode = active ? this.harvesterNode(t) : -1;
+    const mine = this.parked.filter((p) => p.orderId === t.orderId);
+    const here = mine.filter((p) => p.node === v.node);
+    // wird ein Knoten schon von einem anderen Schlepper bedient?
+    const served = (node: number) => this.vehicles.some((w) => w !== v && w.task?.kind === 'haul' && w.task.orderId === t.orderId
+      && ((w.task.phase === 'fetch' && w.task.fetchNode === node) || ((w.task.phase === 'waitPark' || w.task.phase === 'hitch') && w.node === node)));
+    let take: ParkedTrailer[] = [];
+    if (!active || v.node !== hNode) {
+      if (here.length) take = here.slice(0, ZUG_MAX_TRAILERS);
+      else {
+        const other = mine.find((p) => p.node !== hNode && !served(p.node));
+        if (other) { t.phase = 'fetch'; t.fetchNode = other.node; this.driveTo(v, other.node); }
+        else if (active) { t.phase = 'toField'; this.driveTo(v, hNode); }
+        else { t.phase = 'back'; this.driveTo(v, this.homeOf(v)); }
+        this.business.version++;
+        return;
+      }
+    } else {
+      const full = here.filter((p) => p.load >= p.cap - 0.3);
+      const rest = here.length - full.length;
+      if (full.length && (rest > 0 || full.length === here.length)) take = full.slice(0, ZUG_MAX_TRAILERS);
+      else {
+        // nichts Volles hier: verwaiste Anhänger vom alten Feld holen, wenn sich keiner kümmert
+        const other = mine.find((p) => p.node !== hNode && !served(p.node));
+        if (other && !full.length) { t.phase = 'fetch'; t.fetchNode = other.node; this.driveTo(v, other.node); this.business.version++; }
+        return;
+      }
+    }
+    if (!take.length) return;
+    this.parked = this.parked.filter((p) => !take.includes(p));
+    t.trailers = take.map((p) => ({ id: p.id, cap: p.cap, load: p.load }));
+    t.load = Math.round(take.reduce((a, p) => a + p.load, 0) * 100) / 100;
+    t.cap = take.reduce((a, p) => a + p.cap, 0);
+    t.fetchNode = undefined;
+    t.phase = 'hitch';
+    v.state = VehicleState.Waiting;
+    v.waitMin = PARK_COUPLE_MIN * take.length;
+    this.business.version++;
+  }
+
+  /** Abgestellte Anhänger ohne Schlepper im Auftrag (Rückruf, Abbruch): zurück zum Hof, Ladung gilt als abgeliefert */
+  private parkedCleanup() {
+    const keep: ParkedTrailer[] = [];
+    for (const p of this.parked) {
+      const served = this.vehicles.some((w) => w.task?.kind === 'haul' && w.task.orderId === p.orderId && w.task.park && w.task.phase !== 'back' && w.task.phase !== 'unhitch');
+      if (served) { keep.push(p); continue; }
+      const o = this.business.orders.find((x) => x.id === p.orderId);
+      if (o && p.load > 0) o.doneT = Math.round(((o.doneT ?? 0) + p.load) * 10) / 10;
+      const m = this.company.machines.find((x) => x.id === p.id);
+      this.business.info(this.time, `${m ? `${m.brand} ${m.model}` : 'Anhänger'} vom Feldrand zurück zum Hof geholt${p.load > 0.5 ? ` (${Math.round(p.load)} t abgeliefert)` : ''}.`);
+    }
+    if (keep.length !== this.parked.length) { this.parked = keep; this.business.version++; }
+  }
+
+  /** Füllstände abgestellter Anhänger als Text, z. B. „12/13 t, 3/13 t“ (optional nur an einem Knoten) */
+  private parkedText(orderId: number, node?: number): string {
+    return this.parked.filter((p) => p.orderId === orderId && (node === undefined || p.node === node))
+      .map((p) => `${Math.round(p.load)}/${p.cap} t`).join(', ');
+  }
+
+  /** Abgestellte Anhänger mit Füllstand (Karte, Status) */
+  parkedTrailers(): { id: number; orderId: number; name: string; lonLat: [number, number]; load: number; cap: number }[] {
+    return this.parked.map((p) => {
+      const m = this.company.machines.find((x) => x.id === p.id);
+      return { id: p.id, orderId: p.orderId, name: m ? `${m.brand} ${m.model}` : 'Anhänger', lonLat: unproject(this.graph, this.graph.x[p.node], this.graph.y[p.node]), load: Math.round(p.load * 10) / 10, cap: p.cap };
+    });
+  }
+
   /**
    * Abfahrer wartet am Feldrand: ist die Erntemaschine inzwischen auf einem anderen Feld (Feldwechsel,
    * während der Wagen unterwegs war), fährt er nach; ist ihr Auftrag vorbei, fährt er zum Silo bzw. heim.
@@ -2490,13 +2668,14 @@ export class Simulation {
     c.siloBacklog = Math.max(0, c.siloBacklog - c.siloTph / 60);
     if (c.hiredRoller) c.rollerMinutes++;
     if (c.pauseUntil !== undefined && this.time < c.pauseUntil) return; // bunkert am Vorgewende ab
-    if (!c.attached && !c.miete) {
+    // Rübenroder: mit Überladewagen bunkert er während der Fahrt über, sonst fährt er zur Feldrandmiete
+    if (!c.attached && (!c.miete || this.vehicles.some((x) => x.task?.kind === 'haul' && x.task.harvester === v.id))) {
       const node = this.fields!.access[t.queue[t.current]];
       const wagon = this.vehicles.find((x) => x.task?.kind === 'haul' && x.task.harvester === v.id && x.task.phase === 'wait' && x.node === node);
       if (wagon && wagon.task?.kind === 'haul') {
         wagon.task.phase = 'load';
         c.attached = { veh: wagon.id, load: wagon.task.load, cap: wagon.task.cap };
-      } else {
+      } else if (!c.miete) {
         const i = c.virtual.findIndex((at) => at <= this.time);
         if (i >= 0) { c.virtual[i] = Number.MAX_SAFE_INTEGER; c.attached = { veh: -1 - i, load: 0, cap: c.virtualCap }; }
       }
@@ -2504,7 +2683,14 @@ export class Simulation {
         // Korntank zuerst überladen
         if (c.bunker && c.bunker.load > 0) { c.attached.load += c.bunker.load; c.bunker.load = 0; }
         this.business.version++;
-      } else if (!c.bunker || c.bunker.load >= c.bunker.cap) return; // ohne Abfahrer steht der Häcksler, Drescher bei vollem Tank
+      } else if (!c.miete && (!c.bunker || c.bunker.load >= c.bunker.cap)) {
+        // Korntank voll: in einen am Feldrand abgestellten Anhänger überladen (Fahrt zum Feldrand ≈ 4 min)
+        if (c.bunker && c.bunker.load > 0) {
+          const placed = this.fillParked(t.orderId, node, c.bunker.load);
+          if (placed > 0) { c.bunker.load = Math.max(0, c.bunker.load - placed); c.pauseUntil = this.time + PARK_UNLOAD_MIN; this.business.version++; }
+        }
+        return; // ohne Abfahrer steht der Häcksler, Drescher bei vollem Tank
+      }
     }
     if (c.miete && c.bunker && c.bunker.load >= c.bunker.cap) {
       // Rübenroder: Bunker in die Feldrandmiete (Fahrt zum Vorgewende und Abbunkern ≈ 4 min)
@@ -2681,6 +2867,7 @@ export class Simulation {
     else if (c.bunker) c.bunker.load += rest;
     c.fieldHa = 0;
     // letztes Feld: Bunker am Feldrand leeren (Miete bzw. Anhänger)
+    if (t.current + 1 >= t.queue.length && c.bunker && c.bunker.load > 0) c.bunker.load = Math.max(0, c.bunker.load - this.fillParked(t.orderId, this.fields!.access[fi], c.bunker.load));
     if (t.current + 1 >= t.queue.length || c.miete) this.dumpBunker(v, c);
     if (o) {
       b.fieldPartDone(o, fi, part, this.time);

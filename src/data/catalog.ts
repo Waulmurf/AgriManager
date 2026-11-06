@@ -15,6 +15,8 @@ export interface CatalogModel {
   tankM3?: number;
   payloadT?: number;
   weightT?: number;
+  /** Kipper mit Drehschemel-Lenkachse: darf als zweiter Anhänger in einen Zug (Mulden, Tandem-/Tridemkipper und Häckselwagen nicht) */
+  drehschemel?: boolean;
   seats?: number;
   carKind?: 'kombi' | 'kleinbus' | 'werkstatt';
   type: MachineType;
@@ -102,6 +104,9 @@ export const CATALOG: CatalogModel[] = [
   { key: 'jd-s785', type: 'maehdrescher', brand: 'John Deere', model: 'S785i + 735X (10,7 m)', power: 473, width: 10.7, haPerHour: 3.5, workKmh: 6, dieselLHa: 19, payloadT: 11, newPrice: 610_000, deliveryWeeks: 16 },
   // Kipper zum Abfahren von Korn (Annahme)
   { key: 'krampe-hp20', type: 'kipper', brand: 'Krampe', model: 'Halfpipe HP 20 (18 t)', payloadT: 18, powerNeed: 160, newPrice: 52_000, deliveryWeeks: 8 },
+  // Zweiachs-Dreiseitenkipper mit Drehschemel, 18 t zulässiges Gesamtgewicht, rund 13 t Nutzlast (Annahme): koppelbar zum Zug
+  { key: 'fliegl-zdk180', type: 'kipper', brand: 'Fliegl', model: 'ZDK 180 Drehschemel-Dreiseitenkipper (18 t zGG)', payloadT: 13, powerNeed: 110, newPrice: 34_000, deliveryWeeks: 6, drehschemel: true },
+  { key: 'krampe-zk18', type: 'kipper', brand: 'Krampe', model: 'Zweiachs-Dreiseitenkipper Drehschemel (18 t zGG)', payloadT: 13, powerNeed: 110, newPrice: 36_000, deliveryWeeks: 8, drehschemel: true },
   { key: 'fliegl-tdk302', type: 'kipper', brand: 'Fliegl', model: 'TDK 302 Tridem-Kipper (22 t)', payloadT: 22, powerNeed: 200, newPrice: 66_000, deliveryWeeks: 8 },
   // Rübenroder-Selbstfahrer 6-reihig, Bunker ≈ 30 t (docs/ablaeufe.md); Flächenleistung 1,6–1,8 ha/h (Annahme)
   { key: 'grimme-rexor6300', type: 'ruebenroder', brand: 'Grimme', model: 'Rexor 6300 Platinum', power: 627, width: 2.7, haPerHour: 1.6, workKmh: 6, dieselLHa: 32, payloadT: 30, newPrice: 690_000, deliveryWeeks: 20 },

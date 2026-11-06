@@ -131,6 +131,10 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
 - Balance 6. Nov.: Feldpreise +15 %, Ernte +10 %, Pannen seltener, mehr Erntenachfrage, Pacht 540 €/ha bei AZ 35. Fehler behoben:
   Abfahrer folgt bei Feldwechsel (`haulWait`), eigene Ernte nach 3 Wochen Verzug durch Fremd-LU (`farmingDaily`). 20 Jahre: alle
   18 Dienste ab 2036, keine Insolvenz, Eigenkapital 2046 rund 3 Mio. €.
+- Sanierung statt Insolvenz (`Company.sanierung`, `sanierungDaily`): Umschuldung in Sanierungsdarlehen, 12 Monate Sperre,
+  Verwertung von Maschinen bei erneutem Überzug. Bilanz bleibt einfach (Nils: nicht verkomplizieren).
+- Drehschemel-Zug und Anhänger am Feldrand (`Machine.drehschemel`, Haul `park`/`trailers`, `Simulation.parked`, `parkWait`,
+  `fillParked`, Karte `parked`), Überladewagen auch für Rübenroder (`HAULER_TYPES.roden`). Doku in `docs/ablaeufe.md`.
 - macOS: Mindestversion 12 (WebGL 2, Module-Worker), `src/polyfills.ts` + Startprüfung, Kürzel ohne Cmd/Strg, Selbsttest im
   macOS-CI-Job (läuft bei `[mac]` in der Commit-Nachricht).
 
