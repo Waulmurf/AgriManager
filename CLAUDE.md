@@ -135,6 +135,9 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
   Verwertung von Maschinen bei erneutem Überzug. Bilanz bleibt einfach (Nils: nicht verkomplizieren).
 - Drehschemel-Zug und Anhänger am Feldrand (`Machine.drehschemel`, Haul `park`/`trailers`, `Simulation.parked`, `parkWait`,
   `fillParked`, Karte `parked`), Überladewagen auch für Rübenroder (`HAULER_TYPES.roden`). Doku in `docs/ablaeufe.md`.
+- Strategie-Tests `tests/unit/strategies.test.ts` (Profile in `economyBotFull.ts`: Spezialisten, Feldarbeit, Allrounder × vorsichtig/normal/mutig),
+  Bericht `docs/strategien.md`: Feldarbeit-Allrounder am stärksten, Spezialisten (Drusch, Rüben, Transport, Kommunal) nicht tragfähig →
+  Vorschläge warten auf Entscheidung. Endgültige Insolvenz nach gescheiterter Sanierung (`Company.bankruptAt`, Spiel vorbei).
 - macOS: Mindestversion 12 (WebGL 2, Module-Worker), `src/polyfills.ts` + Startprüfung, Kürzel ohne Cmd/Strg, Selbsttest im
   macOS-CI-Job (läuft bei `[mac]` in der Commit-Nachricht).
 

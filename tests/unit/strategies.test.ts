@@ -41,7 +41,7 @@ describe.skipIf(!has || !!process.env.STRATEGY_REPORT_FROM)('Strategien: Spielba
     it(`${run.key} (${run.invest}), ${run.years} ${run.years === 1 ? 'Jahr' : 'Jahre'}`, () => {
       const s = newSim();
       const r = runFullBot(s, run.years, botProfile(run.key, run.invest));
-      const sum = strategySummary(r);
+      const sum = strategySummary(r, run.years);
       if (OUT) {
         mkdirSync(OUT, { recursive: true });
         const base = `${OUT}/${run.key}-${run.invest}-${run.years}`;
@@ -75,9 +75,11 @@ describe.skipIf(!has || !!process.env.STRATEGY_REPORT_FROM)('Strategien: Spielba
 describe.skipIf(!process.env.STRATEGY_REPORT_FROM)('Strategien: Vergleichsbericht', () => {
   it('Tabelle aus den Kennzahlen', () => {
     const dir = process.env.STRATEGY_REPORT_FROM!;
-    const rows: StrategySummary[] = readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => JSON.parse(readFileSync(`${dir}/${f}`, 'utf8')));
+    // geplanter Zeitraum steht auch im Dateinamen <strategie>-<invest>-<jahre>.json
+    const rows: StrategySummary[] = readdirSync(dir).filter((f) => f.endsWith('.json'))
+      .map((f) => ({ horizon: Number(f.replace('.json', '').split('-').pop()), ...JSON.parse(readFileSync(`${dir}/${f}`, 'utf8')) }));
     const order = ['vorsichtig', 'normal', 'mutig'];
-    rows.sort((a, b) => a.years - b.years || STRATEGY_KEYS.indexOf(a.key) - STRATEGY_KEYS.indexOf(b.key) || order.indexOf(a.invest) - order.indexOf(b.invest));
+    rows.sort((a, b) => (a.horizon ?? a.years) - (b.horizon ?? b.years) || STRATEGY_KEYS.indexOf(a.key) - STRATEGY_KEYS.indexOf(b.key) || order.indexOf(a.invest) - order.indexOf(b.invest));
     const md = strategyTable(rows);
     if (process.env.STRATEGY_REPORT) writeFileSync(process.env.STRATEGY_REPORT, md);
     expect(rows.length).toBeGreaterThan(0);

@@ -1140,3 +1140,5 @@ Lohnsatz fürs Hacken und Striegeln gibt es nicht; für Striegeln mit eigener Ma
   Insolvenz.
 - Nils am 6. Nov.: Bilanz einfach lassen; Insolvenz → Sanierungsphase (umgesetzt). Drehschemel-Zug, Anhänger am Feldrand mit
   Füllstand, Überladewagen für Drescher/Roder umgesetzt.
+- Strategie-Tests (6. Nov.): `docs/strategien.md`. Offen (Entscheidung Nils): Arbeitszeit 12 h in der Ernte, mehr Kunden für Spezialisten,
+  ganzjährige Lkw-Frachten, mehr Kommunalaufträge, mehr gebrauchte Großmaschinen/Miete, Verwertung in der Sanierung schonender.

@@ -586,6 +586,8 @@ export function fullReport(r: FullResult, title: string): string {
 /** Kennzahlen eines Strategie-Laufs für den Vergleich */
 export interface StrategySummary {
   key: string; invest: InvestLevel; name: string; years: number; seconds: number;
+  /** geplante Jahre (bei Insolvenz endet der Lauf früher) */
+  horizon?: number;
   revenueTotal: number; profitTotal: number; profitYears: number;
   /** Mittel der letzten (bis zu) fünf Jahre */
   revenueLate: number; profitLate: number;
@@ -595,14 +597,14 @@ export interface StrategySummary {
   stuckHarvest: number; longTasks: number; badNumbers: number; investTotal: number; bankruptYear: number | null;
 }
 
-export function strategySummary(r: FullResult): StrategySummary {
+export function strategySummary(r: FullResult, horizon?: number): StrategySummary {
   const ys = r.years;
   const late = ys.slice(-5);
   const avg = (f: (y: YearRow) => number) => (late.length ? late.reduce((a, y) => a + f(y), 0) / late.length : 0);
   const orders = ys.reduce((a, y) => a + y.orders, 0);
   const last = ys.at(-1);
   return {
-    key: r.profile.key, invest: r.profile.invest, name: r.profile.name, years: ys.length, seconds: r.seconds,
+    key: r.profile.key, invest: r.profile.invest, name: r.profile.name, years: ys.length, seconds: r.seconds, horizon,
     revenueTotal: ys.reduce((a, y) => a + y.revenue, 0), profitTotal: ys.reduce((a, y) => a + y.profit, 0), profitYears: ys.filter((y) => y.profit > 0).length,
     revenueLate: Math.round(avg((y) => y.revenue)), profitLate: Math.round(avg((y) => y.profit)),
     equityEnd: last?.equity ?? 0, equityMin: Math.min(...ys.map((y) => y.equity)), debtMax: Math.max(...ys.map((y) => y.debt)), cashMin: Math.min(...ys.map((y) => y.cash)),
@@ -622,11 +624,11 @@ export function strategySummary(r: FullResult): StrategySummary {
 export function strategyTable(rows: StrategySummary[]): string {
   const k = (v: number) => Math.round(v / 1000).toLocaleString('de-DE');
   const L = [
-    '| Strategie | Invest | Jahre | Umsatz Ø letzte 5 J. (T€) | Gewinn Ø letzte 5 J. (T€) | Gewinnjahre | Gewinn gesamt (T€) | Eigenkapital Ende (T€) | EK min (T€) | Schulden max (T€) | Sanierung ab | Insolvenz | Dienste | Schlepper / Maschinen / Personal | verspätet % | storniert % | Ruf Ende (min) | hängende Ernte | Rechenzeit |',
+    '| Strategie | Invest | Jahre (geplant) | Umsatz Ø letzte 5 J. (T€) | Gewinn Ø letzte 5 J. (T€) | Gewinnjahre | Gewinn gesamt (T€) | Eigenkapital Ende (T€) | EK min (T€) | Schulden max (T€) | Sanierung ab | Insolvenz | Dienste | Schlepper / Maschinen / Personal | verspätet % | storniert % | Ruf Ende (min) | hängende Ernte | Rechenzeit |',
     '| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | ---: | --- | ---: | ---: | --- | ---: | ---: |',
   ];
   for (const r of rows) {
-    L.push(`| ${r.key} | ${r.invest} | ${r.years} | ${k(r.revenueLate)} | ${k(r.profitLate)} | ${r.profitYears}/${r.years} | ${k(r.profitTotal)} | ${k(r.equityEnd)} | ${k(r.equityMin)} | ${k(r.debtMax)} | ${r.firstSanierung ?? '–'} | ${r.bankruptYear ?? '–'} | ${r.services} | ${r.tractorsEnd} / ${r.machinesEnd} / ${r.staffEnd} | ${r.lateShare} | ${r.cancelShare} | ${r.reputationEnd} (${r.reputationMin}) | ${r.stuckHarvest} | ${r.seconds} s |`);
+    L.push(`| ${r.key} | ${r.invest} | ${r.years}${r.horizon && r.horizon !== r.years ? ` (${r.horizon})` : ''} | ${k(r.revenueLate)} | ${k(r.profitLate)} | ${r.profitYears}/${r.years} | ${k(r.profitTotal)} | ${k(r.equityEnd)} | ${k(r.equityMin)} | ${k(r.debtMax)} | ${r.firstSanierung ?? '–'} | ${r.bankruptYear ?? '–'} | ${r.services} | ${r.tractorsEnd} / ${r.machinesEnd} / ${r.staffEnd} | ${r.lateShare} | ${r.cancelShare} | ${r.reputationEnd} (${r.reputationMin}) | ${r.stuckHarvest} | ${r.seconds} s |`);
   }
   return L.join('\n') + '\n';
 }
