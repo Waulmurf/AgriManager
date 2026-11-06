@@ -114,6 +114,8 @@ export function App() {
           <strong>Lohnbetrieb-Simulation</strong>
           <span className="sub">Technischer Prototyp</span>
         </div>
+        {status?.company?.bankruptAt !== undefined && <strong className="warn" data-testid="game-over">Insolvenz – Spiel vorbei (Spielstand laden)</strong>}
+        {status?.company?.sanierung && status.company.bankruptAt === undefined && <strong className="warn">Sanierungsphase</strong>}
         <div className="clock" data-testid="clock">
           <span className="date">{clock.date}</span>
           <span className="time">{clock.time}</span>

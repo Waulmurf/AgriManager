@@ -1637,7 +1637,10 @@ export function FinanceTab({ status, game }: { status: GameStatus; game: GameCon
   return (
     <>
       <h2>Konto</h2>
-      {c.sanierung && (
+      {c.bankruptAt !== undefined && (
+        <p className="warn" data-testid="bankrupt">Insolvenz: Die Sanierung ist gescheitert. Das Spiel ist vorbei – einen älteren Spielstand laden oder neu beginnen.</p>
+      )}
+      {c.sanierung && c.bankruptAt === undefined && (
         <p className="warn" data-testid="sanierung">
           Sanierungsphase bis {fmtDay(c.sanierung.until)}: keine Käufe, Bestellungen und neuen Darlehen. Konto im Rahmen halten –
           sonst verkauft die Bank Maschinen{c.sanierung.forced ? ` (bisher ${c.sanierung.forced} verwertet)` : ''}.

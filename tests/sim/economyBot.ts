@@ -206,6 +206,7 @@ export function runEconomyBot(s: Simulation, days: number): BotResult {
   };
 
   for (let day = 0; day < days; day++) {
+    b.drainEvents(); s.drainRoutes(); // macht im Spiel die Oberfläche
     // Tag in Schritten: Entscheidungen um 06:30, Aufträge starten alle 2 Stunden bis 16 Uhr
     for (let minute = 0; minute < 1440; minute++) {
       const mod = s.time % 1440;

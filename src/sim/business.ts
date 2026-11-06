@@ -84,6 +84,8 @@ export const SANIERUNG_YEARS = 5;
 export const SANIERUNG_SURCHARGE = 0.04;
 export const SANIERUNG_FEE_EUR = 15_000;
 export const SANIERUNG_SALE_SHARE = 0.7;
+/** höchstens so viele Verlängerungen um je 3 Monate, danach endgültige Insolvenz */
+export const SANIERUNG_MAX_EXTENSIONS = 4;
 export const WEAR_GRUBBER_EUR_HA = 3;
 
 export type Service = 'grubbern' | 'stoppel' | 'guelle' | 'haeckseln' | 'drusch' | 'roden' | 'transport'
@@ -2582,6 +2584,7 @@ export class Business {
 
   daily(time: number, workedMinutes: Record<number, number> = {}, surcharge: Record<number, number> = {}, busyDrivers: Set<number> = new Set()) {
     this.lastTime = time;
+    if (this.company.bankruptAt !== undefined) return; // Betrieb abgewickelt: nichts läuft mehr
     this.bookDiesel(time);
     // Arbeitszeit des Vortags fürs Jahr sammeln (neues Jahr: neu zählen)
     const wy = gameDate(time - 1).year;
@@ -2881,11 +2884,22 @@ export class Business {
         this.changeReputation(5);
         this.emit(time, 'info', 'Sanierung abgeschlossen: Die Bank arbeitet wieder normal mit dem Betrieb. Käufe und Darlehen sind wieder möglich.');
       } else {
+        // Sanierung gescheitert: nach vier Verlängerungen (zwei Jahre) oder wenn nichts mehr zu verwerten ist
+        s.extensions = (s.extensions ?? 0) + 1;
+        const sellable = c.machines.some((m) => !m.lease && m.type !== 'firmenwagen');
+        if (s.extensions > SANIERUNG_MAX_EXTENSIONS || !sellable) { this.declareBankrupt(time); return; }
         s.until = time + 90 * 1440;
-        this.emit(time, 'warnung', `Sanierung verlängert bis ${fmtDay(s.until)}: Das Konto liegt noch über dem Rahmen.`);
+        this.emit(time, 'warnung', `Sanierung verlängert bis ${fmtDay(s.until)} (${s.extensions}. Verlängerung von höchstens ${SANIERUNG_MAX_EXTENSIONS}): Das Konto liegt noch über dem Rahmen.`);
       }
     }
     this.version++;
+  }
+
+  /** Endgültige Insolvenz: Betrieb wird abgewickelt, das Spiel ist vorbei */
+  private declareBankrupt(time: number) {
+    this.company.bankruptAt = time;
+    this.version++;
+    this.emit(time, 'warnung', 'Insolvenz: Die Sanierung ist gescheitert, die Bank hat den Betrieb fällig gestellt. Das Spiel ist vorbei – einen älteren Spielstand laden oder ein neues Spiel beginnen.');
   }
 
   private startSanierung(time: number) {

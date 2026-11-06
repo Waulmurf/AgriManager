@@ -157,6 +157,25 @@ describe('Finanzen im Spiel', () => {
     expect(s.command({ kind: 'takeLoan', amount: 10_000, years: 5 })).not.toMatch(/Sanierung/);
   });
 
+  it('Sanierung gescheitert: ohne verwertbare Maschinen endgültige Insolvenz, Spiel vorbei', () => {
+    const s = world(6);
+    const c = s.company;
+    const limit = c.overdraftLimit ?? 0;
+    c.cash = -limit - 150_000;
+    s.run(91 * 1440);
+    expect(c.sanierung).toBeDefined();
+    // alles verkauft, Konto bleibt tief im Minus
+    c.machines = c.machines.filter((m) => m.type === 'firmenwagen');
+    c.cash = -limit - 500_000;
+    s.run(c.sanierung!.until - s.time + 2 * 1440);
+    expect(c.bankruptAt).toBeDefined();
+    expect(s.command({ kind: 'takeLoan', amount: 10_000, years: 5 })).toMatch(/Spiel ist vorbei/);
+    // nichts läuft mehr weiter (keine Zinsen, keine Löhne)
+    const cash = c.cash;
+    s.run(30 * 1440);
+    expect(c.cash).toBe(cash);
+  });
+
   it('Spielstand mit Darlehen und Leasing läuft bitgleich weiter', () => {
     const a = world(6);
     a.command({ kind: 'takeLoan', amount: 50_000, years: 3 });

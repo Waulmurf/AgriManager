@@ -440,7 +440,9 @@ export interface Company {
    * Sanierungsphase: Die Bank schuldet das Konto in ein Sanierungsdarlehen um. Bis `until` keine Käufe,
    * Bestellungen und neuen Darlehen; rutscht das Konto wieder über den Rahmen, verwertet die Bank Maschinen.
    */
-  sanierung?: { since: number; until: number; overSince?: number; forced: number };
+  sanierung?: { since: number; until: number; overSince?: number; forced: number; extensions?: number };
+  /** endgültige Insolvenz (Sanierung gescheitert): Spiel vorbei, nur noch Spielstand laden oder neu beginnen */
+  bankruptAt?: number;
   /** Disponent im Büro (Vorschlag 10) */
   dispatcher?: { autoAccept: boolean; autoStart: boolean; autoRemind: boolean };
   /** Verschleißteillager am Hof (Warenwert €): Schare, Zinken, Filter, Riemen, Schläuche … */

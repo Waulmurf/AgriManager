@@ -1625,6 +1625,7 @@ export class Simulation {
   command(cmd: Command): string {
     const b = this.business;
     const t = this.time;
+    if (this.company.bankruptAt !== undefined) return 'Insolvent – das Spiel ist vorbei. Spielstand laden oder neu beginnen.';
     switch (cmd.kind) {
       case 'respond':
         return b.respond(cmd.requestId, cmd.action, t, cmd.priceHa);
