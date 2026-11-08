@@ -1142,3 +1142,41 @@ Lohnsatz fürs Hacken und Striegeln gibt es nicht; für Striegeln mit eigener Ma
   Füllstand, Überladewagen für Drescher/Roder umgesetzt.
 - Strategie-Tests (6. Nov.): `docs/strategien.md`. Offen (Entscheidung Nils): Arbeitszeit 12 h in der Ernte, mehr Kunden für Spezialisten,
   ganzjährige Lkw-Frachten, mehr Kommunalaufträge, mehr gebrauchte Großmaschinen/Miete, Verwertung in der Sanierung schonender.
+
+## Geplant: realistische Arbeitszeiten, Schichtbetrieb, Abfahrer von Landwirten (Nils, 8. Nov. 2026)
+
+Ziel: Erntemaschinen laufen so lange wie in der Praxis, die Fahrer bleiben im gesetzlichen Rahmen. Heute gilt ein fester
+10-Stunden-Tag je Gespann, und Überstunden werden sofort mit 25 % bezahlt. Umsetzung erst nach Freigabe durch Nils.
+
+1. **Fahrerzeit (ArbZG):**
+   - Höchstens 10 h am Tag und im Mittel 48 h in der Woche; in Bestellung und Ernte mit Ausgleich im Ausgleichszeitraum
+     (Merkblatt RLP: 6 Monate bzw. 24 Wochen, geplante Verkürzung auf 16 Wochen).
+   - Ruhezeit 11 h; in der Landwirtschaft auf 10 h kürzbar, jede Verkürzung mit 12 h Ruhe binnen 4 Wochen ausgleichen.
+   - Sonntag erlaubt, wenn es an Werktagen nicht geht (Zuschlag wie heute).
+   - Optional: Saisonausnahme auf Antrag bei der Gewerbeaufsicht (z. B. 12 h), als Entscheidung im Spiel mit Wartezeit.
+2. **Arbeitszeitkonto:** Mehrstunden in der Saison gehen aufs Konto und werden im Winter als Freizeit abgebaut.
+   Auszahlung mit Zuschlag nur noch, was am Ende des Ausgleichszeitraums übrig ist. Anzeige je Mitarbeiter im Reiter Personal.
+3. **Maschinenzeit statt Fahrerzeit, Schichtplan je Maschine:**
+   - 1 Schicht: Standard für Feldarbeit.
+   - 2 Schichten:
+     - Mähdrescher: ab abgetrocknetem Tau bis zum Abendtau, etwa 10–23 Uhr.
+     - Feldhäcksler mit Abfahrern und Radlader: etwa 6–22 Uhr, mit Licht auch länger.
+   - 3 Schichten bzw. 24 h: Rübenroder und Lkw-Abfuhr in der Kampagne; Rübenmaus nach Abfuhrplan.
+   - Fahrerwechsel am Feld zur Schichtzeit automatisch (Firmenwagen bringt die Ablösung, wie `swapDriver`).
+   - Nacht- und Wochenendzuschläge wie heute (`calendar.ts`).
+   - Wetter bleibt Grenze: kein Drusch bei Tau oder Regen; Roden bei Frost bzw. Nässe gesperrt.
+4. **Abfahrer von Landwirten anheuern (Häckselkette, auch Drusch-Abfuhr):**
+   - Beim Kettenstart Gespanne „aus der Nachbarschaft“ (Landwirte oder Maschinenring) dazubuchen: Schlepper und
+     Häckselwagen bzw. Kipper mit Fahrer, abgerechnet nach Stunden.
+   - Satz als Annahme 85–100 €/h. Anker: Transport 87 €/h laut Bayerischem Wochenblatt, siehe `docs/ablaeufe.md`; ein
+     aktueller Maschinenring-Satz für Deutschland fehlt noch.
+   - Sichtbar als fremde Fahrzeuge mit Hofnamen auf der Karte; sie fahren wie eigene Abfahrer zum Silo.
+   - Verfügbarkeit je nach Region und Jahreszeit: Wer selbst häckselt, hat in der Hochsaison wenig Zeit. Gute Kontakte
+     helfen (bekannte, zufriedene Kunden sagen öfter zu).
+   - Gilt auch für den Walzschlepper am Silo.
+5. **Oberfläche:**
+   - Schichtplan beim Kettenstart wählen; das Planungsboard zeigt Schichten und Fahrerwechsel.
+   - Warnungen bei Gefahr für Ruhezeit oder 48-h-Mittel.
+6. **Prüfen:**
+   - Unit-Tests: Schichtwechsel, 24-h-Roder, Arbeitszeitkonto, angeheuerte Abfahrer.
+   - Danach die Strategie-Läufe (`docs/strategien.md`) wiederholen und den Vorher-nachher-Vergleich berichten.
