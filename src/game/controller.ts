@@ -71,6 +71,15 @@ const VEHICLE_COUNT = 30;
 
 let protocolRegistered = false;
 
+/** Ebenengruppen für die Kartensteuerung */
+export const LAYER_GROUPS = {
+  fahrzeuge: ['vehicles', 'vehicles-player-halo', 'parked-dot', 'parked-label'],
+  kunden: ['farms-dot', 'farms-label', 'referrals-line'],
+  felder: ['fields-fill', 'fields-line'],
+  konkurrenz: ['competitors-dot', 'competitors-label', 'dealers-dot', 'dealers-label'],
+} as const;
+export type LayerGroup = keyof typeof LAYER_GROUPS;
+
 export class GameController {
   private map: MlMap | null = null;
   private worker: Worker | null = null;
@@ -560,6 +569,15 @@ export class GameController {
     if (!map?.getLayer('vehicles')) return;
     map.setFilter('vehicles', show ? null : ['==', ['get', 'player'], true]);
     this.emit({ testVehiclesVisible: show });
+  }
+
+  /** Kartenebenen gruppenweise ein- oder ausblenden */
+  setLayerGroup(group: LayerGroup, visible: boolean) {
+    const map = this.map;
+    if (!map) return;
+    for (const id of LAYER_GROUPS[group]) {
+      if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', visible ? 'visible' : 'none');
+    }
   }
 
   /** Karte auf einen Punkt ausrichten */

@@ -4,7 +4,7 @@
 import { useState } from 'react';
 import type { GameController, GameStatus } from '../game/controller';
 import type { JobEstimate } from '../sim/engine';
-import { COURSES, DISPATCHER_MONTH, type CourseKey, type Skill, MACHINE_SKILL, SELF_PROPELLED, MECHANIC_MIN, SKILLS, roleName, employerHourCost, employerMonthCost, machineValue, marketWage, takeOverFee, type Employee, type Machine } from '../sim/economy';
+import { COURSES, DISPATCHER_MONTH, type CourseKey, type Skill, MACHINE_SKILL, SELF_PROPELLED, MECHANIC_MIN, SKILLS, roleName, employerHourCost, employerMonthCost, marketWage, takeOverFee, type Employee, type Machine } from '../sim/economy';
 import { HARVEST_TOWED, HAULER_TYPES, HAULER_TYPE, chainName, isHarvest, SERVICE_IMPLEMENT, SERVICE_NAMES, fmtDay, fmtTime, partsText, CHECK_COST, type Invoice, type Request, type Order } from '../sim/business';
 import { CATALOG, DEALERS } from '../data/catalog';
 import { BUILDINGS, SITE_OFFERS } from '../data/sites';
@@ -51,36 +51,16 @@ export function BusinessTab({ status, game }: { status: GameStatus; game: GameCo
   const c = status.company;
   const b = status.business;
   if (!c) return <p className="hint">–</p>;
-  const unitStatus = (id: number) => b?.units.find((u) => u.machineId === id)?.status;
   return (
     <>
       <h2>Mein Betrieb</h2>
       <dl data-testid="company">
-        <dt>Konto</dt><dd data-testid="cash">{eur(c.cash)}</dd>
-        <dt>Kreditrahmen</dt><dd>{eur(c.creditLimit - c.loan)} frei</dd>
         <dt>Standort</dt><dd>Groß Thondorf</dd>
         <dt>Chef</dt><dd>{b?.chefBusy ?? 'im Büro'}{b?.queue.length ? ` · ${b.queue.length} geplant` : ''}</dd>
         <dt>Arbeitszeit heute</dt><dd>{b ? `${(b.chefMinutes / 60).toLocaleString('de-DE', { maximumFractionDigits: 1 })} von ${b.chefMaxMinutes / 60} h` : '–'}</dd>
         <dt>Diesel gesamt</dt><dd>{b ? `${b.dieselTotalL.toLocaleString('de-DE')} l` : '–'}</dd>
       </dl>
       <p className="hint">Rechtsklick auf ein Fahrzeug zeigt Status und Befehle (z. B. zurück zum Hof).</p>
-      <h2>Fuhrpark</h2>
-      <ul className="machines">
-        {c.machines.map((m) => (
-          <li key={m.id}>
-            <span>
-              {machineName(m)}
-              {m.power ? `, ${m.power} PS` : ''}
-              {m.width ? `, ${m.width.toLocaleString('de-DE')} m` : ''}
-            </span>
-            <small>
-              {m.hired ? `angeheuert: ${game?.farmById(m.hired.farmId)?.name ?? 'Landwirt'} · ${m.hired.eurH ? `${m.hired.eurH} €/h` : 'eigenes Feld, kostenlos'}` : <>Bj. {m.year}
-              {m.hours ? ` · ${m.hours.toLocaleString('de-DE')} h` : ''} · Zustand {Math.round(m.condition)} % · Wert {eur(machineValue(m))}</>}
-            </small>
-            {unitStatus(m.id) && <small className="unit-status">{unitStatus(m.id)}</small>}
-          </li>
-        ))}
-      </ul>
       <p className="hint">{c.site}</p>
       <h2>Kunden</h2>
       <dl>
@@ -556,26 +536,37 @@ function QueueList({ status, game }: { status: GameStatus; game: GameController 
   );
 }
 
-export function OrdersTab({ status, game }: { status: GameStatus; game: GameController | null }) {
+export type OrdersPart = 'anfragen' | 'laufend' | 'erledigt';
+
+export function OrdersTab({ status, game, part }: { status: GameStatus; game: GameController | null; part: OrdersPart }) {
   const b = status.business;
   if (!b) return <p className="hint">–</p>;
-  const open = b.requests.filter((r) => r.status === 'offen');
+  const open = b.requests.filter((r) => r.status === 'offen').sort((x, y) => x.replyBy - y.replyBy);
   const orders = b.orders.slice().reverse();
+  const running = orders.filter((o) => o.status !== 'fertig');
+  const done = orders.filter((o) => o.status === 'fertig');
+  if (part === 'anfragen') {
+    return open.length ? (
+      <ul className="cards">{open.map((r) => <RequestItem key={r.id} r={r} game={game} time={b.time} estimate={b.estimates[r.id]} />)}</ul>
+    ) : (
+      <p className="hint">Keine offenen Anfragen. Kunden besuchen oder auf Anrufe warten.</p>
+    );
+  }
+  if (part === 'erledigt') {
+    return done.length ? (
+      <ul className="cards">{done.map((o) => <OrderItem key={o.id} o={o} game={game} status={status} />)}</ul>
+    ) : (
+      <p className="hint">Noch keine erledigten Aufträge.</p>
+    );
+  }
   return (
     <>
-      <h2>Anfragen ({open.length})</h2>
-      {open.length ? (
-        <ul className="cards">{open.map((r) => <RequestItem key={r.id} r={r} game={game} time={b.time} estimate={b.estimates[r.id]} />)}</ul>
+      {running.length ? (
+        <ul className="cards">{running.map((o) => <OrderItem key={o.id} o={o} game={game} status={status} />)}</ul>
       ) : (
-        <p className="hint">Keine offenen Anfragen. Kunden besuchen oder auf Anrufe warten.</p>
+        <p className="hint">Keine offenen Aufträge.</p>
       )}
-      <h2>Aufträge ({orders.filter((o) => o.status !== 'fertig').length} offen)</h2>
-      {orders.length ? (
-        <ul className="cards">{orders.map((o) => <OrderItem key={o.id} o={o} game={game} status={status} />)}</ul>
-      ) : (
-        <p className="hint">Noch keine Aufträge.</p>
-      )}
-      <h2>Planungstafel</h2>
+      <h2>Fahrer und Gespanne</h2>
       <ul className="list">
         {(status.company?.drivers ?? []).map((d) => (
           <li key={`d${d.id}`}>
@@ -715,7 +706,9 @@ function AgencyOffer({ a, send }: { a: { id: number; person: Omit<Employee, 'id'
 }
 
 /** Personal (PA-01 bis PA-17): Mitarbeiter, Wünsche, Bewerbungen, Lohnkosten */
-export function StaffTab({ status, game }: { status: GameStatus; game: GameController | null }) {
+export type StaffPart = 'team' | 'bewerbung' | 'buero';
+
+export function StaffTab({ status, game, part }: { status: GameStatus; game: GameController | null; part: StaffPart }) {
   const fb = useFeedback();
   const b = status.business;
   const c = status.company;
@@ -723,7 +716,7 @@ export function StaffTab({ status, game }: { status: GameStatus; game: GameContr
   const monthly = c.drivers.reduce((a, e) => a + (e.kind === 'fest' ? employerMonthCost(e) : 0), 0);
   const name = (id: number) => c.drivers.find((d) => d.id === id)?.name ?? `Mitarbeiter ${id}`;
   const ex = b.arbzg?.exemption;
-  return (
+  if (part === 'buero') return (
     <>
       <h2>Arbeitszeit</h2>
       <p className="hint" data-testid="arbzg-info">
@@ -736,6 +729,25 @@ export function StaffTab({ status, game }: { status: GameStatus; game: GameContr
           <button onClick={async () => fb.show(await game!.command({ kind: 'arbzgExemption' }))} data-testid="exemption">Saisonausnahme beantragen (bis 12 h am Tag, 250 €)</button>
         </div>
       )}
+      <h2>Büro: Disponent</h2>
+      {c.dispatcher ? (
+        <div className="card-actions" data-testid="dispatcher">
+          <label><input type="checkbox" checked={c.dispatcher.autoAccept} onChange={async (x) => fb.show(await game!.command({ kind: 'dispatcher', action: 'set', autoAccept: x.target.checked }))} /> Routineanfragen annehmen</label>
+          <label><input type="checkbox" checked={c.dispatcher.autoStart} onChange={async (x) => fb.show(await game!.command({ kind: 'dispatcher', action: 'set', autoStart: x.target.checked }))} /> Routineaufträge starten</label>
+          <label><input type="checkbox" checked={c.dispatcher.autoRemind} onChange={async (x) => fb.show(await game!.command({ kind: 'dispatcher', action: 'set', autoRemind: x.target.checked }))} /> Zahlungen erinnern</label>
+          <button onClick={async () => fb.show(await game!.command({ kind: 'dispatcher', action: 'fire' }))}>Entlassen</button>
+        </div>
+      ) : (
+        <div className="card-actions">
+          <button onClick={async () => fb.show(await game!.command({ kind: 'dispatcher', action: 'hire' }))} data-testid="hire-dispatcher">Disponent einstellen ({eur(DISPATCHER_MONTH)}/Monat)</button>
+          <small className="hint">Braucht ein Büro. Nimmt Routineanfragen (Grubbern, Stoppel, Saat, Pflanzenschutz, Pressen) zum Kundenpreis an, startet sie morgens mit freien Fahrern und Gespannen und ruft bei überfälligen Rechnungen an.</small>
+        </div>
+      )}
+      {fb.msg && <p className="feedback">{fb.msg}</p>}
+    </>
+  );
+  if (part === 'team') return (
+    <>
       {b.staffRequests.length > 0 && (
         <>
           <h2>Wünsche ({b.staffRequests.length})</h2>
@@ -753,22 +765,6 @@ export function StaffTab({ status, game }: { status: GameStatus; game: GameContr
           </ul>
         </>
       )}
-      <h2>Büro: Disponent</h2>
-      {c.dispatcher ? (
-        <div className="card-actions" data-testid="dispatcher">
-          <label><input type="checkbox" checked={c.dispatcher.autoAccept} onChange={async (x) => fb.show(await game!.command({ kind: 'dispatcher', action: 'set', autoAccept: x.target.checked }))} /> Routineanfragen annehmen</label>
-          <label><input type="checkbox" checked={c.dispatcher.autoStart} onChange={async (x) => fb.show(await game!.command({ kind: 'dispatcher', action: 'set', autoStart: x.target.checked }))} /> Routineaufträge starten</label>
-          <label><input type="checkbox" checked={c.dispatcher.autoRemind} onChange={async (x) => fb.show(await game!.command({ kind: 'dispatcher', action: 'set', autoRemind: x.target.checked }))} /> Zahlungen erinnern</label>
-          <button onClick={async () => fb.show(await game!.command({ kind: 'dispatcher', action: 'fire' }))}>Entlassen</button>
-        </div>
-      ) : (
-        <div className="card-actions">
-          <button onClick={async () => fb.show(await game!.command({ kind: 'dispatcher', action: 'hire' }))} data-testid="hire-dispatcher">Disponent einstellen ({eur(DISPATCHER_MONTH)}/Monat)</button>
-          <small className="hint">Braucht ein Büro. Nimmt Routineanfragen (Grubbern, Stoppel, Saat, Pflanzenschutz, Pressen) zum Kundenpreis an, startet sie morgens mit freien Fahrern und Gespannen und ruft bei überfälligen Rechnungen an.</small>
-        </div>
-      )}
-      <h2>Mitarbeiter ({c.drivers.length})</h2>
-      <div className="card-actions"><button onClick={async () => fb.show(await game!.command({ kind: 'hireApprentice' }))}>Auszubildenden einstellen (etwa 1.100 €/Monat, 3 Jahre)</button></div>
       <ul className="cards" data-testid="staff">
         {c.drivers.map((e) => <EmployeeCard key={e.id} e={e} status={status} game={game} show={fb.show} />)}
       </ul>
@@ -776,11 +772,12 @@ export function StaffTab({ status, game }: { status: GameStatus; game: GameContr
         <dt>Lohnkosten fest</dt><dd>{eur(monthly)} je Monat</dd>
       </dl>
       <p className="hint">Löhne inkl. Arbeitgeberanteil (21 %) werden am Monatsersten gebucht, dazu Zuschläge für Nacht (25 %, 0–4 Uhr 40 %), Sonntag (50 %), Feiertage (125–150 %) und Überstunden über 8 h (25 %). Feste haben 4 Wochen Kündigungsfrist und 26 Tage Urlaub. Unzufriedene Mitarbeiter fordern mehr Lohn und kündigen sonst.</p>
-      <h2>Zeitarbeit ({b.agencyPool.length})</h2>
-      <p className="hint">Leiharbeiter als Ersatz bei Krankheit oder für Spitzen: befristet buchbar, ab dem nächsten Morgen im Einsatz, teurer als eigene Leute. Wer sich bewährt, lässt sich übernehmen – die Provision der Zeitarbeitsfirma sinkt mit der Einsatzdauer (unter 3 Monaten zwei Monatslöhne, ab 12 Monaten frei).</p>
-      {b.agencyPool.length ? (
-        <ul className="cards">{b.agencyPool.map((a) => <AgencyOffer key={a.id} a={a} send={async (cmd) => fb.show(await game!.command(cmd))} />)}</ul>
-      ) : <p className="hint">Die Zeitarbeitsfirma meldet sich morgen früh mit Angeboten.</p>}
+      {fb.msg && <p className="feedback">{fb.msg}</p>}
+    </>
+  );
+  return (
+    <>
+      <div className="card-actions"><button onClick={async () => fb.show(await game!.command({ kind: 'hireApprentice' }))}>Auszubildenden einstellen (etwa 1.100 €/Monat, 3 Jahre)</button></div>
       <h2>Bewerbungen ({b.applicants.length})</h2>
       {b.applicants.length ? (
         <ul className="cards" data-testid="applicants">
@@ -802,6 +799,11 @@ export function StaffTab({ status, game }: { status: GameStatus; game: GameContr
       ) : (
         <p className="hint">Gerade keine Bewerbungen. Neue kommen alle paar Tage.</p>
       )}
+      <h2>Zeitarbeit ({b.agencyPool.length})</h2>
+      <p className="hint">Leiharbeiter als Ersatz bei Krankheit oder für Spitzen: befristet buchbar, ab dem nächsten Morgen im Einsatz, teurer als eigene Leute. Wer sich bewährt, lässt sich übernehmen – die Provision der Zeitarbeitsfirma sinkt mit der Einsatzdauer (unter 3 Monaten zwei Monatslöhne, ab 12 Monaten frei).</p>
+      {b.agencyPool.length ? (
+        <ul className="cards">{b.agencyPool.map((a) => <AgencyOffer key={a.id} a={a} send={async (cmd) => fb.show(await game!.command(cmd))} />)}</ul>
+      ) : <p className="hint">Die Zeitarbeitsfirma meldet sich morgen früh mit Angeboten.</p>}
       {fb.msg && <p className="feedback">{fb.msg}</p>}
     </>
   );
@@ -967,14 +969,23 @@ function RepairChoice({ m, status, send }: { m: Machine; status: GameStatus; sen
 }
 
 /** Fuhrpark (MF-07, MZ-01, MZ-05, MZ-09, MZ-12): Zustand, Wartung, Kosten, Verkauf */
-export function FleetTab({ status, game }: { status: GameStatus; game: GameController | null }) {
+export type FleetPart = 'alle' | 'einsatz' | 'werkstatt';
+
+/** Maschine braucht die Werkstatt: Panne, Stillstand oder Wartung fällig */
+export function needsWorkshop(m: Machine, time: number): boolean {
+  return !!m.repair || (m.downUntil ?? 0) > time || (m.serviceAtH !== undefined && m.hours >= m.serviceAtH - 20);
+}
+
+export function FleetTab({ status, game, part }: { status: GameStatus; game: GameController | null; part: FleetPart }) {
   const b = status.business;
   const c = status.company;
   const fb = useFeedback();
   if (!b || !c) return <p className="hint">–</p>;
   const send = async (cmd: Parameters<GameController['command']>[0]) => fb.show(await game!.command(cmd));
+  const list = c.machines.filter((m) => part === 'alle' || (part === 'einsatz' ? b.busyMachines.includes(m.id) : needsWorkshop(m, b.time)));
   return (
     <>
+      {part === 'werkstatt' && <>
       <h2>Verschleißteillager</h2>
       <dl data-testid="parts-stock">
         <dt>Bestand</dt><dd className={(c.partsStock ?? 0) < 200 ? 'neg' : ''}>{eur(c.partsStock ?? 0)}</dd>
@@ -985,9 +996,11 @@ export function FleetTab({ status, game }: { status: GameStatus; game: GameContr
         <button onClick={() => send({ kind: 'buyParts', amount: 2000 })} data-testid="buy-parts">+2.000 €</button>
       </div>
       <p className="hint">Schare, Zinken, Scheiben, Filter, Riemen, Schläuche: Bodenbearbeitung verbraucht etwa 3 € je ha. Bei Pannen hat der Werkstattwagen Verschleißteile meist an Bord, sonst lädt er sie am Hof. Ist das Lager leer, müssen sie bestellt werden, und Geräte fallen doppelt so oft aus.</p>
-      <h2>Fuhrpark ({c.machines.length})</h2>
-      <ul className="cards" data-testid="fleet">
-        {c.machines.map((m) => {
+      <h2>Pannen und Wartung ({list.length})</h2>
+      </>}
+      {!list.length && <p className="hint">{part === 'einsatz' ? 'Gerade ist keine Maschine im Einsatz.' : part === 'werkstatt' ? 'Keine Panne, keine Wartung fällig.' : 'Noch keine Maschinen.'}</p>}
+      <ul className="cards" data-testid={part === 'alle' ? 'fleet' : `fleet-${part}`}>
+        {list.map((m) => {
           const busy = b.busyMachines.includes(m.id);
           const down = (m.downUntil ?? 0) > b.time;
           const due = m.serviceAtH !== undefined && m.hours >= m.serviceAtH - 20;
@@ -1026,7 +1039,7 @@ export function FleetTab({ status, game }: { status: GameStatus; game: GameContr
           );
         })}
       </ul>
-      <p className="hint">Zustand sinkt mit den Betriebsstunden, schneller bei überfälliger Wartung. Schlechter Zustand und überfällige Wartung erhöhen das Pannenrisiko. Bei einer Panne kommt der Service des nächsten Markenhändlers – je weiter weg, desto länger dauert es.</p>
+      {part === 'alle' && <p className="hint">Zustand sinkt mit den Betriebsstunden, schneller bei überfälliger Wartung. Schlechter Zustand und überfällige Wartung erhöhen das Pannenrisiko. Bei einer Panne kommt der Service des nächsten Markenhändlers – je weiter weg, desto länger dauert es.</p>}
       {fb.msg && <p className="feedback">{fb.msg}</p>}
     </>
   );
@@ -1499,11 +1512,14 @@ export function SitesTab({ status, game }: { status: GameStatus; game: GameContr
   );
 }
 
-export function NewsTab({ status, game }: { status: GameStatus; game: GameController | null }) {
-  if (!status.events.length) return <p className="hint">Noch keine Nachrichten.</p>;
+export type NewsFilter = 'alle' | 'wichtig' | 'auftraege';
+
+export function NewsTab({ status, game, filter = 'alle' }: { status: GameStatus; game: GameController | null; filter?: NewsFilter }) {
+  const list = status.events.filter((e) => filter === 'alle' || (filter === 'wichtig' ? e.kind === 'warnung' : e.kind === 'anfrage' || e.kind === 'auftrag'));
+  if (!list.length) return <p className="hint">Noch keine Nachrichten.</p>;
   return (
     <ul className="news">
-      {status.events.map((e, i) => {
+      {list.map((e, i) => {
         const t = formatGameTime(e.time);
         return (
           <li key={`${e.time}-${i}`} className={e.kind}>
@@ -1660,7 +1676,9 @@ function LoanPanel({ status, game }: { status: GameStatus; game: GameController 
   );
 }
 
-export function FinanceTab({ status, game }: { status: GameStatus; game: GameController | null }) {
+export type FinancePart = 'ueberblick' | 'rechnungen' | 'kredite';
+
+export function FinanceTab({ status, game, part }: { status: GameStatus; game: GameController | null; part: FinancePart }) {
   const fb = useFeedback();
   const b = status.business;
   const c = status.company;
@@ -1678,9 +1696,15 @@ export function FinanceTab({ status, game }: { status: GameStatus; game: GameCon
   const openInv = b.invoices.filter((i) => i.status === 'offen' || i.status === 'überfällig');
   const lost = b.invoices.filter((i) => i.status === 'verfallen');
   const finished = b.orders.filter((o) => o.status === 'fertig').slice().reverse();
-  return (
+  if (part === 'kredite') return <LoanPanel status={status} game={game} />;
+  if (part === 'ueberblick') return (
     <>
-      <h2>Konto</h2>
+      <div className="kpis">
+        <div className="kpi"><span>Kontostand</span><strong className={c.cash < 0 ? 'neg' : ''} data-testid="cash-finance">{eur(c.cash)}</strong><small>Kontokorrent {eur(c.overdraftLimit ?? 0)}</small></div>
+        <div className="kpi"><span>Offene Forderungen</span><strong>{eur(openInv.reduce((a, i) => a + i.amount, 0))}</strong><small className={openInv.some((i) => i.status === 'überfällig') ? 'neg' : ''}>{openInv.length} Rechnungen{openInv.some((i) => i.status === 'überfällig') ? `, ${openInv.filter((i) => i.status === 'überfällig').length} überfällig` : ''}</small></div>
+        <div className="kpi"><span>Ergebnis lfd. Jahr</span><strong className={b.yearNow.profit < 0 ? 'neg' : 'pos'}>{eur(b.yearNow.profit)}</strong><small>Umsatz {eur(b.yearNow.revenue)}</small></div>
+        <div className="kpi"><span>Bonität</span><strong data-testid="rating">{c.rating ?? 'A'}</strong><small>Eigenkapital {b.balance.assets > 0 ? Math.round((b.balance.equity / b.balance.assets) * 100) : 0} %</small></div>
+      </div>
       {c.bankruptAt !== undefined && (
         <p className="warn" data-testid="bankrupt">Insolvenz: Die Sanierung ist gescheitert. Das Spiel ist vorbei – einen älteren Spielstand laden oder neu beginnen.</p>
       )}
@@ -1694,15 +1718,13 @@ export function FinanceTab({ status, game }: { status: GameStatus; game: GameCon
         <p className="warn">Das Konto liegt weit über dem Rahmen. Nach 90 Tagen beginnt die Sanierung (Umschuldung, 12 Monate keine Käufe).</p>
       )}
       <dl>
-        <dt>Kontostand</dt><dd data-testid="cash-finance" className={c.cash < 0 ? 'neg' : ''}>{eur(c.cash)}</dd>
         <dt>Kontokorrent</dt><dd>{eur(c.overdraftLimit ?? 0)} Rahmen · 11 % Zins im Minus</dd>
         <dt>Offene Rechnungen</dt><dd>{eur(openInv.reduce((a, i) => a + i.amount, 0))} ({openInv.length})</dd>
         {lost.length > 0 && <><dt>Forderungsausfall</dt><dd className="neg">{eur(lost.reduce((a, i) => a + i.amount, 0))} ({lost.length})</dd></>}
-        <dt>Bonität</dt><dd data-testid="rating">{c.rating ?? 'A'} · Eigenkapital {eur(b.balance.equity)} ({b.balance.assets > 0 ? Math.round((b.balance.equity / b.balance.assets) * 100) : 0} %)</dd>
+        <dt>Eigenkapital</dt><dd>{eur(b.balance.equity)} ({b.balance.assets > 0 ? Math.round((b.balance.equity / b.balance.assets) * 100) : 0} %)</dd>
         <dt>Dieselpreis</dt><dd>{b.dieselPrice.toLocaleString('de-DE', { minimumFractionDigits: 3 })} €/l netto</dd>
         {b.taxDue && <><dt>Steuern {b.taxDue.year}</dt><dd className="neg">{eur(b.taxDue.amount)} fällig {fmtDay(b.taxDue.at)}</dd></>}
       </dl>
-      <LoanPanel status={status} game={game} />
       <h2>Laufendes Jahr</h2>
       <dl data-testid="year-now">
         <dt>Umsatz</dt><dd>{eur(b.yearNow.revenue)}</dd>
@@ -1740,6 +1762,10 @@ export function FinanceTab({ status, game }: { status: GameStatus; game: GameCon
       ) : (
         <p className="hint">Noch keine Buchungen.</p>
       )}
+    </>
+  );
+  return (
+    <>
       <h2>Rechnungen</h2>
       {b.invoices.length ? (
         <ul className="list" data-testid="invoices">
