@@ -5,7 +5,8 @@ import { runSelftest } from './game/selftest';
 import { forwardLogsToHost, platformName, selftestConfig } from './platform';
 import type { Speed } from './sim/protocol';
 import { AnalyticsTab } from './ui/Analytics';
-import { MunicipalTab, BiogasTab, BusinessTab, CompetitionTab, FarmingTab, SitesTab, FinanceTab, FleetTab, MarketTab, NewsTab, OrdersTab, SavePanel, StaffTab, VehicleMenu, eur, needsWorkshop } from './ui/Panels';
+import { MunicipalTab, BiogasTab, BusinessTab, CompetitionTab, FarmingTab, SitesTab, FinanceTab, FleetTab, NewsTab, OrdersTab, SavePanel, StaffTab, VehicleMenu, eur, needsWorkshop } from './ui/Panels';
+import { MarketWindow } from './ui/Market';
 import { FleetBar, Leitstand, MapLayers, Toasts, type AreaId } from './ui/Shell';
 import { AUTOSAVE } from './game/savegame';
 import { PlanningBoard } from './ui/Board';
@@ -238,7 +239,7 @@ export function App() {
                 <button className="close" onClick={() => setWindowOpen(false)} aria-label="Schließen">×</button>
               </div>
               <div className="window-body">
-                {area === 'markt' ? <MarketTab status={status} game={game} /> : <AnalyticsTab status={status} game={game} />}
+                {area === 'markt' ? <MarketWindow status={status} game={game} /> : <AnalyticsTab status={status} game={game} />}
               </div>
             </div>
           )}

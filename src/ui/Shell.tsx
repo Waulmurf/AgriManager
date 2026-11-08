@@ -201,11 +201,13 @@ export function Toasts({ status, game, go }: { status: GameStatus; game: GameCon
     const h = setTimeout(() => setToasts((cur) => cur.slice(0, -1)), 12000);
     return () => clearTimeout(h);
   }, [toasts]);
-  if (!toasts.length) return null;
+  // erledigte Anfragen (angenommen, abgelehnt) nicht weiter melden
+  const live = toasts.filter((x) => !x.id.startsWith('r') || b?.requests.some((r) => `r${r.id}` === x.id && r.status === 'offen'));
+  if (!live.length) return null;
   const close = (id: string) => setToasts((cur) => cur.filter((x) => x.id !== id));
   return (
     <div className="toasts" data-testid="toasts">
-      {toasts.map((x) => (
+      {live.map((x) => (
         <div key={x.id} className={`toast tone-${x.tone}`}>
           <div className="card-head"><strong>{x.title}</strong><button className="close" onClick={() => close(x.id)} aria-label="Schließen">×</button></div>
           <span>{x.text}</span>

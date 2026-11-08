@@ -173,11 +173,15 @@ test('Kern-Schleife: Besuch → Anfrage → Gerät kaufen → Auftrag starten', 
   expect(Number(await page.getByTestId('known-count').textContent())).toBeGreaterThan(0);
   await page.getByTestId('tab-auftraege').click();
   await expect(page.getByTestId('request').filter({ hasText: 'Grubbern' }).first()).toBeVisible();
+  // Markt: großes Fenster, Angebot Nr. 1 (gebrauchter Grubber) kaufen
   await page.getByTestId('tab-markt').click();
-  await page.getByTestId('buy').first().click();
+  await expect(page.getByTestId('window-markt')).toBeVisible();
+  await page.locator('[data-offer="1"]').getByTestId('buy').click();
   await expect(page.getByTestId('cash')).toHaveText(/87\.500/);
   await page.getByTestId('tab-auftraege').click();
+  await expect(page.getByTestId('window-markt')).toHaveCount(0);
   await page.getByTestId('request').filter({ hasText: 'Grubbern' }).first().getByTestId('accept').click();
+  await page.getByTestId('sub-laufend').click();
   await expect(page.getByTestId('order').first()).toBeVisible();
   await page.getByTestId('start-job').first().click();
   // bei nassem Boden wird der Auftrag eingeplant statt gestartet (Wetter)
@@ -191,7 +195,9 @@ test('Personal: Bewerber einstellen, zweiten Schlepper kaufen – erscheint auf 
   await page.waitForFunction(() => ((window as any).__game.status.business?.applicants.length ?? 0) > 0, null, { timeout: 60_000 });
   await page.getByTestId('speed-0').click();
   await page.getByTestId('tab-personal').click();
+  await page.getByTestId('sub-bewerbung').click();
   await page.getByTestId('hire').first().click();
+  await page.getByTestId('sub-team').click();
   await expect(page.getByTestId('staff').locator('li')).toHaveCount(2);
   const before = await page.evaluate(() => (window as any).__game.status.business.units.length);
   await page.getByTestId('tab-markt').click();
@@ -247,7 +253,8 @@ test('Ackerbau: Reiter zeigt eigene Flächen und Pachtangebote', async ({ page }
   await page.goto('./?neu');
   await waitForGame(page);
   await page.getByTestId('speed-0').click();
-  await page.getByTestId('tab-ackerbau').click();
+  await page.getByTestId('tab-sparten').click();
+  await page.getByTestId('sub-ackerbau').click();
   await expect(page.getByRole('heading', { name: 'Eigene Flächen' })).toBeVisible();
   await expect(page.getByRole('heading', { name: /Pachtangebote/ })).toBeVisible();
 });
@@ -256,7 +263,8 @@ test('Biogas: Reiter zeigt Baugrößen und Bedingungen', async ({ page }) => {
   await page.goto('./?neu');
   await waitForGame(page);
   await page.getByTestId('speed-0').click();
-  await page.getByTestId('tab-biogas').click();
+  await page.getByTestId('tab-sparten').click();
+  await page.getByTestId('sub-biogas').click();
   await expect(page.getByRole('heading', { name: 'Biogasanlage bauen' })).toBeVisible();
   await page.getByTestId('build-biogas').click();
   await expect(page.locator('.feedback')).toContainText('10 ha');
@@ -266,12 +274,37 @@ test('Kommunal, Wettbewerb, Personal: neue Bereiche werden angezeigt', async ({ 
   await page.goto('./?neu');
   await waitForGame(page);
   await page.getByTestId('speed-0').click();
-  await page.getByTestId('tab-kommunal').click();
+  await page.getByTestId('tab-sparten').click();
+  await page.getByTestId('sub-kommunal').click();
   await expect(page.getByRole('heading', { name: 'Winterdienst' })).toBeVisible();
-  await page.getByTestId('tab-wettbewerb').click();
+  await page.getByTestId('tab-auftraege').click();
+  await page.getByTestId('sub-wettbewerb').click();
   await expect(page.getByRole('heading', { name: 'Rahmenverträge' })).toBeVisible();
   await page.getByTestId('tab-personal').click();
+  await page.getByTestId('sub-buero').click();
   await expect(page.getByRole('heading', { name: 'Büro: Disponent' })).toBeVisible();
-  await page.getByTestId('tab-ackerbau').click();
+  await page.getByTestId('tab-sparten').click();
+  await page.getByTestId('sub-ackerbau').click();
   await expect(page.getByRole('heading', { name: 'Preise und Lager' })).toBeVisible();
+});
+
+test('Oberfläche: Leitstand, Bereiche, Markt-Filter und Kartenebenen', async ({ page }) => {
+  await page.goto('./?neu');
+  await waitForGame(page);
+  await page.getByTestId('speed-0').click();
+  await expect(page.getByTestId('leitstand')).toBeVisible();
+  await expect(page.getByTestId('cash')).toHaveText(/€/);
+  // Markt: Händler wählen zeigt nur dessen Angebote, Geräteart über alle Händler
+  await page.getByTestId('tab-markt').click();
+  await page.getByTestId('dealer-1').click();
+  await expect(page.getByTestId('market')).toContainText('Landtechnik Uelzen: alles im Angebot');
+  await page.getByTestId('dealer-all').click();
+  await page.getByTestId('type-schlepper').click();
+  await expect(page.getByTestId('market')).toContainText('Schlepper bei allen Händlern');
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('window-markt')).toHaveCount(0);
+  // Menü: Technik und Leistung
+  await page.getByTestId('menu').click();
+  await page.getByTestId('tab-technik').click();
+  await expect(page.getByRole('heading', { name: 'Testfahrzeuge' })).toBeVisible();
 });

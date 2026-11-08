@@ -39,6 +39,8 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
   `fields.ts` (FLD1, Bahnenmuster im Feld), `worker.ts`, `protocol.ts`
 - `src/map/` Kartenstil (Protomaps, lokale Schriften), Fahrzeugsymbole, Interpolation entlang der Route
 - `src/game/` `controller.ts` (Karte ↔ Worker, Feld-Layer), Uhr, Selbsttest
+- `src/ui/` Oberfläche: `App.tsx` (Kopfleiste, Navigationsleiste `AREAS` mit Unterbereichen, Seitenleiste, großes Fenster),
+  `Shell.tsx` (Leitstand, Fahrzeugleiste, Meldungen, Kartenebenen), `Market.tsx` (Markt), `Panels.tsx` (Bereiche mit `part`), `Board.tsx`, `Analytics.tsx`
 - `src-tauri/` Protokoll `mapdata://` mit HTTP-Range (Crate `range/`), Selbsttest-Befehle
 - `scripts/data/` Kartendaten: `build-region.sh` (Protomaps-Ausschnitt, OSM → Straßengraph,
   Feldblöcke → Felder), `build-roadgraph.mjs`, `build-fields.mjs`
@@ -146,6 +148,10 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
   `Employee.hiredFarmId`, 90 €/h, eigenes Feld kostenlos). Fahrzeug-Verweise werden beim Entfernen umnummeriert (`syncPlayerVehicles`).
 - macOS: Mindestversion 12 (WebGL 2, Module-Worker), `src/polyfills.ts` + Startprüfung, Kürzel ohne Cmd/Strg, Selbsttest im
   macOS-CI-Job (läuft bei `[mac]` in der Commit-Nachricht).
+- Oberfläche neu (8. Nov., Skizze https://claude.ai/artifact/69czgYNvvXt6CvSqkdon4T): Navigationsleiste mit 9 Bereichen statt 14 Reitern,
+  Unterbereiche als Umschalter, Leitstand als Startseite („Braucht deine Entscheidung“), Kennzahlen in der Kopfleiste, Fahrzeugleiste,
+  Meldungen über der Karte, Kartenebenen, Markt und Auswertung als großes Fenster (Händler oder Geräteart über alle Händler).
+  Karten mit Farbstreifen (`tone-ok/run/warn/info/muted`), Abzeichen und Balken (`Meter`). Technik im Menü ☰.
 
 ## CI (GitHub Actions)
 
