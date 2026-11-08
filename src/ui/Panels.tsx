@@ -20,6 +20,22 @@ export const eur = (v: number) => v.toLocaleString('de-DE', { style: 'currency',
 const ha = (v: number) => `${v.toLocaleString('de-DE', { maximumFractionDigits: 1 })} ha`;
 const machineName = (m: Machine) => [m.brand, m.model].filter(Boolean).join(' ');
 
+/** Balken mit Beschriftung (Zustand, Füllstand, Arbeitszeit …) */
+export function Meter({ label, value, text, tone }: { label: string; value: number; text: string; tone?: 'ok' | 'run' | 'warn' }) {
+  const v = Math.max(0, Math.min(1, value));
+  const t = tone ?? (v >= 0.9 ? 'warn' : v >= 0.75 ? 'run' : 'ok');
+  return (
+    <span className={`meter-row m-${t}`}>
+      <span className="meter-label">{label}</span>
+      <span className="meter"><span style={{ width: `${Math.round(v * 100)}%` }} /></span>
+      <span className="meter-text">{text}</span>
+    </span>
+  );
+}
+
+/** Zustand einer Maschine als Balken (niedrig = rot) */
+const conditionTone = (c: number) => (c < 40 ? 'warn' : c < 65 ? 'run' : 'ok') as 'ok' | 'run' | 'warn';
+
 function useFeedback() {
   const [msg, setMsg] = useState<string | null>(null);
   const show = (m: string) => {
@@ -105,12 +121,14 @@ function RequestItem({ r, game, time, estimate }: { r: Request; game: GameContro
     fb.show(msg);
   };
   const hoursLeft = Math.max(0, Math.round((r.replyBy - time) / 60));
+  const tone = r.status !== 'offen' || r.notOffered ? 'muted' : hoursLeft < 6 ? 'warn' : 'run';
   return (
-    <li className="card" data-testid="request">
+    <li className={`card tone-${tone}`} data-testid="request">
       <div className="card-head">
         <button className="link" onClick={() => game?.flyToFarm(r.farmId)}>{farm?.name ?? `Betrieb ${r.farmId}`}</button>
-        <small>{r.channel === 'besuch' ? 'beim Besuch' : r.channel === 'anruf' ? 'Anruf' : 'Nachricht'}</small>
+        <span className={`badge ${tone}`}>{r.status === 'offen' ? (r.notOffered ? 'bieten wir nicht an' : `noch ${hoursLeft} h`) : r.status}</span>
       </div>
+      <small className="hint">{r.channel === 'besuch' ? 'beim Besuch' : r.channel === 'anruf' ? 'per Anruf' : 'per Nachricht'}</small>
       {r.farmId >= 0 && <small className="hint">{CHARACTER_NAMES[farmCharacter({ id: r.farmId })]}</small>}
       <div>
         {SERVICE_NAMES[r.service]}{r.chain ? ` (${chainName(r.service, r.chain)})` : ''}: {r.liquid ? `${Math.round(r.areaHa * (r.tPerHa ?? 0)).toLocaleString('de-DE')} m³ Gärrest von der Biogasanlage zum ${r.destName} (nur Transport)` : r.tPerHa ? `${Math.round(r.areaHa * r.tPerHa).toLocaleString('de-DE')} t ${r.tPerHa >= 50 ? 'Rüben ab Feldrandmiete' : 'Korn ab Hoflager'} nach ${r.destName}` : `${r.fields.length} ${r.fields.length === 1 ? 'Feld' : 'Felder'}, ${ha(r.areaHa)}`} · bis {fmtDay(r.latest)}
@@ -425,14 +443,15 @@ function OrderItem({ o, game, status }: { o: Order; game: GameController | null;
   const driverBusy = status.business?.driverStatus[driver] || status.business?.queue.some((q) => q.driverId === driver);
   const late = status.business && o.status !== 'fertig' && status.business.time > o.latest;
   const queued = !!status.business?.queue.some((q) => q.cmd.kind === 'startJob' && q.cmd.orderId === o.id);
+  const tone = o.cancelled || late ? 'warn' : o.status === 'fertig' ? 'muted' : o.status === 'läuft' ? 'ok' : queued ? 'info' : 'run';
   return (
-    <li className="card" data-testid="order">
+    <li className={`card tone-${tone}`} data-testid="order">
       <div className="card-head">
         {o.ownLeaseId !== undefined
           ? <button className="link" onClick={() => { const l = status.business?.farming.leases.find((x) => x.id === o.ownLeaseId); if (l) game?.flyTo(l.center); }}>Eigene Fläche</button>
           : o.farmId <= MUNI_BASE ? <strong>{MUNICIPALITIES[MUNI_BASE - o.farmId]?.name}</strong>
           : <button className="link" onClick={() => game?.flyToFarm(o.farmId)}>{farm?.name ?? `Betrieb ${o.farmId}`}</button>}
-        <small className={`badge ${o.cancelled ? 'warn' : o.status === 'fertig' ? 'done' : o.status === 'läuft' ? 'run' : ''}`}>{o.cancelled ? 'storniert' : o.status}</small>
+        <span className={`badge ${tone}`}>{o.cancelled ? 'storniert' : late ? 'verspätet' : queued && o.status === 'offen' ? 'eingeplant' : o.status}</span>
       </div>
       <div>
         {SERVICE_NAMES[o.service]}{o.chain ? ` (${chainName(o.service, o.chain)})` : ''} {isTour(o.service) ? '' : ha(o.areaHa)}{o.gaerrest && o.ownLeaseId !== undefined ? ' Gärrest (Eigenauftrag)' : o.ownLeaseId !== undefined ? ' (Eigenauftrag, keine Rechnung)' : o.biogasPriceT !== undefined ? ` (Mais auf dem Halm à ${o.biogasPriceT} €/t, ins eigene Silo)` : isTour(o.service) ? (o.service === 'winterdienst' ? ` Einsatz (${WINTER_EUR_H} €/h)` : ` ${Math.round(o.areaHa)} km zu ${eur(o.priceHa)}/km = ${eur(o.priceHa * o.areaHa)}`) : o.slurrySupply ? ` Gülle holen: ${Math.round(o.tPerHa ?? 0)} m³ in die Vorgrube der Biogasanlage (Eigenauftrag)` : o.tPerHa ? ` nach ${o.destName}: ${Math.round(o.areaHa * o.tPerHa).toLocaleString('de-DE')} ${o.liquid ? 'm³' : 't'} à ${(o.priceHa / o.tPerHa).toLocaleString('de-DE', { maximumFractionDigits: 2 })} ${o.liquid ? '€/m³' : '€/t'} = ${eur(o.priceHa * o.areaHa)}` : <> zu {o.gabe ? `${(o.priceHa / o.gabe).toLocaleString('de-DE', { maximumFractionDigits: 2 })} €/m³ (${Math.round(o.areaHa * o.gabe).toLocaleString('de-DE')} m³)` : `${o.priceHa.toLocaleString('de-DE')} €/ha`} = {eur(o.priceHa * o.areaHa)}</>}
@@ -447,6 +466,7 @@ function OrderItem({ o, game, status }: { o: Order; game: GameController | null;
         {late ? ' · verspätet!' : ''}
         {o.dieselL > 0 ? ` · Diesel ${o.dieselL.toLocaleString('de-DE')} l (${eur(o.dieselCost)})` : ''}
       </small>
+      {o.status === 'läuft' && o.fields.length > 1 && <Meter label="Felder" value={o.doneFields.length / o.fields.length} text={`${o.doneFields.length} / ${o.fields.length}`} tone="ok" />}
       {o.status !== 'fertig' && <EstimateLine e={status.business?.estimates[o.id]} latest={o.latest} />}
       {o.status === 'läuft' && isHarvest(o.service) && <small className="hint">Weitere Maschine einsetzen (teilt die Felder bzw. das aktuelle Feld):</small>}
       {(o.status === 'offen' || o.status === 'läuft') && isHarvest(o.service) && <ChopStart o={o} game={game} status={status} show={fb.show} />}
@@ -598,14 +618,22 @@ function EmployeeCard({ e, status, game, show }: { e: Employee; status: GameStat
   const today = Math.floor(b.time / 1440);
   const sat = e.satisfaction ?? 70;
   const abs = (e.absences ?? []).filter((a) => a.to > b.time);
+  const absent = abs.some((a) => a.from <= b.time);
+  const duty = b.driverStatus[e.id];
+  const dayMax = b.arbzg?.dayMax ?? 600;
+  const tone = e.poach || e.leavesAt !== undefined || (!e.isPlayer && sat < 40) ? 'warn' : absent ? 'muted' : duty ? 'ok' : 'info';
+  const badge = e.leavesAt !== undefined ? 'gekündigt' : absent ? (abs[0].kind === 'urlaub' ? 'Urlaub' : abs[0].kind === 'krank' ? 'krank' : 'abwesend') : duty ? 'im Dienst' : 'frei';
   return (
-    <li className="card" data-testid="employee">
+    <li className={`card tone-${tone}`} data-testid="employee">
       <div className="card-head">
         <strong>{e.isPlayer ? 'Chef (du)' : e.name}</strong>
-        <small>{e.kind === 'chef' ? 'kein Lohn' : e.kind === 'fest' ? `fest · ${eur(employerMonthCost(e))}/Monat` : e.kind === 'leih' ? `Leiharbeit · ${eur(e.agencyRate ?? 0)}/h` : `Saison · ${eur(employerHourCost(e))}/h`}</small>
+        <span className={`badge ${tone}`}>{badge}</span>
       </div>
+      <small className="hint">{e.kind === 'chef' ? 'kein Lohn' : e.kind === 'fest' ? `fest · ${eur(employerMonthCost(e))}/Monat` : e.kind === 'leih' ? `Leiharbeit · ${eur(e.agencyRate ?? 0)}/h` : `Saison · ${eur(employerHourCost(e))}/h`}</small>
+      <Meter label="heute" value={(b.driverMinutes[e.id] ?? 0) / dayMax} text={`${((b.driverMinutes[e.id] ?? 0) / 60).toLocaleString('de-DE', { maximumFractionDigits: 1 })} / ${dayMax / 60} h`} />
+      {!e.isPlayer && e.kind !== 'leih' && b.arbzg?.periodMin ? <Meter label="48-h-Mittel" value={(e.periodMin ?? 0) / b.arbzg.periodMin} text={`${Math.round((e.periodMin ?? 0) / 60)} / ${Math.round(b.arbzg.periodMin / 60)} h`} /> : null}
       <small className="hint">{skillShort(e)}{e.licenseC ? ' · Führerschein C/CE' : ''}{!e.isPlayer && e.kind !== 'leih' ? ` · ${e.age} Jahre · ${e.wage.toLocaleString('de-DE')} €/h brutto (Markt ${marketWage(e).toLocaleString('de-DE')} €)` : ''}</small>
-      <small>{b.driverStatus[e.id] ?? (e.kind === 'leih' && b.time < (e.availableFrom ?? 0) ? `kommt ${fmtDay(e.availableFrom!)} 06:00` : 'frei')} · heute {((b.driverMinutes[e.id] ?? 0) / 60).toLocaleString('de-DE', { maximumFractionDigits: 1 })} von 10 h</small>
+      <small>{duty ?? (e.kind === 'leih' && b.time < (e.availableFrom ?? 0) ? `kommt ${fmtDay(e.availableFrom!)} 06:00` : 'frei')}</small>
       {e.kind === 'leih' && <LeihActions e={e} status={status} send={send} />}
       {e.apprenticeUntil !== undefined && <small className="hint">Auszubildender bis {fmtDay(e.apprenticeUntil)} · lernt 50 % schneller</small>}
       {e.course && <small className="hint">Lehrgang „{COURSES[e.course.key].name}“ bis {fmtDay(e.course.until)}</small>}
@@ -614,19 +642,6 @@ function EmployeeCard({ e, status, game, show }: { e: Employee; status: GameStat
           <small className="warn">{e.poach.competitor} bietet {eur(e.poach.wage)}/h – Antwort bis {fmtDay(e.poach.until)}</small>
           <button onClick={() => send({ kind: 'poachAnswer', employeeId: e.id, match: true })}>Gleichziehen</button>
           <button onClick={() => send({ kind: 'poachAnswer', employeeId: e.id, match: false })}>Gehen lassen</button>
-        </div>
-      )}
-      {e.kind !== 'leih' && !e.course && (
-        <div className="card-actions">
-          <select value={course} onChange={(x) => setCourse(x.target.value as CourseKey)} aria-label="Lehrgang">
-            {(Object.keys(COURSES) as CourseKey[]).map((k) => <option key={k} value={k}>{COURSES[k].name} ({eur(COURSES[k].cost)}, {COURSES[k].days} Tage)</option>)}
-          </select>
-          {course === 'lehrgang' && (
-            <select value={cskill} onChange={(x) => setCskill(x.target.value as Skill)} aria-label="Tätigkeit">
-              {SKILLS.map((k) => <option key={k.key} value={k.key}>{k.name}</option>)}
-            </select>
-          )}
-          <button onClick={() => send({ kind: 'course', employeeId: e.id, course, skill: course === 'lehrgang' ? cskill : undefined })}>Anmelden</button>
         </div>
       )}
       {!e.isPlayer && e.kind !== 'leih' && (
@@ -643,6 +658,26 @@ function EmployeeCard({ e, status, game, show }: { e: Employee; status: GameStat
           </small>
           {abs.map((a, i) => <small key={i} className="hint">{a.kind === 'urlaub' ? 'Urlaub' : 'krank'} {fmtDay(a.from)} bis {fmtDay(a.to - 1)}</small>)}
           {e.leavesAt !== undefined && <small className="warn">gekündigt – geht am {fmtDay(e.leavesAt)}</small>}
+        </>
+      )}
+      {e.kind !== 'leih' && (
+      <details className="more">
+        <summary>{e.isPlayer ? 'Lehrgang' : 'Lehrgang, Urlaub, Lohn, Kündigung'}</summary>
+      {!e.course && (
+        <div className="card-actions">
+          <select value={course} onChange={(x) => setCourse(x.target.value as CourseKey)} aria-label="Lehrgang">
+            {(Object.keys(COURSES) as CourseKey[]).map((k) => <option key={k} value={k}>{COURSES[k].name} ({eur(COURSES[k].cost)}, {COURSES[k].days} Tage)</option>)}
+          </select>
+          {course === 'lehrgang' && (
+            <select value={cskill} onChange={(x) => setCskill(x.target.value as Skill)} aria-label="Tätigkeit">
+              {SKILLS.map((k) => <option key={k.key} value={k.key}>{k.name}</option>)}
+            </select>
+          )}
+          <button onClick={() => send({ kind: 'course', employeeId: e.id, course, skill: course === 'lehrgang' ? cskill : undefined })}>Anmelden</button>
+        </div>
+      )}
+      {!e.isPlayer && (
+        <>
           <div className="card-actions">
             {e.kind === 'fest' && (
               <span className="counter">
@@ -660,6 +695,8 @@ function EmployeeCard({ e, status, game, show }: { e: Employee; status: GameStat
             {e.leavesAt === undefined && <button onClick={() => send({ kind: 'fire', employeeId: e.id })}>{e.kind === 'fest' ? 'Kündigen (4 Wochen)' : 'Entlassen'}</button>}
           </div>
         </>
+      )}
+      </details>
       )}
     </li>
   );
@@ -1005,16 +1042,20 @@ export function FleetTab({ status, game, part }: { status: GameStatus; game: Gam
           const down = (m.downUntil ?? 0) > b.time;
           const due = m.serviceAtH !== undefined && m.hours >= m.serviceAtH - 20;
           const unit = b.units.find((u) => u.machineId === m.id);
+          const tone = m.repair || down ? 'warn' : due ? 'run' : busy ? 'ok' : 'muted';
           return (
-            <li className="card" key={m.id}>
+            <li className={`card tone-${tone}`} key={m.id} data-testid="machine">
               <div className="card-head">
                 <strong>{machineName(m)}</strong>
-                <small>Wert {eur(b.machineValues[m.id] ?? 0)}</small>
+                <span className={`badge ${tone}`}>{m.repair ? 'Panne' : down ? 'Stillstand' : busy ? 'im Einsatz' : m.hired ? 'angeheuert' : 'am Hof'}</span>
               </div>
-              <small>{TYPE_NAMES[m.type]}{machineSpecs(m) ? ` · ${machineSpecs(m)}` : ''} · Bj. {m.year} · {m.hours.toLocaleString('de-DE')} h · Zustand {Math.round(m.condition)} %</small>
-              <small className={down ? 'warn' : busy ? 'unit-status' : 'hint'}>
-                {down ? `${m.downReason}, bis ${fmtDay(m.downUntil!)} ${fmtTime(m.downUntil!)}` : busy ? (unit?.status ?? 'im Einsatz') : 'am Hof'}
-              </small>
+              <small>{TYPE_NAMES[m.type]}{machineSpecs(m) ? ` · ${machineSpecs(m)}` : ''} · Bj. {m.year} · {m.hours.toLocaleString('de-DE')} h · Wert {eur(b.machineValues[m.id] ?? 0)}</small>
+              <Meter label="Zustand" value={m.condition / 100} text={`${Math.round(m.condition)} %`} tone={conditionTone(m.condition)} />
+              {(down || busy) && (
+                <small className={down ? 'warn' : 'unit-status'}>
+                  {down ? `${m.downReason}, bis ${fmtDay(m.downUntil!)} ${fmtTime(m.downUntil!)}` : (unit?.status ?? 'im Einsatz')}
+                </small>
+              )}
               <small className={due ? 'warn' : 'hint'}>
                 {m.serviceAtH !== undefined ? (m.hours > m.serviceAtH ? `Wartung überfällig (seit ${Math.round(m.hours - m.serviceAtH)} h) – höheres Pannenrisiko` : `nächste Wartung bei ${m.serviceAtH.toLocaleString('de-DE')} h`) : ''}
                 {m.breakdowns ? ` · ${m.breakdowns} Pannen` : ''}
@@ -1030,11 +1071,18 @@ export function FleetTab({ status, game, part }: { status: GameStatus; game: Gam
                 </div>
               )}
               {m.repair && <RepairChoice m={m} status={status} send={send} />}
-              <div className="card-actions">
-                <button onClick={() => send({ kind: 'service', machineId: m.id })} disabled={busy || down} data-testid="service">Wartung</button>
-                <button onClick={() => send({ kind: 'sell', machineId: m.id, mode: 'tradein' })} disabled={busy}>In Zahlung geben ({eur(Math.round(((b.machineValues[m.id] ?? 0) * 0.8) / 100) * 100)})</button>
-                {m.saleAt === undefined && <button onClick={() => send({ kind: 'sell', machineId: m.id, mode: 'privat' })} disabled={busy}>Privat inserieren</button>}
-              </div>
+              {!m.hired && (
+                <div className="card-actions">
+                  <button onClick={() => send({ kind: 'service', machineId: m.id })} disabled={busy || down} data-testid="service">Wartung</button>
+                  <details className="more inline">
+                    <summary>Verkaufen</summary>
+                    <div className="card-actions">
+                      <button onClick={() => send({ kind: 'sell', machineId: m.id, mode: 'tradein' })} disabled={busy}>In Zahlung geben ({eur(Math.round(((b.machineValues[m.id] ?? 0) * 0.8) / 100) * 100)})</button>
+                      {m.saleAt === undefined && <button onClick={() => send({ kind: 'sell', machineId: m.id, mode: 'privat' })} disabled={busy}>Privat inserieren</button>}
+                    </div>
+                  </details>
+                </div>
+              )}
             </li>
           );
         })}
@@ -1719,7 +1767,6 @@ export function FinanceTab({ status, game, part }: { status: GameStatus; game: G
       )}
       <dl>
         <dt>Kontokorrent</dt><dd>{eur(c.overdraftLimit ?? 0)} Rahmen · 11 % Zins im Minus</dd>
-        <dt>Offene Rechnungen</dt><dd>{eur(openInv.reduce((a, i) => a + i.amount, 0))} ({openInv.length})</dd>
         {lost.length > 0 && <><dt>Forderungsausfall</dt><dd className="neg">{eur(lost.reduce((a, i) => a + i.amount, 0))} ({lost.length})</dd></>}
         <dt>Eigenkapital</dt><dd>{eur(b.balance.equity)} ({b.balance.assets > 0 ? Math.round((b.balance.equity / b.balance.assets) * 100) : 0} %)</dd>
         <dt>Dieselpreis</dt><dd>{b.dieselPrice.toLocaleString('de-DE', { minimumFractionDigits: 3 })} €/l netto</dd>

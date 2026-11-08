@@ -254,3 +254,16 @@ html, body, #root { margin: 0; height: 100%; }
 .panel-body dl, .window-body dl { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; margin: 0; }
 .panel-body dt { color: var(--muted); }
 .panel-body dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+/* Balken in Karten */
+.meter-row { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
+.meter-row .meter-label { width: 74px; flex: none; }
+.meter-row .meter { flex: 1; height: 6px; border-radius: 3px; }
+.meter-row .meter-text { width: 70px; flex: none; text-align: right; font-variant-numeric: tabular-nums; }
+.m-run .meter > span { background: #c98a12; }
+.m-warn .meter > span { background: var(--warn); }
+/* selten gebrauchte Befehle eingeklappt */
+details.more { font-size: 12px; }
+details.more > summary { cursor: pointer; color: #1f5a1a; padding: 4px 0; list-style-position: inside; }
+details.more[open] > summary { color: var(--muted); }
+details.more.inline { display: inline-block; }
+details.more.inline > summary { display: inline-flex; align-items: center; min-height: 30px; padding: 0 11px; border: 1px solid #b8b4a8; border-radius: 6px; background: #fff; color: var(--ink); list-style: none; }
