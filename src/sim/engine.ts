@@ -677,7 +677,7 @@ export class Simulation {
       const c = cands.get(farmId);
       if (!c || !wagon || !tractors.length) continue;
       const tm = tractors[farmId % tractors.length];
-      const nextId = () => this.company.machines.reduce((a, m) => Math.max(a, m.id), 0) + 1;
+      const nextId = () => b.nextMachineId();
       const base = { year: 2018, hours: 6000, condition: 75, purchasePrice: 0, afaYears: 1, boughtAt: this.time, hired: { farmId, orderId: o.id, eurH: c.eurH } };
       const t: Machine = { ...base, id: nextId(), type: 'schlepper', brand: tm.brand, model: tm.model, newPrice: tm.newPrice, power: tm.power };
       this.company.machines.push(t);

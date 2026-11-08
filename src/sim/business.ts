@@ -2799,7 +2799,8 @@ export class Business {
     return 'gekauft';
   }
 
-  private nextMachineId(): number {
+  /** nächste freie Maschinennummer (auch bestellte Lieferungen sind vergeben) */
+  nextMachineId(): number {
     let id = this.company.machines.reduce((m, x) => Math.max(m, x.id), 0);
     for (const d of this.deliveries) id = Math.max(id, d.id);
     return id + 1;

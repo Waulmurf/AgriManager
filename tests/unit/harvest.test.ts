@@ -301,6 +301,27 @@ describe('Abfahrer von Landwirten', () => {
     expect(o.doneT!).toBeGreaterThan(o.areaHa * 7.5 * 0.8);
   });
 
+  it('Maschinennummern angeheuerter Gespanne kollidieren nicht mit bestellten Lieferungen; Spielstand bleibt ladbar', () => {
+    const { s, o } = harvestOrder('drusch', Crop.Getreide, 8, 1, 'komplett');
+    const m = addMachine(s, lexion);
+    s.company.cash = 1_000_000;
+    // Bestellung läuft (Nummer reserviert), dann Landwirte anheuern
+    runUntil(s, () => !s.weather.threshBlocked(s.time) && s.time % 1440 > 200 && s.time % 1440 < 300, 10 * 1440);
+    for (const f of s.farms!.farms) { f.livestock = true; f.satisfaction = 100; }
+    const reserved = s.business.nextMachineId();
+    (s.business.deliveries as { id: number }[]).push({ ...structuredClone(s.business.deliveries[0] ?? { machine: { ...s.company.machines[0] }, price: 1, at: s.time + 30 * 1440, dealerId: 1 }), id: reserved } as never);
+    const cands = s.business.hireCandidates(o.id, s.time);
+    expect(cands.length).toBeGreaterThan(0);
+    expect(s.command({ kind: 'startJob', orderId: o.id, tractorId: m.id, implementId: m.id, hired: [cands[0].farmId] })).toMatch(/gestartet/);
+    const ids = s.company.machines.map((x) => x.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).not.toContain(reserved);
+    s.run(120);
+    const s2 = harvestOrder('drusch', Crop.Getreide, 8, 1, 'komplett').s;
+    s2.restore(JSON.parse(JSON.stringify(s.serialize())));
+    expect(s2.company.machines.filter((x) => x.hired).length).toBe(2);
+  });
+
   it('nur bei Ketten mit Abfuhr', () => {
     const { s, o } = harvestOrder('drusch', Crop.Getreide, 8, 1, 'haecksler');
     const m = addMachine(s, lexion);
