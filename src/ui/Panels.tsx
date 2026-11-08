@@ -74,8 +74,8 @@ export function BusinessTab({ status, game }: { status: GameStatus; game: GameCo
               {m.width ? `, ${m.width.toLocaleString('de-DE')} m` : ''}
             </span>
             <small>
-              Bj. {m.year}
-              {m.hours ? ` · ${m.hours.toLocaleString('de-DE')} h` : ''} · Zustand {Math.round(m.condition)} % · Wert {eur(machineValue(m))}
+              {m.hired ? `angeheuert: ${game?.farmById(m.hired.farmId)?.name ?? 'Landwirt'} · ${m.hired.eurH ? `${m.hired.eurH} €/h` : 'eigenes Feld, kostenlos'}` : <>Bj. {m.year}
+              {m.hours ? ` · ${m.hours.toLocaleString('de-DE')} h` : ''} · Zustand {Math.round(m.condition)} % · Wert {eur(machineValue(m))}</>}
             </small>
             {unitStatus(m.id) && <small className="unit-status">{unitStatus(m.id)}</small>}
           </li>
@@ -187,6 +187,10 @@ function ChopStart({ o, game, status, show }: { o: Order; game: GameController |
   // Wechselbetrieb (Anhänger am Feldrand) und Zug nur bei Erntemaschinen mit Korntank/Bunker
   const parkOk = o.service === 'drusch' || o.service === 'kartoffelroden';
   const [roller, setRoller] = useState<{ driverId: number; machineId: number } | null>(null);
+  // Schichtbetrieb: Drescher/Häcksler 2 Schichten, Rübenroder rund um die Uhr; Landwirte als Abfahrer
+  const [shifts, setShifts] = useState<1 | 2 | 3>(1);
+  const [hired, setHired] = useState<number[]>([]);
+  const cands = status.business?.hireCandidates[o.id] ?? [];
   const addHauler = () => {
     const usedD = new Set([hd, ...haulers.map((x) => x.driverId)]);
     const usedM = new Set(haulers.flatMap((x) => [x.tractorId, x.implementId, ...(x.implementId2 ? [x.implementId2] : [])]));
@@ -197,7 +201,7 @@ function ChopStart({ o, game, status, show }: { o: Order; game: GameController |
     setHaulers([...haulers, { driverId: d.id, tractorId: t.id, implementId: w.id }]);
   };
   const start = async () => {
-    show(await game!.command({ kind: 'startJob', orderId: o.id, tractorId: towed ? tow : h, implementId: h, driverId: hd, haulers, roller: roller ?? undefined }));
+    show(await game!.command({ kind: 'startJob', orderId: o.id, tractorId: towed ? tow : h, implementId: h, driverId: hd, haulers, roller: roller ?? undefined, shifts, hired: hired.length ? hired : undefined }));
   };
   if (!harvesters.length) return <small className="warn">Kein {harvName} im Fuhrpark – im Markt kaufen oder leasen</small>;
   return (
@@ -258,8 +262,25 @@ function ChopStart({ o, game, status, show }: { o: Order; game: GameController |
             <button onClick={() => setRoller({ driverId: drivers.find((d) => (d.skills.radlader ?? 0) >= 1 && d.id !== hd)?.id ?? 1, machineId: loaders[0].id })}>+ Radlader am Silo</button>
           )
         )}
+        <select value={shifts} onChange={(e) => setShifts(Number(e.target.value) as 1 | 2 | 3)} aria-label="Schichten" data-testid="shifts">
+          <option value={1}>1 Schicht</option>
+          <option value={2}>2 Schichten ({o.service === 'drusch' ? '06–16 und 16–24 Uhr' : '06–14 und 14–22 Uhr'})</option>
+          <option value={3}>3 Schichten (rund um die Uhr)</option>
+        </select>
         <button onClick={start} data-testid="start-chop">Kette starten</button>
       </div>
+      {o.chain === 'komplett' && cands.length > 0 && (
+        <div className="card-actions" data-testid="hire">
+          <small>Landwirte als Abfahrer (eigener Schlepper, Wagen und Fahrer):</small>
+          {cands.map((x) => (
+            <label key={x.farmId}>
+              <input type="checkbox" checked={hired.includes(x.farmId)} onChange={(e) => setHired(e.target.checked ? [...hired, x.farmId].slice(0, 4) : hired.filter((f) => f !== x.farmId))} />
+              {' '}{x.name} ({x.km.toLocaleString('de-DE')} km, {x.eurH ? `${x.eurH} €/h` : 'eigenes Feld, kostenlos'})
+            </label>
+          ))}
+        </div>
+      )}
+      {shifts > 1 && <small className="hint">Schichtwechsel am Feld: Ein freier, ausgeruhter Fahrer mit passender Qualifikation übernimmt (kommt mit eigenem Pkw). Findet sich keiner, fährt der bisherige bis zu seiner Höchstarbeitszeit.</small>}
       <small className="hint">
         {o.service === 'roden'
           ? 'Der Rübenroder bunkert rund 30 t und legt am Vorgewende eine Feldrandmiete an. Mit Überladewagen bunkert er während der Fahrt über und muss nicht zum Feldrand – der Überladewagen kippt auf die Miete. Verladung und Abfuhr übernimmt die Zuckerfabrik.'
@@ -358,6 +379,7 @@ function TruckStart({ o, game, status, show }: { o: Order; game: GameController 
   const [lkw, setLkw] = useState(trucks[0]?.id ?? 0);
   const [tank, setTank] = useState(tanks[0]?.id ?? 0);
   const [d, setD] = useState(slurry ? 1 : drivers.find((x) => (x.skills.transport ?? 0) >= 1)?.id ?? 1);
+  const [shifts, setShifts] = useState<1 | 2 | 3>(1);
   if (slurry) {
     if (!tanks.length) return <small className="warn">Kein Zubringer- oder Güllefass im Fuhrpark</small>;
     return (
@@ -384,7 +406,12 @@ function TruckStart({ o, game, status, show }: { o: Order; game: GameController 
       <select value={d} onChange={(e) => setD(Number(e.target.value))} aria-label="Lkw-Fahrer">
         {drivers.map((x) => <option key={x.id} value={x.id}>{x.isPlayer ? 'Chef' : x.name} · Lkw {x.skills.transport ?? 0}</option>)}
       </select>
-      <button onClick={async () => show(await game!.command({ kind: 'startJob', orderId: o.id, tractorId: lkw, implementId: lkw, driverId: d }))} data-testid="start-truck">Transport starten</button>
+      <select value={shifts} onChange={(e) => setShifts(Number(e.target.value) as 1 | 2 | 3)} aria-label="Schichten Lkw">
+        <option value={1}>1 Schicht</option>
+        <option value={2}>2 Schichten (06–14, 14–22 Uhr)</option>
+        <option value={3}>3 Schichten (Kampagne, rund um die Uhr)</option>
+      </select>
+      <button onClick={async () => show(await game!.command({ kind: 'startJob', orderId: o.id, tractorId: lkw, implementId: lkw, driverId: d, shifts }))} data-testid="start-truck">Transport starten</button>
       <small className="hint">Der Lkw pendelt, bis alles abgefahren ist. Nach 4,5 h Fahrt 45 min Pause, Feierabend nach der Höchstarbeitszeit. Maut auf Bundesstraßen.</small>
     </div>
   );
@@ -619,6 +646,10 @@ function EmployeeCard({ e, status, game, show }: { e: Employee; status: GameStat
             {e.overtime30 ? ` · Überstunden (30 Tage) ${(e.overtime30 / 60).toLocaleString('de-DE', { maximumFractionDigits: 0 })} h` : ''}
             {e.kind === 'fest' ? ` · Resturlaub ${e.vacationLeft ?? 0} Tage` : ''}
           </small>
+          <small className={(e.periodMin ?? 0) > 0.9 * (b.arbzg?.periodMin ?? Infinity) ? 'warn' : 'hint'} data-testid="arbzg">
+            {e.kind === 'fest' ? `Arbeitszeitkonto ${((e.timeAccount ?? 0) / 60).toLocaleString('de-DE', { maximumFractionDigits: 0 })} h (Abrechnung 1. März) · ` : ''}
+            ArbZG-Ausgleichszeitraum: {Math.round((e.periodMin ?? 0) / 60)} von {Math.round((b.arbzg?.periodMin ?? 0) / 60)} h (48 h im Mittel über 24 Wochen)
+          </small>
           {abs.map((a, i) => <small key={i} className="hint">{a.kind === 'urlaub' ? 'Urlaub' : 'krank'} {fmtDay(a.from)} bis {fmtDay(a.to - 1)}</small>)}
           {e.leavesAt !== undefined && <small className="warn">gekündigt – geht am {fmtDay(e.leavesAt)}</small>}
           <div className="card-actions">
@@ -691,8 +722,20 @@ export function StaffTab({ status, game }: { status: GameStatus; game: GameContr
   if (!b || !c) return <p className="hint">–</p>;
   const monthly = c.drivers.reduce((a, e) => a + (e.kind === 'fest' ? employerMonthCost(e) : 0), 0);
   const name = (id: number) => c.drivers.find((d) => d.id === id)?.name ?? `Mitarbeiter ${id}`;
+  const ex = b.arbzg?.exemption;
   return (
     <>
+      <h2>Arbeitszeit</h2>
+      <p className="hint" data-testid="arbzg-info">
+        Höchstens {Math.round((b.arbzg?.dayMax ?? 600) / 60)} h am Tag, im Mittel 48 h je Woche über 24 Wochen, Ruhezeit 11 h (in Bestellung und Ernte 10 h).
+        Feste haben ein Arbeitszeitkonto: Mehrstunden werden im Winter abgebaut, ein Plus am 1. März mit 25 % ausgezahlt.
+        {ex ? (ex.from > b.time ? ` Saisonausnahme beantragt, gilt ab ${fmtDay(ex.from)}.` : ex.until > b.time ? ` Saisonausnahme bis ${fmtDay(ex.until - 1)}: bis 12 h am Tag.` : '') : ''}
+      </p>
+      {(!ex || ex.until <= b.time) && (
+        <div className="card-actions">
+          <button onClick={async () => fb.show(await game!.command({ kind: 'arbzgExemption' }))} data-testid="exemption">Saisonausnahme beantragen (bis 12 h am Tag, 250 €)</button>
+        </div>
+      )}
       {b.staffRequests.length > 0 && (
         <>
           <h2>Wünsche ({b.staffRequests.length})</h2>

@@ -27,6 +27,8 @@ const PLAN: { year: number; type: MachineType; ifBusy?: Service }[] = [
   { year: 5, type: 'lkw', ifBusy: 'transport' }, { year: 5, type: 'maehdrescher', ifBusy: 'drusch' },
   { year: 6, type: 'ruebenroder', ifBusy: 'roden' }, { year: 7, type: 'feldhaecksler', ifBusy: 'haeckseln' },
 ];
+/** Schichten je Erntemaschine bzw. Lkw (Drescher/Häcksler 2, Rübenroder rund um die Uhr, Lkw in der Kampagne 2) */
+const SHIFTS_FOR: Partial<Record<MachineType, 1 | 2 | 3>> = { maehdrescher: 2, feldhaecksler: 2, ruebenroder: 3, lkw: 2 };
 const ROTATION: OwnCrop[] = ['weizen', 'raps', 'weizen', 'mais', 'rueben', 'weizen', 'kartoffeln'];
 
 /** Investitionsfreude: Rücklagen, Leasing, Wachstumsschwellen (normal = bisheriges Verhalten des Bots) */
@@ -293,6 +295,13 @@ export function runFullBot(s: Simulation, years: number, profile: BotProfile = b
       const own = c.drivers.filter((d) => !taken.has(d.id) && (d.skills[sk.skill] ?? 0) >= sk.min).slice(0, n);
       for (const d of own) taken.add(d.id);
       if (own.length < n) ensureSkill(sk.skill, sk.min, c.drivers.filter((d) => (d.skills[sk.skill] ?? 0) >= sk.min).length + 1);
+      // Ablösung für den Schichtbetrieb: weitere qualifizierte Fahrer als Saisonkräfte (nur bezahlte Stunden)
+      const want = n * (SHIFTS_FOR[t] ?? 1);
+      const have = c.drivers.filter((d) => (d.skills[sk.skill] ?? 0) >= sk.min && d.hiredFarmId === undefined).length;
+      if (own.length >= n && have < want) {
+        const a = b.applicants.find((x) => (x.person.skills[sk.skill] ?? 0) >= sk.min);
+        if (a) { s.command({ kind: 'hire', applicantId: a.id, asKind: 'saison' }); say(`Saisonkraft für die ${SHIFTS_FOR[t]}. Schicht (${sk.skill}): ${a.person.name}`); }
+      }
     }
     if (ofType('spritze').length) ensureSkill('pflanzenschutz', 1);
   };
@@ -427,7 +436,8 @@ export function runFullBot(s: Simulation, years: number, profile: BotProfile = b
         } else {
           const lkw = ofType('lkw').find((m) => free(m.id));
           const d = drivers().find((x) => (x.skills.transport ?? 0) >= 1);
-          if (lkw && d) s.command({ kind: 'startJob', orderId: o.id, tractorId: lkw.id, implementId: lkw.id, driverId: d.id });
+          const lkwDrivers = c.drivers.filter((x) => (x.skills.transport ?? 0) >= (MACHINE_SKILL.lkw?.min ?? 1)).length;
+          if (lkw && d) s.command({ kind: 'startJob', orderId: o.id, tractorId: lkw.id, implementId: lkw.id, driverId: d.id, shifts: lkwDrivers >= 2 * ofType('lkw').length ? 2 : 1 });
         }
         continue;
       }
@@ -453,11 +463,17 @@ export function runFullBot(s: Simulation, years: number, profile: BotProfile = b
             haulers.push({ driverId: wd.id, tractorId: wt.id, implementId: w.id });
             usedD.add(wd.id); usedM.add(wt.id); usedM.add(w.id);
           }
-          if (!haulers.length) continue;
+        }
+        // fehlende Abfahrer: Landwirte anheuern (eigenes Feld des Kunden kostenlos zuerst)
+        const hired: number[] = [];
+        if (o.chain === 'komplett') {
+          const need = o.service === 'haeckseln' ? 2 : 1;
+          for (const x of b.hireCandidates(o.id, s.time)) if (haulers.length + hired.length < need) hired.push(x.farmId);
+          if (!haulers.length && !hired.length) continue;
         }
         const rl = o.service === 'haeckseln' && o.chain === 'komplett' ? ofType('radlader').find((m) => free(m.id)) : undefined;
         const rd = rl && c.drivers.find((x) => driverFree(x.id) && x.id !== d.id && !haulers.some((h) => h.driverId === x.id) && (x.skills.radlader ?? 0) >= 1);
-        s.command({ kind: 'startJob', orderId: o.id, tractorId: tr.id, implementId: harv.id, driverId: d.id, haulers, roller: rl && rd ? { driverId: rd.id, machineId: rl.id } : undefined });
+        s.command({ kind: 'startJob', orderId: o.id, tractorId: tr.id, implementId: harv.id, driverId: d.id, haulers, roller: rl && rd ? { driverId: rd.id, machineId: rl.id } : undefined, shifts: SHIFTS_FOR[type] ?? 1, hired: hired.length ? hired : undefined });
         continue;
       }
       // Feldarbeit (auch Eigenaufträge auf Pachtflächen)

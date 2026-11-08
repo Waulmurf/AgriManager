@@ -10,6 +10,7 @@ import { isOrganic } from './farms';
 import { DEALERS } from '../data/catalog';
 import { LEASE_BASE_RATE, RATING_SURCHARGE, loanBaseRate } from './finance';
 import { CHEF_MAX_MINUTES, Simulation, type RouteGeom } from './engine';
+import { ARBZG_PERIOD_MIN, isHarvest } from './business';
 import { parseRoadGraph, unproject, type RoadGraph } from './roadgraph';
 import { parseFields } from './fields';
 import {
@@ -155,6 +156,8 @@ function sendBusiness(force = false) {
     },
     referrals: b.referrals.map((r) => ({ ...r })),
     parkedTrailers: sim.parkedTrailers(),
+    hireCandidates: Object.fromEntries(b.orders.filter((o) => o.status === 'offen' && o.chain === 'komplett' && isHarvest(o.service)).map((o) => [o.id, b.hireCandidates(o.id, sim!.time)])),
+    arbzg: { dayMax: b.dayMaxMinutes(sim.time), periodMin: ARBZG_PERIOD_MIN, exemption: sim.company.arbzgExemption ? { from: sim.company.arbzgExemption.from, until: sim.company.arbzgExemption.until } : null },
     nz: { score: b.nzScore, quota: b.nzQuotaT },
     municipal: { tenders: structuredClone(b.tenders), winterOffers: structuredClone(b.winterOffers), winterContracts: structuredClone(b.winterContracts) },
     incidents: { storm: b.stormDay === Math.floor(sim.time / 1440), hailInsured: b.hailInsured, fairDiscount: b.fairDiscount(sim.time) },

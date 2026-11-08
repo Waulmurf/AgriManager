@@ -1145,8 +1145,11 @@ Lohnsatz fürs Hacken und Striegeln gibt es nicht; für Striegeln mit eigener Ma
 
 ## Geplant: realistische Arbeitszeiten, Schichtbetrieb, Abfahrer von Landwirten (Nils, 8. Nov. 2026)
 
-Ziel: Erntemaschinen laufen so lange wie in der Praxis, die Fahrer bleiben im gesetzlichen Rahmen. Heute gilt ein fester
-10-Stunden-Tag je Gespann, und Überstunden werden sofort mit 25 % bezahlt. Umsetzung erst nach Freigabe durch Nils.
+Ziel: Erntemaschinen laufen so lange wie in der Praxis, die Fahrer bleiben im gesetzlichen Rahmen.
+**Umgesetzt am 8. Nov. 2026** (Nils: „Setze alles wie beschrieben um“; Landwirt auf eigenem Feld kostenlos, auf fremden
+Feldern 90 €/h). Code: `business.ts` (`ARBZG_*`, `dayMaxMinutes`, `restMinutes`, `periodLeft`, `applyExemption`,
+Arbeitszeitkonto in `payroll`, `hireCandidates`, `billHired`), `engine.ts` (`shiftPlan`, `shiftTick`, `chainIdle`,
+`hireHaulers`, `releaseHired`). Tests: `arbeitszeit.test.ts`, `harvest.test.ts`.
 
 1. **Fahrerzeit (ArbZG):**
    - Höchstens 10 h am Tag und im Mittel 48 h in der Woche; in Bestellung und Ernte mit Ausgleich im Ausgleichszeitraum

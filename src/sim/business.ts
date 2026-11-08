@@ -78,6 +78,36 @@ export const RIVAL_TRUST_SATISFACTION = 40;
 export const TRIAL_MAX_HA = 10;
 /** kalkulatorische Maschinenkosten für die Auswertung (Annahmen, LWK-Größenordnung) */
 export const REPAIR_TRACTOR_EUR_H = 8;
+/**
+ * Arbeitszeitgesetz (ArbZG): höchstens 10 h am Tag (§ 3), mit Saisonausnahme der Gewerbeaufsicht 12 h (§ 15);
+ * im Mittel 48 h je Woche über einen Ausgleichszeitraum von 24 Wochen. Ruhezeit 11 h (§ 5), in der Landwirtschaft
+ * in Bestellung und Ernte (März bis November) 10 h (§ 5 Abs. 2; der Ausgleich mit 12 h Ruhe ist vereinfacht).
+ */
+export const ARBZG_DAY_MIN = 600;
+export const ARBZG_EXEMPT_DAY_MIN = 720;
+export const ARBZG_PERIOD_DAYS = 168;
+export const ARBZG_PERIOD_MIN = 48 * 60 * 24;
+export const REST_MIN = 660;
+export const REST_MIN_SEASON = 600;
+/** Saisonausnahme: Gebühr, Bearbeitung 14 Tage, gilt bis 30. November des Jahres (Annahme) */
+export const EXEMPTION_FEE = 250;
+export const EXEMPTION_DAYS = 14;
+/**
+ * Arbeitszeitkonto der Festen: Soll 8 h je Werktag (Mo–Fr). Mehrarbeit geht aufs Konto statt sofort mit Zuschlag
+ * ausgezahlt zu werden; im Winter wird es abgebaut. Obergrenze 300 h (darüber Auszahlung mit 25 %), Abrechnung am
+ * 1. März: Plus mit 25 % Zuschlag ausgezahlt, Minus verfällt (Risiko des Arbeitgebers).
+ */
+export const CONTRACT_DAY_MIN = 480;
+export const ACCOUNT_MAX_MIN = 300 * 60;
+export const OVERTIME_BONUS = 0.25;
+/**
+ * Abfahrer von Landwirten (Nachbarschaftshilfe/Maschinenring): Schlepper mit Häckselwagen bzw. Kipper und Fahrer
+ * nach Stunden (Annahme 90 €/h; Anker Transport 87 €/h laut Bayerischem Wochenblatt). Auf dem eigenen Feld des
+ * Landwirts kostenlos. Höchstens 4 Gespanne je Kette, im Umkreis von 25 km um das Feld.
+ */
+export const HIRED_HAULER_EUR_H = 90;
+export const HIRED_MAX = 4;
+export const HIRED_RADIUS_KM = 25;
 /** Sanierung (statt Insolvenz): Auslöser über dem Rahmen (€), Darlehen (Jahre, Zinsaufschlag), Berater (€), Verwertungsquote */
 export const SANIERUNG_TRIGGER_EUR = 100_000;
 export const SANIERUNG_YEARS = 5;
@@ -514,6 +544,10 @@ export type Command =
       /** Abfahrer: Schlepper mit Wagen; implementId2 = zweiter Drehschemel-Anhänger (Zug); park = Anhänger am Feldrand abstellen */
       haulers?: { driverId: number; tractorId: number; implementId: number; implementId2?: number; park?: boolean }[];
       roller?: { driverId: number; machineId: number };
+      /** Schichtbetrieb: 1 (Standard), 2 (Drescher, Häcksler) oder 3 Schichten (Rübenroder, Lkw-Abfuhr, rund um die Uhr) */
+      shifts?: 1 | 2 | 3;
+      /** angeheuerte Abfahrer: Landwirte (Hof-IDs) mit eigenem Schlepper, Wagen und Fahrer */
+      hired?: number[];
     }
   | { kind: 'buy'; offerId: number }
   | { kind: 'recall'; vehicle: number }
@@ -526,6 +560,7 @@ export type Command =
   | { kind: 'fire'; employeeId: number }
   | { kind: 'vacation'; employeeId: number; fromDay: number; days: number }
   | { kind: 'rent'; poolId: number; days: number }
+  | { kind: 'arbzgExemption' }
   | { kind: 'extendRent'; employeeId: number; days: number }
   | { kind: 'takeOver'; employeeId: number; asKind: 'fest' | 'saison' }
   | { kind: 'swapDriver'; vehicle: number; driverId: number; chauffeurId?: number }
@@ -2791,7 +2826,7 @@ export class Business {
   /** Eigenkapital und Bilanzsumme (vereinfacht) für die Bonität */
   balance(time: number): { assets: number; debt: number; equity: number; receivables: number; machines: number } {
     let machines = 0;
-    for (const m of this.company.machines) if (!m.lease) machines += this.machineValueNow(m, time);
+    for (const m of this.company.machines) if (!m.lease && !m.hired) machines += this.machineValueNow(m, time);
     const receivables = this.invoices.filter((i) => i.status === 'offen' || i.status === 'überfällig').reduce((a, i) => a + i.amount, 0);
     const cash = this.company.cash;
     const debt = this.company.loan + Math.max(0, -cash);
@@ -2905,7 +2940,7 @@ export class Business {
       } else {
         // Sanierung gescheitert: nach vier Verlängerungen (zwei Jahre) oder wenn nichts mehr zu verwerten ist
         s.extensions = (s.extensions ?? 0) + 1;
-        const sellable = c.machines.some((m) => !m.lease && m.type !== 'firmenwagen');
+        const sellable = c.machines.some((m) => !m.lease && !m.hired && m.type !== 'firmenwagen');
         if (s.extensions > SANIERUNG_MAX_EXTENSIONS || !sellable) { this.declareBankrupt(time); return; }
         s.until = time + 90 * 1440;
         this.emit(time, 'warnung', `Sanierung verlängert bis ${fmtDay(s.until)} (${s.extensions}. Verlängerung von höchstens ${SANIERUNG_MAX_EXTENSIONS}): Das Konto liegt noch über dem Rahmen.`);
@@ -2945,7 +2980,7 @@ export class Business {
     const c = this.company;
     const limit = c.overdraftLimit ?? 0;
     const cand = c.machines
-      .filter((m) => !m.lease && m.type !== 'firmenwagen' && !(this.machineInUse?.(m.id) ?? false))
+      .filter((m) => !m.lease && !m.hired && m.type !== 'firmenwagen' && !(this.machineInUse?.(m.id) ?? false))
       .sort((x, y) => this.machineValueNow(y, time) - this.machineValueNow(x, time));
     for (const m of cand) {
       if (c.cash >= -limit) break;
@@ -2991,7 +3026,7 @@ export class Business {
       for (const m of this.company.machines) if (m.lease) this.book(time, `Leasingrate ${m.brand} ${m.model}`, -m.lease.monthly, 'Leasing');
       // Versicherung (WF-05)
       let ins = LIABILITY_PER_YEAR;
-      for (const m of this.company.machines) ins += insurancePerYear(m, m.lease ? m.newPrice * 0.7 : this.machineValueNow(m, time));
+      for (const m of this.company.machines) if (!m.hired) ins += insurancePerYear(m, m.lease ? m.newPrice * 0.7 : this.machineValueNow(m, time));
       this.book(time, 'Versicherungen (Betrieb und Maschinen)', -ins / 12, 'Versicherung');
       // Bonität und Kreditrahmen
       const b = this.balance(time);
@@ -3017,7 +3052,7 @@ export class Business {
       else if (l.category === 'Diesel' || l.category === 'Personal' || l.category === 'Werkstatt' || l.category === 'Zinsen' || l.category === 'Leasing' || l.category === 'Versicherung' || l.category === 'Gebäude' || l.category === 'Pacht' || l.category === 'Ackerbau' || l.category === 'Biogas' || l.category === 'Maut' || l.category === 'Sonstiges') expenses -= l.amount;
     }
     let afa = this.yearAfaSold + this.buildingAfa(from, to) + this.biogasAfa(from, to);
-    for (const m of this.company.machines) afa += bookValue(m, Math.max(from, m.boughtAt ?? 0)) - bookValue(m, to);
+    for (const m of this.company.machines) if (!m.hired) afa += bookValue(m, Math.max(from, m.boughtAt ?? 0)) - bookValue(m, to);
     return { revenue: Math.round(revenue), expenses: Math.round(expenses), afa: Math.round(afa) };
   }
 
@@ -3187,6 +3222,7 @@ export class Business {
     const m = this.company.machines.find((x) => x.id === machineId);
     if (!m) return 'Maschine unbekannt';
     if (m.lease) return 'Geleaste Maschinen gehören der Leasinggesellschaft – erst am Ende übernehmen';
+    if (m.hired) return 'Gehört dem Landwirt – nur für diesen Auftrag angeheuert';
     if (m.type === 'firmenwagen' && this.company.machines.filter((x) => x.type === 'firmenwagen').length < 2) return 'Ohne Firmenwagen sind keine Besuche möglich';
     const value = this.machineValueNow(m, time);
     if (mode === 'tradein') {
@@ -3724,15 +3760,117 @@ export class Business {
   // ---------- Personal ----------
 
   /**
+   * Landwirte, die heute für diese Kette abfahren würden: bekannte Betriebe mit Vieh oder guter Technik im Umkreis
+   * von 25 km um das erste Feld, nicht bei der Konkurrenz, nicht schon angeheuert. Zusage je Tag und Hof fest
+   * (deterministisch), umso eher, je zufriedener der Kunde ist; in der eigenen Silagezeit (Mitte September bis
+   * Mitte Oktober) seltener. Der Kunde selbst fährt auf seinem Feld kostenlos mit ab.
+   */
+  hireCandidates(orderId: number, time: number): { farmId: number; name: string; km: number; eurH: number }[] {
+    const o = this.orders.find((x) => x.id === orderId);
+    const fs = this.farms;
+    if (!o || !fs || !this.fields || !this.nodeLonLat || !isHarvest(o.service) || o.chain !== 'komplett' || o.farmId < -1) return [];
+    const at = this.nodeLonLat(this.fields.access[o.fields[0]]);
+    const busy = new Set(this.company.drivers.filter((e) => e.hiredFarmId !== undefined).map((e) => e.hiredFarmId!));
+    const day = Math.floor(time / 1440);
+    const md = gameDate(time).month * 100 + gameDate(time).day;
+    const silage = md >= 915 && md <= 1015;
+    const out: { farmId: number; name: string; km: number; eurH: number }[] = [];
+    for (const f of fs.farms) {
+      if (!f.known || f.closed || busy.has(f.id) || this.isRival(f.id, time)) continue;
+      if (!f.livestock && f.mechanization < 0.5) continue;
+      const km = kmBetween(this.nodeLonLat(f.homeNode), at);
+      if (km > HIRED_RADIUS_KM) continue;
+      const own = f.id === o.farmId;
+      const h = (((f.id + 1) * 2654435761 + (day + 1) * 40503) % 4294967296) / 4294967296;
+      const chance = own ? 0.9 : (0.25 + 0.5 * (f.satisfaction / 100)) * (silage && f.livestock ? 0.5 : 1);
+      if (h >= chance) continue;
+      out.push({ farmId: f.id, name: f.name, km: Math.round(km * 10) / 10, eurH: own ? 0 : HIRED_HAULER_EUR_H });
+    }
+    out.sort((a, b) => a.eurH - b.eurH || a.km - b.km);
+    return out.slice(0, 6);
+  }
+
+  /** Angeheuerter Landwirt: Stunden × Satz des Gespanns als Fremdleistung buchen und dem Auftrag zurechnen */
+  billHired(e: Employee, minutes: number, time: number) {
+    const m = this.company.machines.find((x) => x.hired && x.hired.farmId === e.hiredFarmId && x.type === 'schlepper');
+    const eur = m?.hired ? Math.round((minutes / 60) * m.hired.eurH * 100) / 100 : 0;
+    if (eur <= 0) return;
+    const o = this.orders.find((x) => x.id === m!.hired!.orderId);
+    this.bookExternal(time, `Abfahrer ${this.farmName(e.hiredFarmId!)} (${(minutes / 60).toLocaleString('de-DE', { maximumFractionDigits: 1 })} h)`, eur, o);
+  }
+
+  /** Tageshöchstarbeitszeit (Minuten): 10 h, mit Saisonausnahme 12 h */
+  dayMaxMinutes(time: number): number {
+    const x = this.company.arbzgExemption;
+    return x && time >= x.from && time < x.until ? ARBZG_EXEMPT_DAY_MIN : ARBZG_DAY_MIN;
+  }
+
+  /** Mindestruhezeit (Minuten): 11 h, in Bestellung und Ernte (März bis November) 10 h */
+  restMinutes(time: number): number {
+    const m = gameDate(time).month;
+    return m >= 3 && m <= 11 ? REST_MIN_SEASON : REST_MIN;
+  }
+
+  /** Noch erlaubte Minuten im ArbZG-Ausgleichszeitraum (48 h im Mittel über 24 Wochen) */
+  periodLeft(employeeId: number): number {
+    const e = this.company.drivers.find((x) => x.id === employeeId);
+    if (!e || e.kind === 'chef') return Infinity;
+    return ARBZG_PERIOD_MIN - (e.periodMin ?? 0);
+  }
+
+  /** Saisonausnahme bei der Gewerbeaufsicht beantragen (bis 12 h am Tag bis 30. November) */
+  applyExemption(time: number): string {
+    const x = this.company.arbzgExemption;
+    const y = gameDate(time).year;
+    if (x && x.until > time) return x.from > time ? `beantragt, gilt ab ${fmtDay(x.from)}` : `gilt schon bis ${fmtDay(x.until)}`;
+    const from = time + EXEMPTION_DAYS * 1440;
+    // Ende der Ernte: 30. November dieses (bzw. bei Antrag im Dezember: des nächsten) Jahres
+    let until = from;
+    while (gameDate(until).year === y && !(gameDate(until).month === 12)) until += 1440;
+    if (until <= from) { until = from; while (!(gameDate(until).month === 12 && gameDate(until).year === y + 1)) until += 1440; }
+    if (!this.canPay(EXEMPTION_FEE)) return 'Nicht genug Geld für die Gebühr';
+    this.book(time, 'Gewerbeaufsicht: Antrag Saisonausnahme ArbZG', -EXEMPTION_FEE, 'Sonstiges');
+    this.company.arbzgExemption = { appliedAt: time, from, until };
+    this.version++;
+    this.emit(time, 'info', `Saisonausnahme beantragt: ab ${fmtDay(from)} bis ${fmtDay(until - 1)} dürfen Fahrer bis 12 h am Tag arbeiten (48 h im Mittel bleiben).`);
+    return `beantragt, gilt ab ${fmtDay(from)}`;
+  }
+
+  /**
    * Lohnkosten des Vortags aufsummieren (feste: Monatsgehalt ÷ 30 je Kalendertag, Saisonkräfte:
    * geleistete Stunden), am Monatsersten als eine Buchung „Löhne“ abziehen. Je Mitarbeiter
    * Erfahrung aus der Arbeit gutschreiben, macht der Rechenkern über addExperience.
    */
   private payroll(time: number, worked: Record<number, number>, surcharge: Record<number, number> = {}) {
     let day = 0;
+    const d0 = Math.floor(time / 1440);
+    const yesterday = time - 1440;
+    const workday = weekday(yesterday) <= 4; // Mo–Fr
+    const settle = gameDate(time).month === 3 && gameDate(time).day === 1;
     for (const e of this.company.drivers) {
       if (e.kind === 'chef') continue;
       const w = worked[e.id] ?? 0;
+      if (e.hiredFarmId !== undefined) { this.billHired(e, w, time); continue; }
+      // ArbZG-Ausgleichszeitraum (24 Wochen): Minuten sammeln, danach neu beginnen
+      if (e.periodStart === undefined || d0 - e.periodStart >= ARBZG_PERIOD_DAYS) { e.periodStart = d0; e.periodMin = 0; }
+      const before = e.periodMin ?? 0;
+      e.periodMin = before + w;
+      if (before < 0.9 * ARBZG_PERIOD_MIN && e.periodMin >= 0.9 * ARBZG_PERIOD_MIN) {
+        this.emit(time, 'warnung', `${e.name} hat 90 % der erlaubten Arbeitszeit im Ausgleichszeitraum erreicht (48 h im Mittel). Neuer Zeitraum ab ${fmtDay((e.periodStart + ARBZG_PERIOD_DAYS) * 1440)} – bis dahin wenig einplanen.`);
+      }
+      if (e.kind === 'fest') {
+        // Arbeitszeitkonto: Ist minus Soll (8 h an Werktagen, Urlaub/Krankheit zählen als Soll erfüllt)
+        let pay = ((surcharge[e.id] ?? 0) / 60) * e.wage + (e.wage * MONTH_HOURS) / 30;
+        if (!this.absence(e.id, yesterday)) e.timeAccount = (e.timeAccount ?? 0) + w - (workday ? CONTRACT_DAY_MIN : 0);
+        const acc = e.timeAccount ?? 0;
+        if (acc > ACCOUNT_MAX_MIN) { pay += ((acc - ACCOUNT_MAX_MIN) / 60) * e.wage * (1 + OVERTIME_BONUS); e.timeAccount = ACCOUNT_MAX_MIN; }
+        if (settle) {
+          if ((e.timeAccount ?? 0) > 0) pay += ((e.timeAccount ?? 0) / 60) * e.wage * (1 + OVERTIME_BONUS);
+          e.timeAccount = 0;
+        }
+        day += pay * (1 + EMPLOYER_SV);
+        continue;
+      }
       const over = Math.max(0, w - 480); // über 8 h: Überstundenzuschlag 25 % (ZU-03)
       // Zuschläge (ZU-01): gewichtete Minuten aus dem Rechenkern
       let pay = ((surcharge[e.id] ?? 0) / 60) * e.wage + (over / 60) * e.wage * 0.25;
@@ -3745,8 +3883,7 @@ export class Business {
         day += hours * (e.agencyRate ?? 30) + ((surcharge[e.id] ?? 0) / 60) * (e.agencyRate ?? 30) * 0.5;
         continue;
       }
-      if (e.kind === 'fest') pay += (e.wage * MONTH_HOURS) / 30 + (over / 60) * e.wage;
-      else pay += (w / 60) * e.wage;
+      pay += (w / 60) * e.wage;
       day += pay * (1 + EMPLOYER_SV);
     }
     this.payrollAccrued += day;
@@ -3997,7 +4134,7 @@ export class Business {
     const fleet = this.company.machines.filter((m) => m.type === 'schlepper');
     const fleetCond = fleet.length ? fleet.reduce((a, m) => a + m.condition, 0) / fleet.length : 70;
     for (const e of [...this.company.drivers]) {
-      if (e.isPlayer) continue;
+      if (e.isPlayer || e.hiredFarmId !== undefined) continue; // angeheuerte Landwirte: keine Personalereignisse
       // Abgang nach Kündigungsfrist
       if (e.leavesAt !== undefined && time >= e.leavesAt && !busy.has(e.id)) {
         this.fire(e.id, time, true);

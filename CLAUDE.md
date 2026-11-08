@@ -140,6 +140,10 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
   Vorschläge warten auf Entscheidung. Endgültige Insolvenz nach gescheiterter Sanierung (`Company.bankruptAt`, Spiel vorbei).
 - Absage/Verfall für Dienste ohne Angebot ohne Folgen (`Business.offersService`, Hinweis „Bieten wir (noch) nicht an“).
   Profil `organisch` (nur nachgefragte Sparten, gebraucht, eigene Kraft). Erklärung der Pleiten in `docs/strategien.md`.
+- Arbeitszeit und Schichten (8. Nov.): ArbZG (10 h, 48-h-Mittel über 24 Wochen, Ruhezeit 10/11 h, Saisonausnahme 12 h),
+  Arbeitszeitkonto der Festen (Abrechnung 1. März), Schichtbetrieb 1/2/3 (`shiftPlan`, `shiftTick`, Start mit `shifts`),
+  Wartezeit ruhender Ketten zählt nicht (`chainIdle`), Landwirte als Abfahrer (`hireCandidates`, `hireHaulers`, `Machine.hired`,
+  `Employee.hiredFarmId`, 90 €/h, eigenes Feld kostenlos). Fahrzeug-Verweise werden beim Entfernen umnummeriert (`syncPlayerVehicles`).
 - macOS: Mindestversion 12 (WebGL 2, Module-Worker), `src/polyfills.ts` + Startprüfung, Kürzel ohne Cmd/Strg, Selbsttest im
   macOS-CI-Job (läuft bei `[mac]` in der Commit-Nachricht).
 

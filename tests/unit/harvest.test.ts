@@ -191,6 +191,124 @@ describe('Drehschemel-Zug und Anhänger am Feldrand', () => {
   });
 });
 
+describe('Schichtbetrieb und Arbeitszeit', () => {
+  const lexion = { type: 'maehdrescher' as const, model: 'Lexion 6800', power: 435, width: 9.3, haPerHour: 3, workKmh: 6, dieselLHa: 18, payloadT: 9 };
+  const rexor = { type: 'ruebenroder' as const, brand: 'Grimme', model: 'Rexor 6300', power: 627, width: 2.7, haPerHour: 1.6, workKmh: 6, dieselLHa: 32, payloadT: 30 };
+  const helper = (chef: ReturnType<typeof harvestOrder>['chef'], id: number, name: string) => ({ ...structuredClone(chef), id, name, isPlayer: false, kind: 'fest' as const, absences: [] });
+  /** Auftrag auf mehrere Felder des Kunden mit der Kultur ausdehnen (mehr als eine Schicht Arbeit) */
+  const widen = (x: ReturnType<typeof harvestOrder>, crop: number, n: number) => {
+    const idx = Array.from(x.s.farms!.fieldCrop, (_, i) => i);
+    const fs = idx.filter((i) => x.s.farms!.fieldFarm[i] === x.o.farmId && x.s.farms!.fieldCrop[i] === crop);
+    const all = fs.length >= n ? fs.slice(0, n) : idx.filter((i) => x.s.farms!.fieldCrop[i] === crop).slice(0, n);
+    x.o.fields = all;
+    x.o.areaHa = all.reduce((a, i) => a + x.s.fields!.areaHa[i], 0);
+  };
+
+  it('Drescher in zwei Schichten: Fahrerwechsel um 16 Uhr, mehr Fläche am Tag als mit einer Schicht', () => {
+    const run = (shifts: 1 | 2) => {
+      const x = harvestOrder('drusch', Crop.Getreide, 8, 1, 'haecksler');
+      widen(x, Crop.Getreide, 6);
+      const m = addMachine(x.s, lexion);
+      x.s.company.drivers.push(helper(x.chef, 7, 'Spätschicht'));
+      runUntil(x.s, () => !x.s.weather.threshBlocked(x.s.time) && x.s.time % 1440 > 200 && x.s.time % 1440 < 300, 10 * 1440);
+      expect(x.s.command({ kind: 'startJob', orderId: x.o.id, tractorId: m.id, implementId: m.id, shifts })).toMatch(/gestartet/);
+      const vs = (x.s as unknown as { vehicles: { machineId?: number; task?: { driverId: number } }[] }).vehicles;
+      const v = vs.find((w) => w.machineId === m.id)!;
+      const drivers = new Set<number>();
+      const t0 = x.s.time;
+      runUntil(x.s, () => { if (v.task) drivers.add(v.task.driverId); return x.o.status === 'fertig'; }, 8 * 1440);
+      expect(x.o.status).toBe('fertig');
+      return { minutes: x.s.time - t0, drivers };
+    };
+    const one = run(1);
+    const two = run(2);
+    expect(two.drivers.size).toBe(2);
+    expect(one.drivers.size).toBe(1);
+    expect(two.minutes).toBeLessThanOrEqual(one.minutes);
+  });
+
+  it('Rübenroder rund um die Uhr (3 Schichten): rodet auch nachts, drei Fahrer wechseln sich ab', () => {
+    const x = harvestOrder('roden', Crop.Zuckerrueben, 10, 5);
+    widen(x, Crop.Zuckerrueben, 4);
+    const { s, o, chef } = x;
+    const m = addMachine(s, rexor);
+    s.company.drivers.push(helper(chef, 7, 'Spät'), helper(chef, 8, 'Nacht'));
+    runUntil(s, () => !s.weather.fieldBlocked(s.time) && s.time % 1440 > 10 && s.time % 1440 < 200, 15 * 1440);
+    expect(s.command({ kind: 'startJob', orderId: o.id, tractorId: m.id, implementId: m.id, shifts: 3 })).toMatch(/gestartet/);
+    const vs = (s as unknown as { vehicles: { machineId?: number; state: number; task?: { driverId: number; phase: string } }[] }).vehicles;
+    const v = vs.find((w) => w.machineId === m.id)!;
+    const drivers = new Set<number>();
+    let nightWork = false;
+    runUntil(s, () => {
+      if (v.task) drivers.add(v.task.driverId);
+      const mod = s.time % 1440; // 0 = 06:00, 16–24 h nach 06:00 = 22–06 Uhr
+      if (mod >= 17 * 60 && v.task?.phase === 'work' && !s.weather.fieldBlocked(s.time)) nightWork = true;
+      return o.status === 'fertig';
+    }, 6 * 1440);
+    expect(o.status).toBe('fertig');
+    expect(drivers.size).toBeGreaterThanOrEqual(2);
+    expect(nightWork).toBe(true);
+  });
+
+  it('Abfahrer wartet, während der Drescher Feierabend hat: die Wartezeit zählt nicht als Arbeitszeit', () => {
+    const { s, o, chef } = harvestOrder('drusch', Crop.Getreide, 8, 1, 'komplett');
+    const m = addMachine(s, lexion);
+    const tr = addMachine(s, { type: 'schlepper', model: 'Axion 870', power: 280 });
+    const k = addMachine(s, { type: 'kipper', model: 'Kipper 22 t', payloadT: 22 });
+    s.company.drivers.push({ ...helper(chef, 7, 'Abfahrer'), kind: 'saison' as const });
+    runUntil(s, () => !s.weather.threshBlocked(s.time) && s.time % 1440 > 200 && s.time % 1440 < 300, 10 * 1440);
+    expect(s.command({ kind: 'startJob', orderId: o.id, tractorId: m.id, implementId: m.id, haulers: [{ tractorId: tr.id, implementId: k.id, driverId: 7 }] })).toMatch(/gestartet/);
+    // bis zum nächsten Morgen: der Abfahrer darf nicht 24 h gezählt werden
+    const minutes = (s as unknown as { driverMinutes: Record<number, number> }).driverMinutes;
+    runUntil(s, () => s.time % 1440 === 1439, 2 * 1440);
+    expect(minutes[7] ?? 0).toBeLessThanOrEqual((minutes[1] ?? 0) + 120);
+  });
+});
+
+describe('Abfahrer von Landwirten', () => {
+  const lexion = { type: 'maehdrescher' as const, model: 'Lexion 6800', power: 435, width: 9.3, haPerHour: 3, workKmh: 6, dieselLHa: 18, payloadT: 9 };
+
+  it('Landwirte fahren mit eigenem Gespann ab: fremdes Feld nach Stunden, eigenes Feld kostenlos, danach wieder weg', () => {
+    const { s, o } = harvestOrder('drusch', Crop.Getreide, 8, 1, 'komplett');
+    const m = addMachine(s, lexion);
+    runUntil(s, () => !s.weather.threshBlocked(s.time) && s.time % 1440 > 200 && s.time % 1440 < 300, 10 * 1440);
+    for (const f of s.farms!.farms) { f.livestock = true; f.satisfaction = 100; }
+    let cands = s.business.hireCandidates(o.id, s.time);
+    for (let d = 0; d < 10 && cands.filter((c) => c.eurH > 0).length < 1; d++) { s.run(1440); cands = s.business.hireCandidates(o.id, s.time); }
+    const own = cands.find((c) => c.farmId === o.farmId);
+    const foreign = cands.find((c) => c.farmId !== o.farmId)!;
+    expect(foreign).toBeDefined();
+    expect(foreign.eurH).toBe(90);
+    if (own) expect(own.eurH).toBe(0);
+    const hired = [foreign.farmId, ...(own ? [own.farmId] : [])];
+    const machinesBefore = s.company.machines.length;
+    runUntil(s, () => !s.weather.threshBlocked(s.time) && s.time % 1440 > 200 && s.time % 1440 < 300, 10 * 1440);
+    cands = s.business.hireCandidates(o.id, s.time);
+    const ok = hired.filter((f) => cands.some((c) => c.farmId === f));
+    expect(ok.length).toBeGreaterThan(0);
+    expect(s.command({ kind: 'startJob', orderId: o.id, tractorId: m.id, implementId: m.id, hired: ok })).toMatch(/gestartet/);
+    expect(s.company.machines.length).toBe(machinesBefore + 2 * ok.length);
+    expect(s.playerUnits().some((u) => /Landwirt|:/.test(s.vehicleInfo[u.vehicle]?.name ?? ''))).toBe(true);
+    runUntil(s, () => o.status === 'fertig', 6 * 1440);
+    expect(o.status).toBe('fertig');
+    // alle wieder auf ihrem Hof und aus dem Fuhrpark verschwunden
+    runUntil(s, () => !s.company.machines.some((x) => x.hired), 2 * 1440);
+    expect(s.company.machines.some((x) => x.hired)).toBe(false);
+    expect(s.company.drivers.some((d) => d.hiredFarmId !== undefined)).toBe(false);
+    const paid = s.business.ledger.filter((l) => l.text.startsWith('Abfahrer ')).reduce((a, l) => a - l.amount, 0);
+    if (ok.includes(foreign.farmId)) expect(paid).toBeGreaterThan(0);
+    else expect(paid).toBe(0);
+    expect(o.doneT!).toBeGreaterThan(o.areaHa * 7.5 * 0.8);
+  });
+
+  it('nur bei Ketten mit Abfuhr', () => {
+    const { s, o } = harvestOrder('drusch', Crop.Getreide, 8, 1, 'haecksler');
+    const m = addMachine(s, lexion);
+    expect(s.business.hireCandidates(o.id, s.time)).toEqual([]);
+    expect(s.command({ kind: 'startJob', orderId: o.id, tractorId: m.id, implementId: m.id, hired: [0] })).toMatch(/nur bei Ketten mit Abfuhr/);
+  });
+});
+
 describe('Mehrere Maschinen auf einem Feld', () => {
   it('zweiter Drescher steigt mitten im Feld ein: Feld wird geteilt, schneller fertig, Menge stimmt', () => {
     const one = harvestOrder('drusch', Crop.Getreide, 8, 1, 'haecksler');

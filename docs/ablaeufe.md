@@ -190,3 +190,33 @@ Bunker), die Ernteketten mit Phase 4 (Wirtschaft, Jahreslauf).
     Der Überladewagen kippt auf die Feldrandmiete. Überladen ohne Anhalten bringt laut Hersteller rund 20 %
     Mehrleistung ([topagrar, Ropa Taurus](https://www.topagrar.com/technik/news/dazu-ist-der-ropa-taurus-da-20028964.html)).
 
+## Umgesetzt: Schichtbetrieb, Arbeitszeit, Landwirte als Abfahrer (8. Nov. 2026)
+
+- **Schichten beim Kettenstart** (Drusch, Häckseln, Roden, Kartoffeln, Lkw):
+  - 1 Schicht: Standard.
+  - 2 Schichten: Drescher 06–16 und 16–24 Uhr (Tau begrenzt auf etwa 9–23 Uhr), sonst 06–14 und 14–22 Uhr.
+  - 3 Schichten: rund um die Uhr (06–14, 14–22, 22–06 Uhr).
+  - Zum Wechsel übernimmt ein freier, ausgeruhter und qualifizierter Fahrer, der mit eigenem Pkw kommt (10 min Übergabe).
+    Abfahrer und Radlader der Kette wechseln mit.
+  - Findet sich keiner, fährt der bisherige bis zu seiner Höchstarbeitszeit weiter. Bei 2 Schichten ruht die Kette nach
+    Schichtende bis 06:00.
+- **Wartezeit zählt nicht:** Abfahrer und Radlader, die auf eine ruhende Erntemaschine warten (Feierabend, Wetter,
+  Fahrer krank), sammeln keine Arbeitszeit. Bisher zählte die Wartezeit über Nacht als Arbeitszeit.
+- **Arbeitszeitgesetz:**
+  - höchstens 10 h am Tag (mit Saisonausnahme 12 h)
+  - im Mittel 48 h je Woche über 24 Wochen
+  - Ruhezeit 11 h, in Bestellung und Ernte 10 h
+  - Warnung bei 90 % des Kontingents
+- **Arbeitszeitkonto der Festen:**
+  - Mehrstunden gehen aufs Konto statt sofort mit 25 % ausgezahlt zu werden; Werktage ohne Arbeit bauen es ab.
+  - Höchstens 300 h, darüber Auszahlung mit 25 % Zuschlag.
+  - Am 1. März wird ein Plus mit 25 % Zuschlag ausgezahlt.
+- **Landwirte als Abfahrer** bei Ketten mit Abfuhr:
+  - Bekannte Betriebe mit Vieh oder guter Technik im Umkreis von 25 km sagen je nach Zufriedenheit und Saison zu
+    (in der eigenen Silagezeit seltener).
+  - Sie kommen mit eigenem Schlepper, Häckselwagen bzw. Kipper und Fahrer von ihrem Hof und fahren danach dorthin
+    zurück. Auf der Karte erscheinen sie mit Hofnamen, im Fuhrpark als „angeheuert“.
+  - Abrechnung: 90 €/h als Fremdleistung des Auftrags; auf dem eigenen Feld des Landwirts kostenlos.
+  - Höchstens 4 Landwirte je Kette.
+  - „Nur Häcksler“ bzw. „nur Drusch“ bleibt wie bisher: Der Kunde fährt selbst ab und zahlt weniger.
+

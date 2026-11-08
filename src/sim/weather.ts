@@ -99,6 +99,7 @@ export class Weather {
     const minute = time - idx * 1440;
     if (w.rain >= 0.5 && w.rainFrom >= 0 && minute >= w.rainFrom) return 'Regen – Korn zu feucht';
     if (minute < 3 * 60) return 'Tau – Drusch ab etwa 9 Uhr';
+    if (minute >= 17 * 60) return 'Abendtau – Drusch bis etwa 23 Uhr';
     if (idx > 0 && this.day(idx - 1).rain >= 2 && minute < 6 * 60) return 'Bestand nass vom Regen, Drusch ab Mittag';
     if (w.soil > SOIL_MAX - 2) return 'Boden aufgeweicht';
     return null;

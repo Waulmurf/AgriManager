@@ -53,6 +53,8 @@ export interface Machine {
   weightT?: number;
   /** Drehschemel-Kipper: koppelbar zum Zug (zwei Anhänger) */
   drehschemel?: boolean;
+  /** angeheuertes Gespann eines Landwirts (gehört nicht dem Betrieb, nur für diesen Auftrag): Hof, Auftrag, Stundensatz */
+  hired?: { farmId: number; orderId: number; eurH: number };
   /** Firmenwagen: Sitzplätze inkl. Fahrer und Art */
   seats?: number;
   carKind?: CarKind;
@@ -348,6 +350,13 @@ export interface Employee {
   leavesAt?: number;
   /** Überstunden der letzten 30 Tage (Minuten, gleitend) */
   overtime30?: number;
+  /** angeheuerter Landwirt (fährt sein eigenes Gespann, Abrechnung nach Stunden über die Maschine) */
+  hiredFarmId?: number;
+  /** Arbeitszeitkonto (Feste, Minuten): Plus aus der Saison, Abbau im Winter, Abrechnung am 1. März */
+  timeAccount?: number;
+  /** ArbZG-Ausgleichszeitraum (24 Wochen): Beginn (Spieltag) und gearbeitete Minuten darin */
+  periodStart?: number;
+  periodMin?: number;
   /** Ärger über abgelehnte Wünsche (klingt ab) */
   grudge?: number;
 }
@@ -445,6 +454,8 @@ export interface Company {
   bankruptAt?: number;
   /** Disponent im Büro (Vorschlag 10) */
   dispatcher?: { autoAccept: boolean; autoStart: boolean; autoRemind: boolean };
+  /** Saisonausnahme vom ArbZG (Gewerbeaufsicht): beantragt am, gilt von … bis (bis 12 h am Tag) */
+  arbzgExemption?: { appliedAt: number; from: number; until: number };
   /** Verschleißteillager am Hof (Warenwert €): Schare, Zinken, Filter, Riemen, Schläuche … */
   partsStock?: number;
   /** nachgekaufte Verschleißteile, Lieferung am Morgen */

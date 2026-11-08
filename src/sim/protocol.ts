@@ -94,6 +94,10 @@ export interface BusinessState {
   referrals: { from: number; to: number; time: number }[];
   /** am Feldrand abgestellte Anhänger mit Füllstand (Wechselbetrieb) */
   parkedTrailers: { id: number; orderId: number; name: string; lonLat: [number, number]; load: number; cap: number }[];
+  /** Landwirte, die heute für offene Ketten mit Abfuhr abfahren würden (je Auftrag) */
+  hireCandidates: Record<number, { farmId: number; name: string; km: number; eurH: number }[]>;
+  /** Arbeitszeitgesetz: Tageshöchstzeit (Min.), Kontingent im Ausgleichszeitraum (Min.), Saisonausnahme */
+  arbzg: { dayMax: number; periodMin: number; exemption: { from: number; until: number } | null };
   nz: { score: number; quota: number };
   /** Übernahmeangebot eines kleinen Konkurrenten (Vorschlag 12) */
   takeoverOffer: { competitorId: number; price: number; until: number } | null;
