@@ -179,6 +179,56 @@ decken.
 - Spezialisierung nur dort, wo die Saison lang ist (Gülle Februar bis Mai und August/September).
 - Erntemaschinen erst, wenn genug Fläche zusammenkommt, und mit Saisonfahrern statt fester Stelle.
 
+## Nachtrag 8. Nov.: realistische Arbeitszeiten, Schichten, Landwirte als Abfahrer
+
+Neu im Spiel:
+- Schichtbetrieb: Drescher und Häcksler in 2 Schichten, Rübenroder und Lkw-Kampagne rund um die Uhr.
+- Arbeitszeitgesetz: 10 h am Tag, 48 h im Mittel, Ruhezeit 10 bzw. 11 h.
+- Arbeitszeitkonto für Feste statt sofortiger Überstundenzuschläge.
+- Landwirte als Abfahrer: 90 €/h, auf dem eigenen Feld kostenlos.
+- Korrektur: Abfahrer, die auf eine ruhende Erntemaschine warten, sammeln keine Arbeitszeit mehr.
+
+Der Bot nutzt Schichten, Saisonkräfte als Ablösung und Landwirte, wenn eigene Wagen fehlen.
+
+**Vergleich über 10 Jahre (normal), vorher (6. Nov., mit Absage-Korrektur) gegen nachher:**
+
+| Strategie | Gewinn gesamt vorher | nachher | Gewinnjahre nachher | Eigenkapital Ende nachher |
+| --- | ---: | ---: | ---: | ---: |
+| Rüben | +37 T€ | **+1.431 T€** | 10/10 | 1,25 Mio. € |
+| Transport | −59 T€ | **+699 T€** | 8/10 | 0,73 Mio. € |
+| Allrounder | −152 T€ | **+1.342 T€** | 9/10 | 2,18 Mio. € |
+| Organisch | +414 T€ | **+741 T€** | 8/10 | 1,77 Mio. € |
+| Gülle | +350 T€ | +350 T€ | 9/10 | 0,39 Mio. € |
+| Feldarbeit | +1.279 T€ | +858 T€ | 10/10 | 1,31 Mio. € |
+| Drusch | insolvent 2033 | insolvent 2032 | 0/6 | – |
+| Kommunal | −308 T€ | −308 T€ | 0/10 | 0 |
+
+**Warum:**
+- **Rüben und Transport:** Roder und Lkw laufen in der Kampagne rund um die Uhr. So kommt die Fläche zusammen, die die
+  teure Maschine braucht.
+- **Allrounder und Organisch:** Sie profitieren von den Schichten in der Ernte, vom Arbeitszeitkonto und davon, dass die
+  Wartezeit der Abfahrer nicht mehr bezahlt wird.
+- **Drusch:** Mit 2 Schichten steigt der Umsatz von 57–87 auf 101–138 T€ im Jahr. Leasing (82 T€) und Personal (64 T€)
+  bleiben aber zu hoch; ein Drescher allein findet nicht genug Fläche.
+- **Feldarbeit:** schlechter als vorher. Das 48-h-Mittel begrenzt Saisonkräfte, die im Frühjahr und Sommer 60 h in der
+  Woche fahren; nach etwa 19 Wochen ist ihr Kontingent ausgeschöpft. Ab 2032 trennen sich auch die Kaufentscheidungen.
+- **Kommunal:** keine Erntearbeit, daher unverändert.
+
+**Über 50 Jahre (normal):**
+
+| Strategie | vorher | nachher |
+| --- | --- | --- |
+| Organisch | Sanierung 2041, insolvent 2048 | **47/50 Gewinnjahre, +22,95 Mio. €, Eigenkapital 17,1 Mio. €, nie Sanierung** |
+| Allrounder | 34/50 Gewinnjahre, Eigenkapital 3,6 Mio. € | **49/50 Gewinnjahre, +17,93 Mio. €, Eigenkapital 13,2 Mio. €** (eine Sanierung 2034, überstanden) |
+
+In den späten Jahren liegt die Marge bei etwa 17–20 % vom Umsatz. Das ist eher großzügig, denn der Bot erneuert den
+Fuhrpark kaum, und die Abschreibung fällt deshalb niedrig aus. Für einen Spieler, der Maschinen ersetzt, liegt sie
+niedriger.
+
+**Neuer Fehler gefunden (Spielstand-Prüfung):** Angeheuerte Gespanne bekamen Maschinennummern, die schon für bestellte
+Lieferungen vergeben waren. Bei der Lieferung gab es die Nummer doppelt, und der Spielstand ließ sich nicht laden.
+Behoben, mit Test.
+
 ## Alle Läufe
 
 | Strategie | Invest | Jahre (geplant) | Umsatz Ø letzte 5 J. (T€) | Gewinn Ø letzte 5 J. (T€) | Gewinnjahre | Gewinn gesamt (T€) | Eigenkapital Ende (T€) | EK min (T€) | Schulden max (T€) | Sanierung ab | Insolvenz | Dienste | Schlepper / Maschinen / Personal | verspätet % | storniert % | Ruf Ende (min) | hängende Ernte | Rechenzeit |
