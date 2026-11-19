@@ -318,7 +318,8 @@ export const RUEST_ABBAU_MIN = 10;
 export const SLURRY_FILL_M3_MIN = 3;
 export const SLURRY_TRANSFER_M3_MIN = 4;
 /** Höchstarbeitszeit des Chefs je Tag (ArbZG § 3: 10 h), Tageswechsel 06:00 */
-export const CHEF_MAX_MINUTES = 600;
+/** Chef als Unternehmer: nicht ans ArbZG gebunden, bis 12 h am Tag (Ruhezeit gilt weiter) */
+export const CHEF_MAX_MINUTES = 720;
 /** Geplante Aufgaben starten nur tagsüber: bis 20:00 (Minute des Tages ab 06:00) */
 export const QUEUE_LAST_START = 14 * 60;
 /** Dieselverbrauch (Annahmen): Schlepper 200 PS auf der Straße, Pkw */
@@ -621,6 +622,8 @@ export class Simulation {
     this.time++;
     if (SHIFT_MINUTES.has(this.time % 1440)) this.shiftTick(this.time % 1440);
     if (this.time % 60 === 0 && this.time % 1440 < 8 * 60) this.dispatchTick();
+    // Anfragen kommen über den Tag verteilt (stündlich), nicht nur morgens
+    if (this.time % 60 === 0 && this.time % 1440 !== 0) this.business.hourly(this.time);
     if (this.time % 1440 === 0) {
       const busyDrivers = new Set<number>();
       for (const v of this.vehicles) if (v.owner === 'player' && v.task) busyDrivers.add(v.task.driverId);
@@ -801,7 +804,7 @@ export class Simulation {
       const cur = t.driverId;
       const relief = this.company.drivers
         .filter((e) => e.id !== cur && !taken.has(e.id) && info.fits(e) && !this.driverBusy(e.id) && !this.driverBlocked(e.id)
-          && !this.queue.some((q) => q.driverId === e.id) && this.dayMax() - this.minutesOf(e.id) >= 6 * 60)
+          && !this.queue.some((q) => q.driverId === e.id) && this.dayMax(e.id) - this.minutesOf(e.id) >= 6 * 60)
         .sort((a, b) => this.minutesOf(a.id) - this.minutesOf(b.id) || a.id - b.id)[0];
       if (relief) {
         taken.add(relief.id);
@@ -822,9 +825,9 @@ export class Simulation {
     }
   }
 
-  /** Tageshöchstarbeitszeit je Fahrer (ArbZG 10 h, mit Saisonausnahme 12 h) */
-  private dayMax(): number {
-    return this.business.dayMaxMinutes(this.time);
+  /** Tageshöchstarbeitszeit je Fahrer (ArbZG 10 h, mit Saisonausnahme 12 h; der Chef als Unternehmer bis 12 h) */
+  private dayMax(driverId: number): number {
+    return this.business.dayMaxMinutes(this.time, driverId);
   }
 
   private minutesOf(driverId: number): number {
@@ -846,7 +849,7 @@ export class Simulation {
     if (e?.kind === 'leih' && this.time >= (e.contractUntil ?? Infinity)) return 'Einsatz beendet';
     const abs = this.business.absence(d, this.time);
     if (abs) return abs === 'urlaub' ? 'hat Urlaub' : abs === 'schulung' ? 'ist auf Lehrgang' : 'ist krank';
-    if (this.minutesOf(d) >= this.dayMax()) return 'Arbeitszeit für heute erreicht';
+    if (this.minutesOf(d) >= this.dayMax(d)) return 'Arbeitszeit für heute erreicht';
     // ArbZG: 48 h im Mittel über 24 Wochen
     if (this.business.periodLeft(d) - this.minutesOf(d) <= 0) return 'hat das 48-h-Mittel im Ausgleichszeitraum erreicht';
     const last = this.lastWork[d];
@@ -1040,14 +1043,14 @@ export class Simulation {
     const skip = (day: number) => field && day - today0 <= 5 && this.weather.dayBlocked(day);
     for (let k = 0; k < 10 && skip(Math.floor(t / 1440)); k++) t = (Math.floor(t / 1440) + 1) * 1440;
     const today = Math.floor(this.time / 1440) === Math.floor(t / 1440);
-    let left = Math.max(0, this.dayMax() - (today ? this.minutesOf(driverId) : 0));
+    let left = Math.max(0, this.dayMax(driverId) - (today ? this.minutesOf(driverId) : 0));
     // nach 20:00 beginnt nichts Neues mehr
     if (t % 1440 >= QUEUE_LAST_START) left = 0;
     while (need > left) {
       need -= left;
       t = (Math.floor(t / 1440) + 1) * 1440;
       for (let k = 0; k < 10 && skip(Math.floor(t / 1440)); k++) t += 1440;
-      left = this.dayMax();
+      left = this.dayMax(driverId);
     }
     return t + need;
   }
@@ -1847,7 +1850,7 @@ export class Simulation {
       }
       case 'remind': {
         // Anruf geht auch unterwegs, kostet aber Arbeitszeit des Chefs
-        if (this.chefMinutes >= this.dayMax()) return 'Arbeitszeit des Chefs für heute erreicht (ab 06:00 wieder)';
+        if (this.chefMinutes >= this.dayMax(1)) return 'Arbeitszeit des Chefs für heute erreicht (ab 06:00 wieder)';
         const r = b.remind(cmd.invoiceId, t);
         if (r === 'Kunde angerufen') this.driverMinutes[1] = this.chefMinutes + REMIND_CALL_MINUTES;
         return r;
@@ -2343,7 +2346,7 @@ export class Simulation {
     if (t && this.business.absence(t.driverId, this.time)) return; // Fahrer krank: Gespann wartet
     if ((v.handoverUntil ?? 0) > this.time) return; // Fahrerwechsel
     if (t?.kind === 'job' && (t.phase === 'setup' || t.phase === 'work') && this.weatherFor(t.orderId)) return; // Wetter: Feldarbeit ruht
-    if (t?.kind === 'job' && (t.phase === 'to' || t.phase === 'setup' || t.phase === 'work') && this.minutesOf(t.driverId) >= this.dayMax()) {
+    if (t?.kind === 'job' && (t.phase === 'to' || t.phase === 'setup' || t.phase === 'work') && this.minutesOf(t.driverId) >= this.dayMax(t.driverId)) {
       v.restUntil = Math.max(this.time + (1440 - (this.time % 1440)), this.time + this.business.restMinutes(this.time));
       this.business.warn(this.time, `${v.name}: Feierabend – Höchstarbeitszeit (${this.driverName(t.driverId)}) erreicht, weiter morgen um 06:00.`);
       return;
@@ -2364,7 +2367,7 @@ export class Simulation {
       }
       if (down) return;
     }
-    if (t?.kind === 'truck' && (t.phase === 'toLoad' || t.phase === 'toUnload') && this.minutesOf(t.driverId) >= this.dayMax()) {
+    if (t?.kind === 'truck' && (t.phase === 'toLoad' || t.phase === 'toUnload') && this.minutesOf(t.driverId) >= this.dayMax(t.driverId)) {
       v.restUntil = Math.max(this.time + (1440 - (this.time % 1440)), this.time + this.business.restMinutes(this.time));
       this.business.warn(this.time, `${v.name}: Höchstarbeitszeit erreicht – Lkw steht über Nacht, weiter morgen um 06:00.`);
       return;
@@ -3026,7 +3029,7 @@ export class Simulation {
       } else {
         // reicht die Arbeitszeit noch für eine Runde? (Hin- und Rückweg ≈ doppelte letzte Fahrt + Laden/Abladen)
         const cycle = 2 * ((v.route?.duration ?? 1800) / 60) + t.loadMin + t.unloadMin;
-        if (this.minutesOf(t.driverId) + cycle > this.dayMax()) { t.phase = 'back'; this.driveTo(v, this.homeOf(v)); }
+        if (this.minutesOf(t.driverId) + cycle > this.dayMax(t.driverId)) { t.phase = 'back'; this.driveTo(v, this.homeOf(v)); }
         else { t.phase = 'toLoad'; this.driveTo(v, t.from); }
       }
     } else if (t.phase === 'night') {

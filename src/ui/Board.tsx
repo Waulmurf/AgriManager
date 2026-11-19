@@ -257,7 +257,7 @@ export function PlanningBoard({ status, game, onClose }: { status: GameStatus; g
             </div>
           ) : <p className="hint">Balken anklicken.</p>}
           {msg && <p className="feedback" data-testid="board-msg">{msg}</p>}
-          <p className="hint">Konto {eur(c.cash)} · Arbeitszeit je Fahrer höchstens 10 h am Tag, Start neuer Aufgaben bis 20:00.</p>
+          <p className="hint">Konto {eur(c.cash)} · Arbeitszeit je Fahrer höchstens 10 h am Tag (Chef 12 h), Start neuer Aufgaben bis 20:00.</p>
         </div>
       </div>
     </div>

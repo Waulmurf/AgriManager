@@ -629,6 +629,11 @@ export interface QueueItem {
   notBefore?: number;
 }
 
+/** Anrufe und Nachrichten der Kunden: zu jeder vollen Stunde von 07:00 bis 19:00 (Minute des Tages, 0 = 06:00) */
+const REQUEST_FROM_MIN = 60;
+const REQUEST_TO_MIN = 13 * 60;
+const REQUEST_HOURS = 13;
+
 /** Höchstzahl Gebrauchtangebote je Händler bzw. auf der Gebrauchtbörse */
 const USED_PER_DEALER = 8;
 const USED_PRIVATE = 20;
@@ -2677,6 +2682,20 @@ export class Business {
     }
     this.checkInvoices(time);
     this.cancelStaleOrders(time);
+    this.expireRequests(time);
+    const fs = this.farms;
+    if (!fs) return;
+    for (const farm of fs.farms) {
+      if (!farm.known) continue;
+      if (farm.rivalUntil > time - 1440 && farm.rivalUntil <= time) {
+        farm.satisfaction = Math.max(farm.satisfaction, RIVAL_RETURN_SATISFACTION);
+        this.emit(time, 'info', `${farm.name} ist mit der Konkurrenz nicht ganz zufrieden. Mit kleinen Aufträgen lässt sich der Kunde zurückgewinnen.`, farm.id);
+      }
+    }
+  }
+
+  /** Unbeantwortete Anfragen verfallen zur Antwortfrist */
+  private expireRequests(time: number) {
     for (const r of this.requests) {
       if (r.status === 'offen' && time >= r.replyBy) {
         r.status = 'abgelaufen';
@@ -2687,15 +2706,23 @@ export class Business {
         this.changeReputation(-1);
       }
     }
+  }
+
+  /**
+   * Stündlich: Anfragen verfallen zur vollen Stunde; bekannte Kunden melden sich zwischen 07:00 und 19:00
+   * zu jeder vollen Stunde (Chance je Tag wie bisher, auf 13 Stunden verteilt).
+   */
+  hourly(time: number) {
+    if (this.company.bankruptAt !== undefined) return;
+    this.lastTime = time;
+    this.expireRequests(time);
+    const mod = time % 1440;
+    if (mod < REQUEST_FROM_MIN || mod > REQUEST_TO_MIN) return;
     const fs = this.farms;
     if (!fs) return;
     for (const farm of fs.farms) {
       if (!farm.known) continue;
-      if (farm.rivalUntil > time - 1440 && farm.rivalUntil <= time) {
-        farm.satisfaction = Math.max(farm.satisfaction, RIVAL_RETURN_SATISFACTION);
-        this.emit(time, 'info', `${farm.name} ist mit der Konkurrenz nicht ganz zufrieden. Mit kleinen Aufträgen lässt sich der Kunde zurückgewinnen.`, farm.id);
-      }
-      const req = this.maybeRequest(farm.id, time, 0.06 + 0.1 * (1 - farm.mechanization), farm.contact);
+      const req = this.maybeRequest(farm.id, time, (0.06 + 0.1 * (1 - farm.mechanization)) / REQUEST_HOURS, farm.contact);
       if (req) {
         this.emit(time, 'anfrage', `${farm.contact === 'anruf' ? 'Anruf' : 'Nachricht'} von ${farm.name}: ${SERVICE_NAMES[req.service]} ${req.tPerHa ? this.requestSize(req) : fmtHa(req.areaHa)}, bis ${fmtDay(req.latest)}, ${this.requestPrice(req)}`, farm.id);
       }
@@ -3809,8 +3836,9 @@ export class Business {
     this.bookExternal(time, `Abfahrer ${this.farmName(e.hiredFarmId!)} (${(minutes / 60).toLocaleString('de-DE', { maximumFractionDigits: 1 })} h)`, eur, o);
   }
 
-  /** Tageshöchstarbeitszeit (Minuten): 10 h, mit Saisonausnahme 12 h */
-  dayMaxMinutes(time: number): number {
+  /** Tageshöchstarbeitszeit (Minuten): 10 h, mit Saisonausnahme 12 h; der Chef (Unternehmer, kein ArbZG) immer bis 12 h */
+  dayMaxMinutes(time: number, driverId?: number): number {
+    if (driverId !== undefined && this.company.drivers.find((d) => d.id === driverId)?.kind === 'chef') return ARBZG_EXEMPT_DAY_MIN;
     const x = this.company.arbzgExemption;
     return x && time >= x.from && time < x.until ? ARBZG_EXEMPT_DAY_MIN : ARBZG_DAY_MIN;
   }

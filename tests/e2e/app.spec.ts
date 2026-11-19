@@ -303,6 +303,12 @@ test('Oberfläche: Leitstand, Bereiche, Markt-Filter und Kartenebenen', async ({
   await expect(page.getByTestId('market')).toContainText('Schlepper bei allen Händlern');
   await page.keyboard.press('Escape');
   await expect(page.getByTestId('window-markt')).toHaveCount(0);
+  // Ausblick: Nachfrage der nächsten Monate
+  await page.getByTestId('tab-ausblick').click();
+  await page.getByTestId('outlook-region').click();
+  await expect(page.getByTestId('outlook-table')).toContainText('Grubbern');
+  await expect(page.getByTestId('outlook-crops')).toContainText('Getreide');
+  await page.keyboard.press('Escape');
   // Menü: Technik und Leistung
   await page.getByTestId('menu').click();
   await page.getByTestId('tab-technik').click();

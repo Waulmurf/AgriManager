@@ -10,7 +10,7 @@ import type { Machine } from '../sim/economy';
 import { eur } from './Panels';
 
 /** Bereiche der Navigationsleiste */
-export type AreaId = 'leitstand' | 'auftraege' | 'fuhrpark' | 'personal' | 'finanzen' | 'markt' | 'sparten' | 'auswertung' | 'meldungen' | 'technik';
+export type AreaId = 'leitstand' | 'auftraege' | 'ausblick' | 'fuhrpark' | 'personal' | 'finanzen' | 'markt' | 'sparten' | 'auswertung' | 'meldungen' | 'technik';
 export type Go = (area: AreaId, sub?: string) => void;
 
 const machineName = (m: Pick<Machine, 'brand' | 'model'>) => [m.brand, m.model].filter(Boolean).join(' ');

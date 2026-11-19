@@ -61,10 +61,10 @@ export function runEconomyBot(s: Simulation, days: number): BotResult {
   const free = (id: number) => !(s as unknown as { machineBusy(id: number): boolean }).machineBusy(id) && (c.machines.find((m) => m.id === id)?.downUntil ?? 0) <= s.time;
   const tractors = () => c.machines.filter((m) => m.type === 'schlepper');
 
-  /** Darlehen für Investitionen (5 Jahre), solange der Kreditrahmen reicht */
+  /** Darlehen für Investitionen (5 Jahre), höchstens bis zur Hälfte des Kreditrahmens (vorsichtiger Betrieb) */
   const borrow = (need: number): boolean => {
     const amount = Math.ceil((need + 20_000) / 10_000) * 10_000;
-    if (c.creditLimit - c.loan < amount) return false;
+    if (c.creditLimit * 0.5 - c.loan < amount) return false;
     const r = s.command({ kind: 'takeLoan', amount, years: 5 });
     if (/ausgezahlt/.test(r)) { loans += amount; say(`Darlehen ${amount} € (${r})`); return true; }
     return false;
@@ -152,7 +152,7 @@ export function runEconomyBot(s: Simulation, days: number): BotResult {
     const chef = c.drivers[0];
     if ((chef.skills.pflanzenschutz ?? 0) < 1 && !chef.course && gameDate(s.time).month === 1 && c.cash > 5_000) s.command({ kind: 'course', employeeId: chef.id, course: 'sachkunde' });
     // Geld: Kontokorrent nicht überziehen, sonst Darlehen
-    if (c.cash < 5_000 && c.creditLimit - c.loan > 50_000) {
+    if (c.cash < 5_000 && c.creditLimit * 0.5 - c.loan > 50_000) {
       const r = s.command({ kind: 'takeLoan', amount: 50_000, years: 5 });
       if (/ausgezahlt/.test(r)) { loans += 50_000; say(`Darlehen 50.000 € (${r})`); }
     }

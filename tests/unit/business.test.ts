@@ -181,6 +181,27 @@ describe('Besuch, Anfrage, Auftrag', () => {
     expect(s.business.offersService(req)).toBe(true);
   });
 
+  it('Anrufe und Nachrichten kommen über den Tag verteilt (07–19 Uhr), nicht nur morgens', () => {
+    const s = world(11);
+    for (const farm of s.farms!.farms.slice(0, 25)) {
+      s.command({ kind: 'visit', farmId: farm.id });
+      runUntil(s, () => !s.chefBusy);
+    }
+    const before = s.business.requests.length;
+    s.run(30 * 1440);
+    const remote = s.business.requests.slice(before).filter((r) => r.channel !== 'besuch');
+    expect(remote.length).toBeGreaterThan(3);
+    const hours = new Set(remote.map((r) => Math.floor((r.createdAt % 1440) / 60) + 6));
+    expect(hours.size).toBeGreaterThan(2);
+    for (const h of hours) { expect(h).toBeGreaterThanOrEqual(7); expect(h).toBeLessThanOrEqual(19); }
+  });
+
+  it('der Chef ist Unternehmer: bis 12 h am Tag, Angestellte 10 h', () => {
+    const s = world(5);
+    expect(s.business.dayMaxMinutes(s.time, 1)).toBe(720);
+    expect(s.business.dayMaxMinutes(s.time)).toBe(600);
+  });
+
   it('bekannte Betriebe melden sich per Anruf oder Nachricht', () => {
     const s = world(11);
     for (const farm of s.farms!.farms.slice(0, 15)) {
@@ -249,9 +270,9 @@ describe('Rückruf, Rüstzeit, Arbeitszeit', () => {
     expect(new Set(order.doneFields).size).toBe(order.fields.length);
   });
 
-  it('macht nach 10 Stunden Arbeit des Chefs Feierabend bis 06:00', () => {
+  it('macht nach 12 Stunden Arbeit des Chefs Feierabend bis 06:00', () => {
     const { s, order, grubber } = setupJob(5);
-    s.driverMinutes[1] = 590; // Tag ist fast voll
+    s.driverMinutes[1] = 710; // Tag ist fast voll (Chef bis 12 h)
     s.command({ kind: 'startJob', orderId: order.id, tractorId: 1, implementId: grubber.id });
     s.run(40);
     expect(s.playerUnits()[0].status).toMatch(/Feierabend/);

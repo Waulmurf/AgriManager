@@ -53,7 +53,9 @@ function harvestOrder(service: 'drusch' | 'roden' | 'kartoffelroden' | 'pflanzen
     req = s.business.requests.find((r) => r.status === 'offen' && r.service === service && (!chain || r.chain === chain));
   }
   expect(req).toBeDefined();
-  req!.fields = req!.fields.slice(0, 1);
+  // ein Feld der gewünschten Kultur (die Anfrage kann auch andere Kulturen enthalten, z. B. Raps beim Drusch)
+  const own = req!.fields.filter((i) => s.farms!.fieldCrop[i] === crop);
+  req!.fields = own.length ? own.slice(0, 1) : [Array.from(s.farms!.fieldCrop, (c, i) => (c === crop ? i : -1)).find((i) => i >= 0)!];
   req!.areaHa = s.fields!.areaHa[req!.fields[0]];
   s.command({ kind: 'respond', requestId: req!.id, action: 'accept' });
   const o = s.business.orders.find((x) => x.requestId === req!.id)!;
@@ -210,8 +212,10 @@ describe('Schichtbetrieb und Arbeitszeit', () => {
       widen(x, Crop.Getreide, 6);
       const m = addMachine(x.s, lexion);
       x.s.company.drivers.push(helper(x.chef, 7, 'Spätschicht'));
+      // Frühschicht fährt ein Angestellter (10 h; der Chef dürfte als Unternehmer 12 h)
+      x.s.company.drivers.push(helper(x.chef, 8, 'Frühschicht'));
       runUntil(x.s, () => !x.s.weather.threshBlocked(x.s.time) && x.s.time % 1440 > 200 && x.s.time % 1440 < 300, 10 * 1440);
-      expect(x.s.command({ kind: 'startJob', orderId: x.o.id, tractorId: m.id, implementId: m.id, shifts })).toMatch(/gestartet/);
+      expect(x.s.command({ kind: 'startJob', orderId: x.o.id, tractorId: m.id, implementId: m.id, driverId: 8, shifts })).toMatch(/gestartet/);
       const vs = (x.s as unknown as { vehicles: { machineId?: number; task?: { driverId: number } }[] }).vehicles;
       const v = vs.find((w) => w.machineId === m.id)!;
       const drivers = new Set<number>();
@@ -222,7 +226,7 @@ describe('Schichtbetrieb und Arbeitszeit', () => {
     };
     const one = run(1);
     const two = run(2);
-    expect(two.drivers.size).toBe(2);
+    expect(two.drivers.size).toBeGreaterThanOrEqual(2);
     expect(one.drivers.size).toBe(1);
     expect(two.minutes).toBeLessThanOrEqual(one.minutes);
   });

@@ -618,7 +618,8 @@ function EmployeeCard({ e, status, game, show }: { e: Employee; status: GameStat
   const abs = (e.absences ?? []).filter((a) => a.to > b.time);
   const absent = abs.some((a) => a.from <= b.time);
   const duty = b.driverStatus[e.id];
-  const dayMax = b.arbzg?.dayMax ?? 600;
+  // der Chef ist Unternehmer und nicht ans ArbZG gebunden: bis 12 h
+  const dayMax = e.kind === 'chef' ? b.chefMaxMinutes : b.arbzg?.dayMax ?? 600;
   const tone = e.poach || e.leavesAt !== undefined || (!e.isPlayer && sat < 40) ? 'warn' : absent ? 'muted' : duty ? 'ok' : 'info';
   const badge = e.leavesAt !== undefined ? 'gekündigt' : absent ? (abs[0].kind === 'urlaub' ? 'Urlaub' : abs[0].kind === 'krank' ? 'krank' : 'abwesend') : duty ? 'im Dienst' : 'frei';
   return (
@@ -755,7 +756,7 @@ export function StaffTab({ status, game, part }: { status: GameStatus; game: Gam
     <>
       <h2>Arbeitszeit</h2>
       <p className="hint" data-testid="arbzg-info">
-        Höchstens {Math.round((b.arbzg?.dayMax ?? 600) / 60)} h am Tag, im Mittel 48 h je Woche über 24 Wochen, Ruhezeit 11 h (in Bestellung und Ernte 10 h).
+        Höchstens {Math.round((b.arbzg?.dayMax ?? 600) / 60)} h am Tag, im Mittel 48 h je Woche über 24 Wochen, Ruhezeit 11 h (in Bestellung und Ernte 10 h). Der Chef selbst ist Unternehmer und kann bis 12 h am Tag arbeiten.
         Feste haben ein Arbeitszeitkonto: Mehrstunden werden im Winter abgebaut, ein Plus am 1. März mit 25 % ausgezahlt.
         {ex ? (ex.from > b.time ? ` Saisonausnahme beantragt, gilt ab ${fmtDay(ex.from)}.` : ex.until > b.time ? ` Saisonausnahme bis ${fmtDay(ex.until - 1)}: bis 12 h am Tag.` : '') : ''}
       </p>

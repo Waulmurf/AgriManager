@@ -7,6 +7,7 @@ import type { Speed } from './sim/protocol';
 import { AnalyticsTab } from './ui/Analytics';
 import { MunicipalTab, BiogasTab, BusinessTab, CompetitionTab, FarmingTab, SitesTab, FinanceTab, FleetTab, NewsTab, OrdersTab, SavePanel, StaffTab, VehicleMenu, eur, needsWorkshop } from './ui/Panels';
 import { MarketWindow } from './ui/Market';
+import { OutlookWindow } from './ui/Outlook';
 import { FleetBar, Leitstand, MapLayers, Toasts, type AreaId } from './ui/Shell';
 import { AUTOSAVE } from './game/savegame';
 import { PlanningBoard } from './ui/Board';
@@ -18,6 +19,7 @@ interface Area { id: AreaId; icon: string; label: string; subs?: Sub[]; window?:
 const AREAS: Area[] = [
   { id: 'leitstand', icon: '⌂', label: 'Leitstand', subs: [{ id: 'heute', label: 'Heute' }, { id: 'betrieb', label: 'Betrieb und Kunden' }] },
   { id: 'auftraege', icon: '✎', label: 'Aufträge', subs: [{ id: 'anfragen', label: 'Anfragen' }, { id: 'laufend', label: 'Laufend' }, { id: 'erledigt', label: 'Erledigt' }, { id: 'wettbewerb', label: 'Wettbewerb' }] },
+  { id: 'ausblick', icon: '◷', label: 'Ausblick', window: true },
   { id: 'fuhrpark', icon: '⚙', label: 'Fuhrpark', subs: [{ id: 'alle', label: 'Alle' }, { id: 'einsatz', label: 'Im Einsatz' }, { id: 'werkstatt', label: 'Werkstatt' }] },
   { id: 'personal', icon: '☺', label: 'Personal', subs: [{ id: 'team', label: 'Mitarbeiter' }, { id: 'bewerbung', label: 'Bewerbungen' }, { id: 'buero', label: 'Büro' }] },
   { id: 'finanzen', icon: '€', label: 'Finanzen', subs: [{ id: 'ueberblick', label: 'Überblick' }, { id: 'rechnungen', label: 'Rechnungen' }, { id: 'kredite', label: 'Darlehen' }] },
@@ -231,7 +233,7 @@ export function App() {
           {status && <FleetBar status={status} game={game} />}
           {status && <VehicleMenu status={status} game={game} />}
           {boardOpen && status && <PlanningBoard status={status} game={game} onClose={() => setBoardOpen(false)} />}
-          {windowOpen && status && (area === 'markt' || area === 'auswertung') && (
+          {windowOpen && status && cur.window && (
             <div className="window" data-testid={`window-${area}`}>
               <div className="window-head">
                 <strong>{cur.label}</strong>
@@ -239,7 +241,7 @@ export function App() {
                 <button className="close" onClick={() => setWindowOpen(false)} aria-label="Schließen">×</button>
               </div>
               <div className="window-body">
-                {area === 'markt' ? <MarketWindow status={status} game={game} /> : <AnalyticsTab status={status} game={game} />}
+                {area === 'markt' ? <MarketWindow status={status} game={game} /> : area === 'ausblick' ? <OutlookWindow status={status} game={game} /> : <AnalyticsTab status={status} game={game} />}
               </div>
             </div>
           )}
@@ -290,9 +292,9 @@ export function App() {
               <section hidden={!show('meldungen', 'alle')}><NewsTab status={status} game={game} filter="alle" /></section>
               <section hidden={!show('meldungen', 'wichtig')}><NewsTab status={status} game={game} filter="wichtig" /></section>
               <section hidden={!show('meldungen', 'auftraege')}><NewsTab status={status} game={game} filter="auftraege" /></section>
-              {(area === 'markt' || area === 'auswertung') && (
+              {cur.window && (
                 <section>
-                  <p className="hint">{area === 'markt' ? 'Der Markt braucht Platz und öffnet als großes Fenster über der Karte: Händler links wählen oder eine Geräteart über alle Händler vergleichen.' : 'Diagramme nach Sparten, Auslastung von Maschinen und Fahrern und Deckungsbeitrag je Kunde im großen Fenster.'}</p>
+                  <p className="hint">{area === 'markt' ? 'Der Markt braucht Platz und öffnet als großes Fenster über der Karte: Händler links wählen oder eine Geräteart über alle Händler vergleichen.' : area === 'ausblick' ? 'Ausblick: welche Dienste die Kunden in den nächsten sechs Monaten wahrscheinlich anfragen – nach dem Jahreslauf der Kulturen und den Flächen der Betriebe. Mit Hinweis, welche Geräte dafür noch fehlen.' : 'Diagramme nach Sparten, Auslastung von Maschinen und Fahrern und Deckungsbeitrag je Kunde im großen Fenster.'}</p>
                   {!windowOpen && <div className="card-actions"><button onClick={() => setWindowOpen(true)}>Großes Fenster öffnen</button></div>}
                 </section>
               )}

@@ -295,3 +295,17 @@ details.more.inline > summary { display: inline-flex; align-items: center; min-h
 .market-buy { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none; max-width: 330px; }
 .market-buy .price { font-size: 17px; font-variant-numeric: tabular-nums; }
 .market-buy .card-actions { justify-content: flex-end; margin-top: 0; }
+/* Ausblick */
+.outlook { display: flex; flex-direction: column; gap: 10px; }
+.outlook-head { display: flex; gap: 20px; align-items: flex-start; justify-content: space-between; }
+.outlook-head .hint { margin: 0; max-width: 760px; }
+.outlook-scope { flex: none; width: 340px; }
+.outlook-tbl { border-collapse: separate; border-spacing: 3px; font-size: 12.5px; font-variant-numeric: tabular-nums; width: 100%; }
+.outlook-tbl th { text-align: left; font-weight: 600; padding: 4px 8px; white-space: nowrap; }
+.outlook-tbl thead th { color: var(--muted); font-weight: 500; text-align: center; }
+.outlook-tbl thead th:first-child { text-align: left; }
+.outlook-tbl td { text-align: center; padding: 6px 8px; border-radius: 6px; background: #fff; min-width: 54px; }
+.outlook-tbl td.ol-empty { background: #f6f4ef; color: #b8b4a8; }
+.outlook-tbl td:last-child:not(:nth-child(2)) { text-align: left; background: none; white-space: nowrap; }
+.outlook-tbl.crops td { text-align: left; font-size: 12px; vertical-align: top; background: #fff; }
+.outlook-tbl.crops td:last-child { white-space: normal; background: #fff; }

@@ -155,6 +155,10 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
 - 19. Nov. (Nils): Absage ohne Folgen, bis die Maschine geliefert ist (`offersService` zählt nur Maschinen am Hof, nicht
   Bestellungen/Leasing in Lieferung). Kreditrahmen höher (`CREDIT_MIN` 300.000 €, 150 % des Eigenkapitals, max. 3 Mio. €;
   Kontokorrent 80.000 €, alte Spielstände werden angehoben). Mehr Gebrauchte (`USED_PER_DEALER` 8, `USED_PRIVATE` 20).
+- 19. Nov. (Nils): Bereich Ausblick (`src/ui/Outlook.tsx`, großes Fenster): erwartete Anfragen je Dienst und Monat für 6 Monate aus
+  `seasonServices` und den Kulturflächen (Adressbuch oder ganze Region), fehlende Geräte, Kulturkalender. Anfragen kommen stündlich
+  07–19 Uhr (`Business.hourly`, Verfall stündlich), nicht mehr nur um 06:00. Chef als Unternehmer bis 12 h am Tag
+  (`dayMaxMinutes(time, driverId)`, `CHEF_MAX_MINUTES` 720), Angestellte weiter ArbZG.
 
 ## CI (GitHub Actions)
 
