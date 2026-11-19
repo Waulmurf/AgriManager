@@ -192,7 +192,7 @@ export function runFullBot(s: Simulation, years: number, profile: BotProfile = b
         purchases.push(`${gameDate(s.time).month}/${gameDate(s.time).year}: ${type} gebraucht ${used.machine.brand} ${used.machine.model} ${Math.round(used.price).toLocaleString('de-DE')} € (Ausbauplan)`);
         return true;
       }
-      return false;
+      // Gebrauchte zu teuer: nach der Wartezeit neu (Leasing) statt endlos auf ein bezahlbares Angebot zu warten
     }
     if (usedOnly) return false;
     const model = CATALOG.filter((x) => x.type === type && fits(x.powerNeed)).sort((x, y) => x.newPrice - y.newPrice)[0];

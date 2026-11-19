@@ -169,6 +169,18 @@ describe('Besuch, Anfrage, Auftrag', () => {
     }
   });
 
+  it('bestellte Maschine (Kauf oder Leasing): Absage bleibt ohne Folgen, bis sie geliefert ist', () => {
+    const s = world(5);
+    const req = { service: 'guelle' as const };
+    expect(s.business.offersService(req)).toBe(false);
+    expect(s.command({ kind: 'order', dealerId: 5, modelKey: 'joskin-alpina7', leaseMonths: 36 })).toMatch(/geleast|bestellt/);
+    expect(s.business.deliveries.length).toBe(1);
+    expect(s.business.offersService(req)).toBe(false);
+    s.run(s.business.deliveries[0].at - s.time + 1440);
+    expect(s.business.deliveries.length).toBe(0);
+    expect(s.business.offersService(req)).toBe(true);
+  });
+
   it('bekannte Betriebe melden sich per Anruf oder Nachricht', () => {
     const s = world(11);
     for (const farm of s.farms!.farms.slice(0, 15)) {

@@ -152,6 +152,9 @@ Selbsttest (Leistung): Browser `?selftest=1&seconds=20`, App mit `LOHNBETRIEB_SE
   Unterbereiche als Umschalter, Leitstand als Startseite („Braucht deine Entscheidung“), Kennzahlen in der Kopfleiste, Fahrzeugleiste,
   Meldungen über der Karte, Kartenebenen, Markt und Auswertung als großes Fenster (Händler oder Geräteart über alle Händler).
   Karten mit Farbstreifen (`tone-ok/run/warn/info/muted`), Abzeichen und Balken (`Meter`). Technik im Menü ☰.
+- 19. Nov. (Nils): Absage ohne Folgen, bis die Maschine geliefert ist (`offersService` zählt nur Maschinen am Hof, nicht
+  Bestellungen/Leasing in Lieferung). Kreditrahmen höher (`CREDIT_MIN` 300.000 €, 150 % des Eigenkapitals, max. 3 Mio. €;
+  Kontokorrent 80.000 €, alte Spielstände werden angehoben). Mehr Gebrauchte (`USED_PER_DEALER` 8, `USED_PRIVATE` 20).
 
 ## CI (GitHub Actions)
 

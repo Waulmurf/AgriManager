@@ -25,7 +25,7 @@ import { MUNICIPALITIES, MUNI_BASE, TOUR, WINTER_EUR_H, WINTER_PENALTY, WINTER_S
 import { GAER_N_KG_M3, ORGANIC_N_LIMIT, SEASON_FACTOR, STORABLE, STORE_EUR_T_MONTH, landPrice } from './marketing';
 import { COMPETITOR_RANGE_KM, PRICE_WAR_KM, generateCompetitors, kmBetween, type Competitor } from './market';
 import {
-  DIESEL_MEAN, DIESEL_START, LEASE_BASE_RATE, LIABILITY_PER_YEAR, OVERDRAFT_RATE, RATING_SURCHARGE,
+  CREDIT_EQUITY_FACTOR, CREDIT_MAX, CREDIT_MIN, DIESEL_MEAN, DIESEL_START, LEASE_BASE_RATE, LIABILITY_PER_YEAR, OVERDRAFT_RATE, RATING_SURCHARGE,
   afaYears, annuity, bookValue, insurancePerYear, leaseRate, loanBaseRate, profitTax, rating,
 } from './finance';
 
@@ -628,6 +628,10 @@ export interface QueueItem {
   /** frühester Start (Planungsboard); ohne = so bald wie möglich */
   notBefore?: number;
 }
+
+/** Höchstzahl Gebrauchtangebote je Händler bzw. auf der Gebrauchtbörse */
+const USED_PER_DEALER = 8;
+const USED_PRIVATE = 20;
 
 export class Business {
   readonly requests: Request[] = [];
@@ -1760,7 +1764,8 @@ export class Business {
    * auch ein Abfahrwagen, bei Pflanzenschutz ein Fahrer mit Sachkunde. Sonst sind Absage und Verfall folgenlos.
    */
   offersService(r: Pick<Request, 'service' | 'chain' | 'liquid'>): boolean {
-    const have = (types: MachineType[]) => this.company.machines.some((m) => types.includes(m.type)) || this.deliveries.some((d) => types.includes(d.machine.type));
+    // nur Maschinen am Hof zählen: Bestellte (Kauf oder Leasing) erst ab Lieferung, vorher keine Folgen bei Absage
+    const have = (types: MachineType[]) => this.company.machines.some((m) => types.includes(m.type) && !m.hired);
     if (r.service === 'transport') return have(r.liquid ? ['guellefass', 'zubringer'] : ['lkw']);
     if (!have([SERVICE_IMPLEMENT[r.service]])) return false;
     if (r.chain === 'komplett' && HAULER_TYPES[r.service] && !have(HAULER_TYPES[r.service]!)) return false;
@@ -3033,7 +3038,8 @@ export class Business {
       const b = this.balance(time);
       const last = this.years.length ? this.years[this.years.length - 1].profit : 0;
       this.company.rating = rating(b.assets > 0 ? b.equity / b.assets : 0, last);
-      this.company.creditLimit = Math.max(this.company.loan, Math.min(1_500_000, Math.floor((Math.max(0, b.equity) * 0.8) / 10_000) * 10_000));
+      const byEquity = Math.floor((Math.max(0, b.equity) * CREDIT_EQUITY_FACTOR) / 10_000) * 10_000;
+      this.company.creditLimit = Math.max(this.company.loan, Math.min(CREDIT_MAX, Math.max(b.equity > 0 ? CREDIT_MIN : 0, byEquity)));
       this.version++;
     }
     if (d.month === 1 && d.day === 1) this.closeYear(time);
@@ -3155,10 +3161,13 @@ export class Business {
       const models = CATALOG.filter((m) => brands.includes(m.brand));
       if (!models.length) continue;
       const have = this.offers.filter((o) => o.dealerId === d.id).length;
-      if (have < 3 && this.rng.next() < 0.3) this.offers.push(this.usedOffer(models[this.rng.int(models.length)], time, d.id));
+      // mehr Gebrauchte (19. Nov.): je Händler bis zu 8, die Börse bis zu 20 Angebote
+      if (have < USED_PER_DEALER && this.rng.next() < 0.6) this.offers.push(this.usedOffer(models[this.rng.int(models.length)], time, d.id));
     }
-    const priv = this.offers.filter((o) => o.dealerId === 0).length;
-    if (priv < 6 && this.rng.next() < 0.4) this.offers.push(this.usedOffer(CATALOG[this.rng.int(CATALOG.length)], time, 0));
+    for (let k = 0; k < 2; k++) {
+      const priv = this.offers.filter((o) => o.dealerId === 0).length;
+      if (priv < USED_PRIVATE && this.rng.next() < 0.6) this.offers.push(this.usedOffer(CATALOG[this.rng.int(CATALOG.length)], time, 0));
+    }
   }
 
   private usedOffer(m: CatalogModel, time: number, dealerId: number): MarketOffer {

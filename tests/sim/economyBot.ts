@@ -123,7 +123,9 @@ export function runEconomyBot(s: Simulation, days: number): BotResult {
   const daily = () => {
     // Anfragen beantworten: machbare Dienste annehmen (Kapazität: 3 offene Aufträge je Schlepper)
     const openOrders = b.orders.filter((o) => o.status !== 'fertig').length;
-    let capacity = tractors().length * 2 - openOrders;
+    // Kapazität: 2 offene Aufträge je Gespann (Schlepper mit Fahrer)
+    const crews = Math.min(tractors().length, c.drivers.filter((d) => (d.skills.boden ?? 0) >= 1).length);
+    let capacity = crews * 2 - openOrders;
     for (const r of b.requests.filter((x) => x.status === 'offen')) {
       const doable = BOT_SERVICES.includes(r.service) && (r.service !== 'pflanzenschutz' || c.drivers.some((d) => (d.skills.pflanzenschutz ?? 0) >= 1));
       const type = SERVICE_IMPLEMENT[r.service];
@@ -164,7 +166,7 @@ export function runEconomyBot(s: Simulation, days: number): BotResult {
         const r = s.command({ kind: 'hire', applicantId: a.id, asKind: 'saison' });
         hires.push(`${gameDate(s.time).month}/${gameDate(s.time).year} ${a.person.name} (${r})`);
       } else if (drivers > tractors().length) {
-        const used = b.offers.filter((o) => o.machine.type === 'schlepper' && (o.machine.power ?? 0) >= 140).sort((x, y) => x.price - y.price)[0];
+        const used = b.offers.filter((o) => o.machine.type === 'schlepper' && (o.machine.power ?? 0) >= 160).sort((x, y) => x.price - y.price)[0];
         if (used && c.cash - used.price < 25_000) borrow(used.price + 25_000 - c.cash);
         if (used && c.cash - used.price > 25_000) {
           const r = s.command({ kind: 'buy', offerId: used.id });

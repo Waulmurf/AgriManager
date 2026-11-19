@@ -26,7 +26,7 @@ describe('Startbetrieb', () => {
   it('entspricht den Startbedingungen', () => {
     const c = startCompany(42);
     expect(c.cash).toBe(100_000);
-    expect(c.creditLimit).toBe(150_000);
+    expect(c.creditLimit).toBe(300_000);
     expect(c.homeNode).toBe(42);
     expect(c.drivers).toHaveLength(1);
     const tractor = c.machines.find((m) => m.type === 'schlepper')!;

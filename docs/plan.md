@@ -97,7 +97,7 @@ Feldblock als ein Feld; eine Aufteilung in Schläge ist später möglich.
 - Kontaktvorliebe Anruf oder Nachricht je zur Hälfte (KK-10); alle Betriebe zu Beginn unbekannt (KK-01).
 - Namen erfunden aus häufigen norddeutschen Familiennamen.
 - Startbetrieb: Fendt 720 Vario (Bj. 2014, 9.000 h, Wert nach Startformel 70.208 €), Firmenwagen
-  (Annahme: Bj. 2018, Neupreis 38.000 €), 100.000 € Konto, 150.000 € Kreditrahmen.
+  (Annahme: Bj. 2018, Neupreis 38.000 €), 100.000 € Konto, 300.000 € Kreditrahmen (seit 19. Nov. 2026).
 
 ## Anfragen und Aufträge (Schritt 3, Annahmen)
 
@@ -466,7 +466,7 @@ Schritte:
   - Eigenkapital = Konto + Marktwert der eigenen Maschinen + offene Rechnungen +
     Verschleißteillager − Darlehen − Minus auf dem Konto.
   - Neu berechnet am Monatsersten.
-- **Kontokorrent:** Rahmen 30.000 € zu 11 % (Annahme Hausbank). Käufe dürfen das Konto bis zum
+- **Kontokorrent:** Rahmen 80.000 € (vorher 30.000 €) zu 11 % (Annahme Hausbank). Käufe dürfen das Konto bis zum
   Rahmen ins Minus bringen. Dispozinsen werden täglich aufgelaufen und am Monatsersten gebucht.
   Über dem Rahmen gibt es täglich eine Warnung, und Käufe sind gesperrt.
 - **Leasing (WF-02):** bei Neubestellung über 36, 48 oder 60 Monate, Zins 5,9 % + Aufschlag

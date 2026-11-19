@@ -372,7 +372,7 @@ Eine öffentliche Zählung der Lohnunternehmen je Landkreis habe ich nicht gefun
 
 ## Startbedingungen
 
-Das Spiel beginnt mit einem gebrauchten 200-PS-Schlepper (Baujahr um 2014, rund 9.000 Betriebsstunden, Wert rund 70.000 €), 100.000 € auf dem Konto, einem Kreditrahmen von 150.000 € und einem gebrauchten Firmenwagen für Kundenbesuche. Zu Beginn ist der Spieler sein einziger Fahrer. Startstandort in Groß Thondorf ist ein unbefestigter Abstellplatz mit Büro im Wohnhaus (Annahme); alles Weitere wird ausgebaut.
+Das Spiel beginnt mit einem gebrauchten 200-PS-Schlepper (Baujahr um 2014, rund 9.000 Betriebsstunden, Wert rund 70.000 €), 100.000 € auf dem Konto, einem Kreditrahmen von 300.000 € (Kontokorrent 80.000 €; Änderung 19. Nov. 2026 auf Wunsch von Nils) und einem gebrauchten Firmenwagen für Kundenbesuche. Zu Beginn ist der Spieler sein einziger Fahrer. Startstandort in Groß Thondorf ist ein unbefestigter Abstellplatz mit Büro im Wohnhaus (Annahme); alles Weitere wird ausgebaut.
 
 Reale Angebotspreise für einen 200-PS-Schlepper (Fendt 720 Vario) als Grundlage, netto:
 

@@ -18,7 +18,11 @@ export const RATING_SURCHARGE: Record<Rating, number> = { A: 0, B: 0.005, C: 0.0
 export type Rating = 'A' | 'B' | 'C' | 'D';
 
 /** Kontokorrent (Dispo): Rahmen und Zins p. a. (Annahme, typische Hausbank-Konditionen) */
-export const OVERDRAFT_LIMIT = 30_000;
+export const OVERDRAFT_LIMIT = 80_000;
+/** Kreditrahmen für Darlehen: Sockel bei positivem Eigenkapital, sonst 150 % des Eigenkapitals, höchstens 3 Mio. € (Annahme) */
+export const CREDIT_MIN = 300_000;
+export const CREDIT_EQUITY_FACTOR = 1.5;
+export const CREDIT_MAX = 3_000_000;
 export const OVERDRAFT_RATE = 0.11;
 
 /** Leasingzins p. a. für Bonität A (Annahme, Herstellerfinanzierer) und Restwert nach Laufzeit */

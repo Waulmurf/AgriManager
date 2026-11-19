@@ -468,17 +468,17 @@ export function machineValue(m: Machine, year = START_YEAR): number {
 
 /**
  * Startbetrieb: gebrauchter 200-PS-Schlepper (Bj. 2014, ~9.000 h, Wert ~70.000 €; Neupreis-Anker
- * Fendt 720 Vario 225.000 €), 100.000 € Konto, 150.000 € Kreditrahmen, gebrauchter Firmenwagen
+ * Fendt 720 Vario 225.000 €), 100.000 € Konto, 300.000 € Kreditrahmen, gebrauchter Firmenwagen
  * (Annahme: Bj. 2018, 140.000 km ≈ 2.800 h, Neupreis 38.000 €), unbefestigter Abstellplatz.
  */
 export function startCompany(homeNode: number): Company {
   return {
     name: 'Lohnbetrieb Groß Thondorf',
     cash: 100_000,
-    creditLimit: 150_000,
+    creditLimit: 300_000,
     loan: 0,
     loans: [],
-    overdraftLimit: 30_000,
+    overdraftLimit: 80_000,
     rating: 'A',
     homeNode,
     site: 'Unbefestigter Abstellplatz, Büro im Wohnhaus',
@@ -509,7 +509,9 @@ export function normalizeDrivers(c: Company): void {
   for (const d of c.drivers) for (const k of SKILLS) if (d.skills[k.key] === undefined) d.skills[k.key] = 0;
   if (c.partsStock === undefined) c.partsStock = 1_000;
   c.loans ??= [];
-  c.overdraftLimit ??= 30_000;
+  // höhere Rahmen seit 19. Nov. 2026 (Kontokorrent 80.000 €, Darlehen ab 300.000 €) auch für alte Spielstände
+  c.overdraftLimit = Math.max(c.overdraftLimit ?? 0, 80_000);
+  if (c.bankruptAt === undefined && !c.sanierung) c.creditLimit = Math.max(c.creditLimit ?? 0, 300_000);
   c.rating ??= 'A';
   c.partsIncoming ??= [];
   // Firmenwagen älterer Spielstände sind Kombis mit 5 Plätzen

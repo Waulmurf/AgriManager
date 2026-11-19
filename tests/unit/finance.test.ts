@@ -57,7 +57,7 @@ describe('Finanzen im Spiel', () => {
   it('Darlehen: Auszahlung, Monatsrate mit Zins und Tilgung, Kreditrahmen', () => {
     const s = world(5);
     const cash = s.company.cash;
-    expect(s.command({ kind: 'takeLoan', amount: 200_000, years: 5 })).toMatch(/Kreditrahmen/);
+    expect(s.command({ kind: 'takeLoan', amount: 400_000, years: 5 })).toMatch(/Kreditrahmen/);
     expect(s.command({ kind: 'takeLoan', amount: 60_000, years: 5 })).toMatch(/ausgezahlt/);
     expect(s.company.cash).toBe(cash + 60_000);
     expect(s.company.loan).toBe(60_000);
@@ -74,9 +74,9 @@ describe('Finanzen im Spiel', () => {
 
   it('Kontokorrent: Kauf ins Minus bis zum Rahmen, Dispozinsen', () => {
     const s = world(5);
-    s.company.cash = 50_000;
-    expect(s.command({ kind: 'buy', offerId: 4 })).toBe('gekauft'); // 69.500 €
-    expect(s.company.cash).toBe(-19_500);
+    s.company.cash = 0;
+    expect(s.command({ kind: 'buy', offerId: 4 })).toBe('gekauft'); // 69.500 €, Rahmen 80.000 €
+    expect(s.company.cash).toBe(-69_500);
     expect(s.command({ kind: 'buy', offerId: 5 })).toMatch(/Nicht genug Geld/);
     s.run(31 * 1440);
     expect(s.business.ledger.some((x) => x.text === 'Zinsen Kontokorrent')).toBe(true);
